@@ -233,11 +233,11 @@ export const mongoImageGenerationReceiptStore: ImageGenerationReceiptStore = {
     return currentOrConflict(key, 'submitting owned by this execution')
   },
 
-  async adoptClaimedAsset(key, expectedAssetId, asset, assetSha256, now) {
+  async adoptClaimedAsset(receipt, expectedAssetId, asset, assetSha256, now) {
     await connectDB()
     const doc = await ImageGenerationReceiptModel.findOneAndUpdate(
       {
-        ...filter(key),
+        ...filter(receipt),
         status: 'asset_stored',
         'asset.assetId': expectedAssetId,
       },
@@ -251,13 +251,13 @@ export const mongoImageGenerationReceiptStore: ImageGenerationReceiptStore = {
       { returnDocument: 'after' },
     ).lean<ImageGenerationReceiptDocument>()
     if (doc) return fromDocument(doc)
-    const current = await mongoImageGenerationReceiptStore.get(key)
+    const current = await mongoImageGenerationReceiptStore.get(receipt)
     if (
       current?.status === 'asset_stored'
       && current.asset?.assetId === asset.assetId
       && current.assetSha256 === assetSha256
     ) return current
-    return currentOrConflict(key, `asset_stored for ${expectedAssetId}`)
+    return currentOrConflict(receipt, `asset_stored for ${expectedAssetId}`)
   },
 
   async markPublished(key, asset, resultContent, now) {

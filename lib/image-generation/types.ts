@@ -124,7 +124,7 @@ export interface ImageGenerationReceiptStore {
     now: Date,
   ): Promise<ImageGenerationReceipt>
   adoptClaimedAsset(
-    key: ImageGenerationReceiptKey,
+    receipt: ImageGenerationReceipt,
     expectedAssetId: string,
     asset: RasterAssetRef,
     assetSha256: string,
@@ -163,7 +163,7 @@ export interface ImageGenerationHooks {
   afterPaidSlotBound?: () => void | Promise<void>
   /** Test-only crash window after submission claim, immediately before provider I/O. */
   afterSubmissionClaimed?: () => void | Promise<void>
-  /** Test-only true-crash window after staged media storage, before durable receipt linkage. */
+  /** Test-only true-crash window after private staging, before receipt linkage. */
   afterAssetStagedBeforeReceipt?: () => void | Promise<void>
   /** Test-only crash window after durable asset receipt, before Workspace publication. */
   afterAssetStored?: () => void | Promise<void>

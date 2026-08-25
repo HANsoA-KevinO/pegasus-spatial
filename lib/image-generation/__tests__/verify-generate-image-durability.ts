@@ -86,7 +86,7 @@ class MemoryReceiptStore implements ImageGenerationReceiptStore {
   }
 
   async adoptClaimedAsset(
-    key: ImageGenerationReceiptKey,
+    key: ImageGenerationReceipt,
     expectedAssetId: string,
     asset: RasterAssetRef,
     assetSha256: string,
