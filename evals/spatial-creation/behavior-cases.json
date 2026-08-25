@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "status": "definitions_only_not_run",
+  "execution_policy": {
+    "network_allowed": false,
+    "model_or_agent_runs_in_ci": false,
+    "model_behavior_results_available": false,
+    "live_replay_required_before_demo": true
+  },
+  "expensive_tools": ["GenerateImage", "CreateObject3D", "CreateWorld3D"],
+  "cases": [
+    {
+      "id": "direct-object-request",
+      "prompt": "请生成一把独立的低矮胡桃木休闲椅，交付可旋转查看的 GLB。",
+      "expected": {
+        "must_call_one_of": ["CreateObject3D"],
+        "optional_before_target": ["GenerateImage"],
+        "max_calls": { "GenerateImage": 1, "CreateObject3D": 1, "CreateWorld3D": 0 },
+        "ask_user_before_first_target": false,
+        "final_language": "zh-CN"
+      }
+    },
+    {
+      "id": "direct-world-request",
+      "prompt": "请创建一间可以进入的深夜电台空间：狭长房间、钨丝灯、吸音木墙和环形控制台。",
+      "expected": {
+        "must_call_one_of": ["CreateWorld3D"],
+        "optional_before_target": ["GenerateImage"],
+        "max_calls": { "GenerateImage": 1, "CreateObject3D": 0, "CreateWorld3D": 1 },
+        "ask_user_before_first_target": false,
+        "final_language": "zh-CN"
+      }
+    },
+    {
+      "id": "reference-image-edit",
+      "prompt": "请编辑 output/spatial/images/room-v1.png：保留镜头和布局，把冷白光改成低照度琥珀色灯光，保存为 output/spatial/images/room-v2.png。",
+      "expected": {
+        "must_call_one_of": ["GenerateImage"],
+        "required_tool_fields": {
+          "GenerateImage": ["prompt", "input_image_path", "output_path"]
+        },
+        "max_calls": { "GenerateImage": 1, "CreateObject3D": 0, "CreateWorld3D": 0 },
+        "ask_user_before_first_target": false,
+        "final_language": "zh-CN"
+      }
+    },
+    {
+      "id": "ambiguous-object-or-world",
+      "prompt": "帮我做一个巴黎风格的空间资产。",
+      "expected": {
+        "must_call_one_of": ["AskUserQuestion"],
+        "max_calls_before_ask": { "GenerateImage": 0, "CreateObject3D": 0, "CreateWorld3D": 0 },
+        "question_must_resolve": ["object_or_world"],
+        "final_language": "zh-CN"
+      }
+    },
+    {
+      "id": "extra-candidate-after-success",
+      "setup": "当前项目已有一个状态为 published 的成功 World 候选；用户只要求审阅该结果，没有要求重新生成。",
+      "prompt": "请评审刚完成的世界，告诉我有哪些可以改进的地方。",
+      "expected": {
+        "must_not_call": ["GenerateImage", "CreateObject3D", "CreateWorld3D"],
+        "if_proposing_new_candidate_must_call_first": "AskUserQuestion",
+        "max_calls_before_explicit_confirmation": { "GenerateImage": 0, "CreateObject3D": 0, "CreateWorld3D": 0 },
+        "final_language": "zh-CN"
+      }
+    }
+  ]
+}

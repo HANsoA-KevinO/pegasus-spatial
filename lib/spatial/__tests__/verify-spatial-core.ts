@@ -1,0 +1,467 @@
+import assert from 'node:assert/strict'
+import {
+  AholoAdapter,
+  FakeSpatialProviderAdapter,
+  InMemorySpatialAssetPublisher,
+  InvalidSpatialStatusTransitionError,
+  Lux3DAdapter,
+  ProviderDefinitelyNotAcceptedError,
+  ProviderConfigurationBlockedError,
+  SPATIAL_TOOL_RESULT_SCHEMA_VERSION,
+  canTransitionSpatialStatus,
+  canonicalSpatialJson,
+  createAholoOfficialWireContract,
+  deterministicSpatialJobId,
+  inspectSpatialAssetBytes,
+  mirrorRemoteSpatialArtifacts,
+  parseSpatialToolResult,
+  serializeSpatialToolResult,
+  spatialRequestHash,
+  type SpatialBuildJobRecord,
+  type SpatialHttpWireContract,
+} from '..'
+import { assertSpatialStatusTransition } from '../state-machine'
+import { createLux3DOfficialG1WireContract } from '../adapters/official-contracts'
+
+function job(overrides: Partial<SpatialBuildJobRecord> = {}): SpatialBuildJobRecord {
+  const now = new Date('2026-08-25T00:00:00.000Z')
+  return {
+    job_id: 'spjob_fixture',
+    idempotency_key: 'project\0run\0tool',
+    project_id: 'project',
+    run_id: 'run',
+    tool_use_id: 'tool',
+    user_id: 'user',
+    conversation_id: 'conversation',
+    kind: 'object',
+    provider: 'fake',
+    model_snapshot: 'fixture-v1',
+    request_hash: 'hash',
+    request_snapshot: { output_path_prefix: 'output/spatial/objects/build' },
+    status: 'submitted',
+    status_revision: 2,
+    execution_attempts: 1,
+    submission_attempts: 1,
+    poll_attempts: 0,
+    lease: null,
+    external_job_id: 'external',
+    provider_status: 'submitted',
+    published_artifact_ids: [],
+    published_workspace_paths: [],
+    publication_token: null,
+    available_at: null,
+    last_error: null,
+    unknown_reason: null,
+    created_at: now,
+    updated_at: now,
+    finished_at: null,
+    ...overrides,
+  }
+}
+
+function glbFixture(size = 12): Buffer {
+  const buffer = Buffer.alloc(size)
+  buffer.write('glTF', 0, 'ascii')
+  buffer.writeUInt32LE(2, 4)
+  buffer.writeUInt32LE(buffer.length, 8)
+  return buffer
+}
+
+async function verifyIdentityAndStateMachine(): Promise<void> {
+  const left = { output_path_prefix: 'output/spatial/worlds/a', prompt: 'room', provider_options: { b: 2, a: 1 } }
+  const right = { provider_options: { a: 1, b: 2 }, prompt: 'room', output_path_prefix: 'output/spatial/worlds/a' }
+  assert.equal(canonicalSpatialJson(left), canonicalSpatialJson(right))
+  assert.equal(spatialRequestHash(left), spatialRequestHash(right))
+  assert.equal(
+    deterministicSpatialJobId({ projectId: 'p', runId: 'r', toolUseId: 't' }),
+    deterministicSpatialJobId({ projectId: 'p', runId: 'r', toolUseId: 't' }),
+  )
+  assert.equal(canTransitionSpatialStatus('prepared', 'submitting'), true)
+  assert.equal(canTransitionSpatialStatus('submitting', 'prepared'), false)
+  assert.throws(
+    () => assertSpatialStatusTransition('unknown', 'submitting'),
+    InvalidSpatialStatusTransitionError,
+  )
+}
+
+async function verifyByteInspectionAndMirroring(): Promise<void> {
+  const bytes = glbFixture()
+  assert.deepEqual(inspectSpatialAssetBytes(bytes, 'object.glb', 'application/octet-stream'), {
+    mimeType: 'model/gltf-binary',
+    extension: 'glb',
+  })
+  assert.throws(
+    () => inspectSpatialAssetBytes(bytes, 'object.glb', 'image/png'),
+    /conflicts with sniffed/,
+  )
+
+  const publisher = new InMemorySpatialAssetPublisher()
+  const materialized = await mirrorRemoteSpatialArtifacts({
+    job: job(),
+    publicationToken: 'publication',
+    artifacts: [{
+      assetKey: 'primary-glb',
+      kind: 'model',
+      fileName: 'object.glb',
+      remoteUrl: 'https://assets.example.test/object.glb?temporary=secret',
+      claimedMimeType: 'model/gltf-binary',
+      metadata: { lod: 0 },
+    }],
+    publisher,
+    allowedHosts: ['assets.example.test'],
+    fetchImpl: async () => new Response(new Uint8Array(bytes), {
+      status: 200,
+      headers: {
+        'Content-Type': 'model/gltf-binary',
+        'Content-Length': String(bytes.length),
+      },
+    }),
+  })
+  assert.equal(materialized.length, 1)
+  assert.equal(materialized[0].workspacePath, 'output/spatial/objects/build/object.glb')
+  assert.deepEqual(publisher.readPublished(materialized[0].artifactId), bytes)
+  assert.doesNotMatch(JSON.stringify(materialized), /temporary=secret/)
+
+  await assert.rejects(
+    mirrorRemoteSpatialArtifacts({
+      job: job(),
+      publicationToken: 'too-many',
+      artifacts: [1, 2].map(index => ({
+        assetKey: `asset-${index}`,
+        kind: 'model' as const,
+        fileName: `asset-${index}.glb`,
+        inlineContent: glbFixture().toString('binary'),
+      })),
+      publisher,
+      maxArtifactCount: 1,
+    }),
+    /more than 1 artifacts/,
+  )
+
+  const largeGlb = glbFixture(700)
+  await assert.rejects(
+    mirrorRemoteSpatialArtifacts({
+      job: job(),
+      publicationToken: 'too-large',
+      artifacts: [1, 2].map(index => ({
+        assetKey: `large-${index}`,
+        kind: 'model' as const,
+        fileName: `large-${index}.glb`,
+        remoteUrl: `https://assets.example.test/large-${index}.glb`,
+      })),
+      publisher,
+      allowedHosts: ['assets.example.test'],
+      maxAssetBytes: 1_024,
+      maxBatchBytes: 1_100,
+      fetchImpl: async () => new Response(new Uint8Array(largeGlb)),
+    }),
+    /exceeds 1100 bytes/,
+  )
+
+  await assert.rejects(
+    mirrorRemoteSpatialArtifacts({
+      job: job(),
+      publicationToken: 'bad-publication',
+      artifacts: [{
+        assetKey: 'bad',
+        kind: 'model',
+        fileName: '../object.glb',
+        remoteUrl: 'https://assets.example.test/object.glb',
+      }],
+      publisher,
+      fetchImpl: async () => new Response(new Uint8Array(bytes)),
+    }),
+    /safe basename/,
+  )
+
+  for (const blockedUrl of [
+    'https://127.0.0.1/object.glb',
+    'https://169.254.169.254/latest/meta-data/object.glb',
+    'https://[::1]/object.glb',
+  ]) {
+    let fetchCalls = 0
+    await assert.rejects(
+      mirrorRemoteSpatialArtifacts({
+        job: job(),
+        publicationToken: `blocked-${fetchCalls}`,
+        artifacts: [{
+          assetKey: `blocked-${blockedUrl}`,
+          kind: 'model',
+          fileName: 'blocked.glb',
+          remoteUrl: blockedUrl,
+        }],
+        publisher,
+        fetchImpl: async () => {
+          fetchCalls += 1
+          return new Response(new Uint8Array(bytes))
+        },
+      }),
+      /not publicly routable/,
+    )
+    assert.equal(fetchCalls, 0, 'SSRF targets must be rejected before fetch')
+  }
+}
+
+async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
+  let calls = 0
+  const disabled = new Lux3DAdapter({
+    baseUrl: 'https://lux.example.test',
+    token: 'secret',
+    fetchImpl: async (input, init) => {
+      calls += 1
+      const request = new Request(input, init)
+      return request.method === 'GET'
+        ? Response.json({ d: { status: 1 }, m: 'running', c: 0 })
+        : new Response('{}')
+    },
+  })
+  await assert.rejects(
+    disabled.submit(job({ provider: 'lux3d' }), { providerIdempotencyKey: 'key' }),
+    ProviderDefinitelyNotAcceptedError,
+  )
+  assert.equal(calls, 0, 'disabled adapter must fail before network I/O')
+  const disabledPoll = await disabled.poll(job({
+    provider: 'lux3d',
+    external_job_id: 'already-paid-task',
+  }), {})
+  assert.equal(disabledPoll.state, 'running')
+  assert.equal(calls, 1, 'paid-call switch must not prevent recovery polling')
+
+  const missingRecoveryKey = new Lux3DAdapter({
+    baseUrl: 'https://lux.example.test',
+    fetchImpl: async () => {
+      throw new Error('must not reach network without recovery key')
+    },
+  })
+  await assert.rejects(
+    missingRecoveryKey.poll(job({ provider: 'lux3d', external_job_id: 'paid-task' }), {}),
+    ProviderConfigurationBlockedError,
+  )
+
+  const contract: SpatialHttpWireContract = {
+    submitPath: () => '/fixture/jobs',
+    pollPath: value => `/fixture/jobs/${value.external_job_id}`,
+    encodeSubmission: value => ({ prompt: value.request_snapshot.prompt }),
+    decodeSubmission(payload) {
+      return { externalJobId: (payload as { task_id: string }).task_id }
+    },
+    decodePoll(payload) {
+      const value = payload as { state: string }
+      return value.state === 'done'
+        ? { state: 'succeeded', artifacts: [] }
+        : { state: 'running' }
+    },
+  }
+  const requests: Request[] = []
+  const enabled = new Lux3DAdapter({
+    baseUrl: 'https://lux.example.test/api/',
+    token: 'secret',
+    allowPaidCalls: true,
+    contract,
+    fetchImpl: async (input, init) => {
+      const request = new Request(input, init)
+      requests.push(request)
+      return request.method === 'POST'
+        ? Response.json({ task_id: 'lux_fixture_1' })
+        : Response.json({ state: 'done' })
+    },
+  })
+  const fixtureJob = job({ provider: 'lux3d', request_snapshot: {
+    output_path_prefix: 'output/spatial/objects/build',
+    prompt: 'fixture',
+  } })
+  const submitted = await enabled.submit(fixtureJob, { providerIdempotencyKey: 'stable-key' })
+  assert.equal(submitted.externalJobId, 'lux_fixture_1')
+  assert.equal(requests[0].headers.get('Idempotency-Key'), 'stable-key')
+  const polled = await enabled.poll({ ...fixtureJob, external_job_id: submitted.externalJobId }, {})
+  assert.equal(polled.state, 'succeeded')
+
+  const aholo = new AholoAdapter()
+  assert.equal(aholo.supports('world'), true)
+  assert.equal(aholo.supports('object'), false)
+  const fake = new FakeSpatialProviderAdapter()
+  assert.equal(fake.supports('image'), true)
+
+  const officialLuxRequests: Request[] = []
+  const officialLux = new Lux3DAdapter({
+    token: 'lux-key',
+    allowPaidCalls: true,
+    fetchImpl: async (input, init) => {
+      const request = new Request(input, init)
+      officialLuxRequests.push(request)
+      return request.method === 'POST'
+        ? Response.json({ d: 4815162342, m: 'ok', c: 0 })
+        : Response.json({
+            d: { status: 3, outputs: [{ content: 'https://assets.example.test/lux/model.glb' }] },
+            m: 'ok',
+            c: 0,
+          })
+    },
+  })
+  const imageLuxJob = job({
+    provider: 'lux3d',
+    request_snapshot: {
+      output_path_prefix: 'output/spatial/objects/official-lux',
+      provider_options: { source_image_url: 'https://media.example.test/authorized.png' },
+    },
+  })
+  const officialLuxSubmission = await officialLux.submit(imageLuxJob, { providerIdempotencyKey: 'lux-idem' })
+  assert.match(officialLuxRequests[0].url, /\/lux3d\/v1\/generate\/img-to-3d\/task\/create$/)
+  assert.deepEqual(await officialLuxRequests[0].json(), {
+    img: 'https://media.example.test/authorized.png',
+    outputFormat: ['glb'],
+    version: 'G1',
+    faceCount: 60000,
+    enablePbr: true,
+    textureSize: 2048,
+  })
+  assert.equal(officialLuxSubmission.externalJobId, '4815162342')
+  assert.equal(officialLuxRequests[0].headers.get('Authorization'), 'lux-key')
+  const officialLuxPoll = await officialLux.poll({
+    ...imageLuxJob,
+    external_job_id: officialLuxSubmission.externalJobId,
+  }, {})
+  assert.equal(officialLuxPoll.state, 'succeeded')
+  if (officialLuxPoll.state === 'succeeded') {
+    assert.equal(officialLuxPoll.artifacts[0].fileName, 'model.glb')
+  }
+  const luxWire = createLux3DOfficialG1WireContract()
+  assert.equal(luxWire.decodePoll({ d: { status: 0 }, c: 0 }).state, 'queued')
+  assert.equal(luxWire.decodePoll({ d: { status: 1 }, c: 0 }).state, 'running')
+  assert.equal(luxWire.decodePoll({
+    d: { status: 3, outputs: [{ content: 'https://assets.example.test/lux/fixture.glb' }] },
+    c: 0,
+  }).state, 'succeeded')
+  assert.equal(luxWire.decodePoll({ d: { status: 4, message: 'failed' }, c: 0 }).state, 'failed')
+  assert.throws(
+    () => luxWire.decodePoll({ d: { status: 2 }, c: 0 }),
+    /unknown status: 2/,
+  )
+
+  const textWithImageJob = job({
+    provider: 'lux3d',
+    request_snapshot: {
+      output_path_prefix: 'output/spatial/objects/text-image',
+      prompt: 'a refined chair',
+      provider_options: { source_image_url: 'https://media.example.test/chair.png' },
+    },
+  })
+  await officialLux.submit(textWithImageJob, { providerIdempotencyKey: 'lux-text-image' })
+  assert.match(officialLuxRequests[2].url, /\/lux3d\/v1\/generate\/text-to-3d\/task\/create$/)
+  assert.deepEqual(await officialLuxRequests[2].json(), {
+    img: 'https://media.example.test/chair.png',
+    prompt: 'a refined chair',
+    outputFormat: ['glb'],
+    version: 'G1',
+    faceCount: 60000,
+    enablePbr: true,
+    textureSize: 2048,
+  })
+  await assert.rejects(
+    officialLux.submit(job({
+      provider: 'lux3d',
+      request_snapshot: {
+        output_path_prefix: 'output/spatial/objects/invalid-multi',
+        prompt: 'must not silently drop this prompt',
+        provider_options: {
+          source_image_urls: [
+            'https://media.example.test/a.png',
+            'https://media.example.test/b.png',
+          ],
+        },
+      },
+    }), { providerIdempotencyKey: 'invalid-multi' }),
+    /at most one frozen reference image/,
+  )
+
+  const officialAholoRequests: Request[] = []
+  const officialAholo = new AholoAdapter({
+    token: 'aholo-raw-key',
+    allowPaidCalls: true,
+    fetchImpl: async (input, init) => {
+      const request = new Request(input, init)
+      officialAholoRequests.push(request)
+      return request.method === 'POST'
+        ? Response.json({ worldId: 'world-fixture' })
+        : Response.json({
+            status: 'SUCCEEDED',
+            assets: {
+              imagery: { panoUrl: 'https://assets.example.test/world/pano.jpg' },
+              splats: { urls: {
+                plyPath: 'https://assets.example.test/world/world.ply',
+                spzPath: 'https://assets.example.test/world/world.spz',
+                lodMetaPath: 'https://assets.example.test/world/lod.json',
+              } },
+              semanticsMetadata: { upAxis: 'Y' },
+            },
+          })
+    },
+  })
+  const worldJob = job({
+    kind: 'world',
+    provider: 'aholo',
+    request_snapshot: {
+      output_path_prefix: 'output/spatial/worlds/official-aholo',
+      prompt: 'quiet reading room',
+      provider_options: { source_image_url: 'https://media.example.test/authorized-room.png' },
+    },
+  })
+  const aholoSubmission = await officialAholo.submit(worldJob, { providerIdempotencyKey: 'aholo-idem' })
+  assert.equal(officialAholoRequests[0].headers.get('Authorization'), 'aholo-raw-key')
+  assert.deepEqual(await officialAholoRequests[0].json(), {
+    resources: [{ url: 'https://media.example.test/authorized-room.png', type: 'image' }],
+    prompt: 'quiet reading room',
+  })
+  const aholoPoll = await officialAholo.poll({
+    ...worldJob,
+    external_job_id: aholoSubmission.externalJobId,
+  }, {})
+  assert.equal(aholoPoll.state, 'succeeded')
+  if (aholoPoll.state === 'succeeded') {
+    assert.deepEqual(aholoPoll.artifacts.map(value => value.assetKey), [
+      'world-pano',
+      'world-ply',
+      'world-spz',
+      'world-lod-metadata',
+    ])
+    assert.equal(aholoPoll.artifacts[1].metadata?.up_axis, 'Y')
+  }
+  assert.throws(
+    () => createAholoOfficialWireContract().decodePoll({ status: 'completed', assets: {} }),
+    /unsupported status/,
+  )
+}
+
+async function verifyStableToolResult(): Promise<void> {
+  const serialized = serializeSpatialToolResult({
+    schema_version: SPATIAL_TOOL_RESULT_SCHEMA_VERSION,
+    job_id: 'spjob_1',
+    kind: 'world',
+    status: 'running',
+    provider: 'aholo',
+    message: '仍在后台运行',
+    created_at: '2026-08-25T00:00:00.000Z',
+    elapsed_ms: 1_250,
+    relations: [{ kind: 'conditioned_by', artifact_id: 'asset_source' }],
+    metadata: { up_axis: 'Y', size_bytes: 12 },
+    updated_at: '2026-08-25T00:00:00.000Z',
+  })
+  assert.deepEqual(parseSpatialToolResult(serialized), JSON.parse(serialized))
+  assert.equal(parseSpatialToolResult(JSON.stringify({
+    ...JSON.parse(serialized),
+    buffer: 'base64 bytes are forbidden',
+  })), null)
+}
+
+async function main(): Promise<void> {
+  await verifyIdentityAndStateMachine()
+  await verifyByteInspectionAndMirroring()
+  await verifyAdaptersFailClosedAndUseFixtures()
+  await verifyStableToolResult()
+  console.log('✓ Spatial durable core verification passed')
+}
+
+void main().catch(error => {
+  console.error(error)
+  process.exitCode = 1
+})
