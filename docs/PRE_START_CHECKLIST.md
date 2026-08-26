@@ -131,10 +131,10 @@ npm run spatial:smoke:aholo -- --resume --smoke-id <spsmoke_id>
 ### P0-5：建立恢复点后停止新增功能
 
 - [x] 已确认 `.env.local`、日志和探针产物均未进入 Git；精确配置值扫描为 0 命中，通用模式命中仅限隔离测试的合成 fixture。
-- [ ] 提交当前改动、创建新的开赛前 tag，并生成可离线恢复的 Git bundle。
+- [x] 当前实现已提交；最终恢复点使用 tag `prestart-2026-08-27-final`，并生成同名仓库外 Git bundle。
 - [ ] 配置并推送 remote；本机和远程应能检出同一 tag。
 - [x] `docs/LIVE_SMOKE_LOG.md` 已保留 H0 上限：Aholo 1、Lux3D 1、NewAPI 文生图 1、NewAPI 单图修订 1。
-- [ ] 睡前不再增加第二阶段功能，不在疲劳状态下修改 durable 状态机或发起真实付费请求。
+- [x] 第一阶段功能范围已冻结；后续只做明早复核与正式 H0，不再增加第二阶段功能或赛前付费请求。
 
 ## 3. 明早开赛前复核
 
@@ -147,7 +147,7 @@ npm run spatial:smoke:aholo -- --resume --smoke-id <spsmoke_id>
 - [x] Operator smoke 已实现；Aholo/Lux `--dry-run` 为绿，Image 因公网 HTTP 正确 fail closed，三者提交数均为 0。
 - [ ] NewAPI 正式传输已安全化；否则明确采用不依赖图像参考的降级方案。
 - [ ] 现有规则基线已记录，且余额、预算和单次人工授权均已填写；后三项任何一项为空都不提交。
-- [ ] 当前 commit/tag/bundle、恢复命令、演示降级话术可以离线查看。
+- [x] 当前 commit、`prestart-2026-08-27-final` tag、离线 bundle、恢复命令和演示降级话术均已固定在本地恢复点中。
 
 ## 4. H0 边界
 
@@ -175,7 +175,7 @@ npm run spatial:smoke:aholo -- --resume --smoke-id <spsmoke_id>
 - [ ] 基础聊天 live 已在安全 NewAPI 传输和演示授权就绪后完成验证；
 - [ ] NewAPI 正式 HTTPS 或等价加密传输通过；
 - [ ] 成本停止线和单次人工授权已填写；
-- [ ] 本地代码已提交、创建新 tag，并生成 Git bundle；
+- [x] 本地代码已提交，最终 tag 固定为 `prestart-2026-08-27-final`，并生成同名 Git bundle；
 - [ ] remote 已配置，且同一 tag 已推送并可从远程检出。
 
 **当前判定：Local Go，真实付费链路 No-Go。**
