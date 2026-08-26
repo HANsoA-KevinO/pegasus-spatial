@@ -962,6 +962,46 @@ function assertByteFree(value: unknown): void {
   assert.equal(state.providerCalls(), 0)
 }
 
+// Operator prepare/resume reuses the production receipt without crossing the
+// provider boundary. Only the explicit allow-submit call may claim it.
+{
+  const workspace = createInMemoryWorkspace()
+  const state = setup(new MemoryReceiptStore())
+  const capacity = new MemoryPaidCapacity()
+  state.dependencies.paidSlots = capacity.imageCoordinator
+  const context = { ...executionContext, runId: 'run_operator_prepare_policy' }
+  const prepared = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: state.dependencies,
+    submissionPolicy: 'prepare-only',
+  })
+  assert.equal(prepared.is_error, undefined)
+  assert.match(prepared.content, /"status":"prepared"/)
+  assert.equal(state.providerCalls(), 0)
+  assert.equal(capacity.size('project_1'), 0, 'prepare-only must not retain paid capacity')
+
+  const resumed = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: state.dependencies,
+    submissionPolicy: 'forbid-submit',
+  })
+  assert.equal(resumed.is_error, undefined)
+  assert.match(resumed.content, /"status":"prepared"/)
+  assert.equal(state.providerCalls(), 0, 'forbid-submit must not claim a prepared receipt')
+
+  const submitted = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: state.dependencies,
+    submissionPolicy: 'allow-submit',
+  })
+  assert.equal(submitted.is_error, undefined)
+  assert.equal(state.providerCalls(), 1)
+  assert.equal(capacity.size('project_1'), 0)
+}
+
 // Two concurrent images fill the shared paid capacity atomically; a third
 // image cannot enter the provider until one terminal receipt releases a slot.
 {

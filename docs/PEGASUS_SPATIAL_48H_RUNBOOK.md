@@ -2,6 +2,14 @@
 
 本文只描述真实门禁和操作顺序，不把配置存在、Mock 测试或预制截图冒充供应商真实生成。
 
+## 0. 现场部署与规则基线
+
+- 继续使用本地 Mongo，不改为纯文件持久化。评委演示不需要任何数据库操作；从零运行时只增加 Docker 这一个前置，本地开发使用 `docker compose up -d mongo` 和 `npm run dev`，不需要云 Mongo 账号、连接串或手工建表。
+- 当前比赛要求以用户已提供的 VentureD 通知和海报为基线。腾讯文档《Venture D 软件支持清单及领取方式》是 AI Ping、Zion、Qoder 等福利的领取说明，可见内容未出现 Aholo、Lux3D、群核或额外比赛规则。
+- 本项目从主办方/赛题平台提供的资源中仅领取和使用 Aholo；LLM 与生图使用自有 NewAPI。Zion 兑换码 `VentureD2026` 不影响本项目，不需要领取或接入赞助模型。
+- 现有资料未明确授权赛前真实生成；在没有新证据时，赛前仅做零费用验证，真实付费 smoke 从正式 H0 后开始。
+- 密钥轮换经用户决定本轮暂缓，不阻塞本地开发；但严禁在文档、日志、截图或 Git 中记录密钥。
+
 ## 1. H0–H4 真实能力冻结
 
 1. 从 `.env.example` 创建 `.env.local`。图像生成复用受控的既有 NewAPI 配置：填写 `LLM_BASE_URL` 与
@@ -20,10 +28,12 @@
    若启用 OSS，确认非敏感的 `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX` 在构建和运行环境中取同一值；
    readiness 会拒绝非法前缀或与旧 `PEGASUS_SPATIAL_MEDIA_PREFIX` 冲突的配置。
 
-3. 分别做一次 NewAPI `GPT-image-2` 文生图、单图修订、Aholo World 和 Lux3D G1 最小真实请求；记录请求时间、任务 ID、最终状态、响应字段、产物 MIME、文件 magic、字节数和 SHA-256。
+3. Operator smoke 实现且 `--dry-run` 通过后，在正式 H0 后先填写 `docs/LIVE_SMOKE_LOG.md` 的预算、余额下限和单次人工授权，再分别做一次 NewAPI `GPT-image-2` 文生图、单图修订、Aholo World 和 Lux3D G1 最小真实请求。逐项记录请求时间、任务 ID、最终状态、脱敏响应字段、产物 MIME、文件 magic、字节数和 SHA-256；未经该流程不得提交。
 4. 从真实成功响应中提取 Aholo/Lux3D 产物 hostname，写入精确的 `*_ASSET_HOST_ALLOWLIST`。禁止使用通配符、任意 URL 或重定向扩展白名单。
 5. 图像路由必须保持唯一：`LLM_BASE_URL` 上的 `/chat/completions`、`LLM_API_KEY_TOOLS` 和区分大小写的精确别名 `GPT-image-2`。不测试或配置 `/images/generations`、`/images/edits`、provider selector 或自动 fallback；任一真实图像用例失败时先修复这条固定路由。
 6. 再次运行 readiness。只有全部门禁通过，才可显式设置 `SPATIAL_PAID_CALLS_ENABLED=1`。
+
+Operator smoke 的普通聊天全局开关始终保持 `0`。每次先运行 `--prepare --project-id <conversation-id> --phase H0 --purpose <fixed>`，记录返回的 `smoke_id`；只有逐字提供 `--confirm AUTHORIZE_ONE_PAID_SUBMISSION` 的 `--submit` 可以发起一次供应商请求。`--status` 与 `--resume` 永不从 prepared 状态提交。未核销的 `unknown` 会按项目和供应商跨 phase 阻止新提交；只有核对供应商账单后，才能用带操作员、理由和精确确认文本的 `--reconcile-unknown` 写入不可覆盖的核销记录，原任务仍保持 `unknown`。完整命令见 `docs/PRE_START_CHECKLIST.md`。
 
 ## 2. 发布前自动验收
 

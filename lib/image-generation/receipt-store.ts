@@ -1,6 +1,6 @@
 import mongoose, { Schema, type Model } from 'mongoose'
 import { connectDB } from '../db/mongodb'
-import { ImageGenerationReceiptConflictError } from './errors'
+import { boundedErrorMessage, ImageGenerationReceiptConflictError } from './errors'
 import { reconcileSpatialPaidSlots } from '../spatial/paid-slots'
 import {
   IMAGE_GENERATION_RESERVATION_RECOVERY_MS,
@@ -315,7 +315,7 @@ export const mongoImageGenerationReceiptStore: ImageGenerationReceiptStore = {
         $set: {
           status: 'failed',
           error_code: code,
-          error_message: message,
+          error_message: boundedErrorMessage(message),
           updated_at: now,
         },
       },
@@ -333,7 +333,7 @@ export const mongoImageGenerationReceiptStore: ImageGenerationReceiptStore = {
         $set: {
           status: 'unknown',
           error_code: code,
-          error_message: message,
+          error_message: boundedErrorMessage(message),
           updated_at: now,
         },
       },

@@ -23,7 +23,7 @@ delete process.env.NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX
 assert.equal(getMediaObjectPrefix(), DEFAULT_MEDIA_OBJECT_PREFIX)
 assert.equal(
   buildRasterAssetObjectKey(assetId, 'original'),
-  `pegasus-spatial/raster-assets/${assetId}/original`,
+  `raster-assets/pegasus-spatial/${assetId}/original`,
 )
 
 process.env.NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX = 'pegasus-spatial-v2/media/raster'

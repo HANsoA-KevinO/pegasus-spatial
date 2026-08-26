@@ -175,6 +175,7 @@ export function sanitizeSpatialRuntimeError(
     env.AHOLO_API_TOKEN,
     env.LUX3D_API_KEY,
     env.LUX3D_API_TOKEN,
+    env.LLM_API_KEY_TOOLS,
   ]) {
     const secret = key?.trim()
     if (secret && secret.length >= 4) message = message.split(secret).join('[redacted]')
@@ -291,7 +292,10 @@ export async function resolveSpatialJobWorkspace(
 
 export function createProductionSpatialDependencies(
   config: SpatialRuntimeConfig = readSpatialRuntimeConfig(),
-  options: { fetchImpl?: typeof fetch } = {},
+  options: {
+    fetchImpl?: typeof fetch
+    resolveArtifactHostname?: ProcessSpatialBuildDependencies['resolveArtifactHostname']
+  } = {},
 ): ProcessSpatialBuildDependencies {
   const adapters = new Map<string, SpatialProviderAdapter>([
     ['aholo', new AholoAdapter({
@@ -313,6 +317,7 @@ export function createProductionSpatialDependencies(
       resolveWorkspace: resolveSpatialJobWorkspace,
     }),
     fetchImpl: options.fetchImpl,
+    resolveArtifactHostname: options.resolveArtifactHostname,
     // A non-empty deny sentinel is intentional. artifact-mirror treats an
     // absent/empty list as unrestricted, which is never safe in production.
     allowedArtifactHosts(provider) {

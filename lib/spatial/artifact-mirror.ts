@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { posix } from 'node:path'
 import { canonicalSpatialJson, normalizeSpatialWorkspacePrefix } from './identity'
@@ -24,6 +25,30 @@ export class SpatialAssetValidationError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'SpatialAssetValidationError'
+  }
+}
+
+/**
+ * DNS transport failures are deliberately retryable. A provider artifact URL
+ * may be short lived, but a temporary resolver outage is not evidence that
+ * the already-paid provider output is unsafe or permanently invalid.
+ */
+export class SpatialArtifactDnsResolutionError extends Error {
+  readonly code = 'SPATIAL_ARTIFACT_DNS_RESOLUTION_ERROR'
+
+  constructor(hostname: string) {
+    super(`Provider artifact hostname could not be resolved safely: ${hostname}`)
+    this.name = 'SpatialArtifactDnsResolutionError'
+  }
+}
+
+/** A temporary artifact transport response; the durable paid job may retry. */
+export class SpatialArtifactDownloadTransientError extends Error {
+  readonly code = 'SPATIAL_ARTIFACT_DOWNLOAD_TRANSIENT'
+
+  constructor(status: number) {
+    super(`Provider artifact download is temporarily unavailable (HTTP ${status}).`)
+    this.name = 'SpatialArtifactDownloadTransientError'
   }
 }
 
@@ -121,22 +146,136 @@ function validateRemoteUrl(
   } catch {
     throw new SpatialAssetValidationError('Provider artifact URL is invalid.')
   }
-  const local = ['127.0.0.1', 'localhost', '::1'].includes(url.hostname)
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  const local = ['127.0.0.1', 'localhost', '::1'].includes(hostname)
   if (url.protocol !== 'https:' && !(options.allowInsecureLocalhost && local && url.protocol === 'http:')) {
     throw new SpatialAssetValidationError('Provider artifact URL must use HTTPS.')
   }
-  const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  if (url.username || url.password) {
+    throw new SpatialAssetValidationError('Provider artifact URL must not contain userinfo.')
+  }
+  if (url.port && !(options.allowInsecureLocalhost && local)) {
+    throw new SpatialAssetValidationError('Provider artifact URL must use the default HTTPS port.')
+  }
+  if (isUnsafeSpatialArtifactHost(hostname) && !(options.allowInsecureLocalhost && local)) {
+    throw new SpatialAssetValidationError(`Provider artifact host is not publicly routable: ${hostname}`)
+  }
   if (options.allowedHosts?.length) {
     if (!options.allowedHosts.map(value => value.toLowerCase()).includes(hostname)) {
       throw new SpatialAssetValidationError(`Provider artifact host is not allowed: ${hostname}`)
     }
-  } else if (isUnsafeUnlistedHost(hostname)) {
-    throw new SpatialAssetValidationError(`Provider artifact host is not publicly routable: ${hostname}`)
   }
   return url
 }
 
-function isUnsafeUnlistedHost(hostname: string): boolean {
+function ipv4Octets(address: string): [number, number, number, number] | null {
+  if (isIP(address) !== 4) return null
+  const values = address.split('.').map(Number)
+  return values.length === 4 && values.every(value => Number.isInteger(value) && value >= 0 && value <= 255)
+    ? values as [number, number, number, number]
+    : null
+}
+
+function isUnsafeIpv4Address(address: string): boolean {
+  const octets = ipv4Octets(address)
+  if (!octets) return true
+  const [a, b, c] = octets
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 0 && c === 0)
+    || (a === 192 && b === 0 && c === 2)
+    || (a === 192 && b === 88 && c === 99)
+    || (a === 192 && b === 168)
+    || (a === 198 && (b === 18 || b === 19))
+    || (a === 198 && b === 51 && c === 100)
+    || (a === 203 && b === 0 && c === 113)
+    || a >= 224
+}
+
+function expandIpv6(address: string): number[] | null {
+  let candidate = address.toLowerCase()
+  const zone = candidate.indexOf('%')
+  if (zone >= 0) candidate = candidate.slice(0, zone)
+  if (candidate.includes('.')) {
+    const separator = candidate.lastIndexOf(':')
+    const octets = ipv4Octets(candidate.slice(separator + 1))
+    if (separator < 0 || !octets) return null
+    candidate = `${candidate.slice(0, separator)}:${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`
+  }
+  if (candidate.split('::').length > 2) return null
+  const [leftRaw, rightRaw] = candidate.split('::')
+  const left = leftRaw ? leftRaw.split(':') : []
+  const right = rightRaw ? rightRaw.split(':') : []
+  const compressed = candidate.includes('::')
+  const missing = 8 - left.length - right.length
+  if ((!compressed && missing !== 0) || (compressed && missing < 1)) return null
+  const parts = [...left, ...Array.from({ length: missing }, () => '0'), ...right]
+  if (parts.length !== 8 || parts.some(part => !/^[a-f0-9]{1,4}$/.test(part))) return null
+  return parts.map(part => Number.parseInt(part, 16))
+}
+
+function isUnsafeIpv6Address(address: string): boolean {
+  const parts = expandIpv6(address)
+  if (!parts) return true
+  // Fail closed to the currently allocated global-unicast block, then exclude
+  // special-purpose ranges inside it. This also rejects IPv4-mapped, ULA,
+  // link-local, multicast, NAT64 and unspecified/loopback addresses.
+  if ((parts[0] & 0xe000) !== 0x2000) return true
+  return (parts[0] === 0x2001 && parts[1] === 0x0000) // Teredo
+    || (parts[0] === 0x2001 && parts[1] === 0x0002 && parts[2] === 0x0000) // benchmarking
+    || (parts[0] === 0x2001 && (parts[1] & 0xfff0) === 0x0010) // ORCHIDv1
+    || (parts[0] === 0x2001 && (parts[1] & 0xfff0) === 0x0020) // ORCHIDv2
+    || (parts[0] === 0x2001 && parts[1] === 0x0db8) // documentation
+    || parts[0] === 0x2002 // 6to4
+}
+
+export function isUnsafeSpatialArtifactAddress(address: string): boolean {
+  const version = isIP(address)
+  if (version === 4) return isUnsafeIpv4Address(address)
+  if (version === 6) return isUnsafeIpv6Address(address)
+  return true
+}
+
+export type SpatialHostnameResolver = (hostname: string) => Promise<readonly string[]>
+
+const resolveSpatialArtifactHostname: SpatialHostnameResolver = async hostname => {
+  const records = await lookup(hostname, { all: true, verbatim: true })
+  return [...new Set(records.map(record => record.address))]
+}
+
+async function assertPublicDnsResolution(
+  hostname: string,
+  resolver: SpatialHostnameResolver,
+): Promise<void> {
+  let addresses: readonly string[]
+  try {
+    addresses = await resolver(hostname)
+  } catch {
+    throw new SpatialArtifactDnsResolutionError(hostname)
+  }
+  if (addresses.length === 0) {
+    throw new SpatialArtifactDnsResolutionError(hostname)
+  }
+  if (addresses.some(isUnsafeSpatialArtifactAddress)) {
+    throw new SpatialAssetValidationError(
+      `Provider artifact hostname resolved to a private or reserved address: ${hostname}`,
+    )
+  }
+}
+
+function isExplicitlyAllowedLocalArtifact(
+  hostname: string,
+  allowInsecureLocalhost: boolean | undefined,
+): boolean {
+  return allowInsecureLocalhost === true
+    && ['127.0.0.1', 'localhost', '::1'].includes(hostname)
+}
+
+export function isUnsafeSpatialArtifactHost(hostname: string): boolean {
   if (
     hostname === 'localhost'
     || hostname.endsWith('.localhost')
@@ -144,31 +283,7 @@ function isUnsafeUnlistedHost(hostname: string): boolean {
     || hostname === 'metadata.google.internal'
   ) return true
   const ipVersion = isIP(hostname)
-  if (ipVersion === 4) {
-    const [a, b] = hostname.split('.').map(Number)
-    return a === 0
-      || a === 10
-      || a === 127
-      || (a === 100 && b >= 64 && b <= 127)
-      || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 168)
-      || a >= 224
-  }
-  if (ipVersion === 6) {
-    const normalized = hostname.toLowerCase()
-    return normalized === '::'
-      || normalized === '::1'
-      || normalized.startsWith('fc')
-      || normalized.startsWith('fd')
-      || normalized.startsWith('fe8')
-      || normalized.startsWith('fe9')
-      || normalized.startsWith('fea')
-      || normalized.startsWith('feb')
-      || normalized.startsWith('::ffff:127.')
-      || normalized.startsWith('::ffff:10.')
-      || normalized.startsWith('::ffff:192.168.')
-  }
+  if (ipVersion) return isUnsafeSpatialArtifactAddress(hostname)
   return false
 }
 
@@ -260,6 +375,7 @@ export interface MirrorRemoteSpatialArtifactsOptions {
   maxBatchBytes?: number
   maxArtifactCount?: number
   allowedHosts?: readonly string[]
+  resolveHostname?: SpatialHostnameResolver
   allowInsecureLocalhost?: boolean
   signal?: AbortSignal
   deriveArtifacts?: (staged: readonly StagedSpatialAsset[]) => readonly ProviderArtifactDescriptor[]
@@ -363,6 +479,13 @@ export async function mirrorRemoteSpatialArtifacts(
         }
       } else {
         const requestedUrl = validateRemoteUrl(descriptor.remoteUrl!, options)
+        const requestedHostname = requestedUrl.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+        if (!isExplicitlyAllowedLocalArtifact(requestedHostname, options.allowInsecureLocalhost)) {
+          await assertPublicDnsResolution(
+            requestedHostname,
+            options.resolveHostname ?? resolveSpatialArtifactHostname,
+          )
+        }
         const response = await fetchImpl(requestedUrl, {
           method: 'GET',
           signal: options.signal,
@@ -370,9 +493,21 @@ export async function mirrorRemoteSpatialArtifacts(
           headers: { Accept: '*/*' },
         })
         if (!response.ok) {
+          if ([408, 425, 429].includes(response.status) || response.status >= 500) {
+            throw new SpatialArtifactDownloadTransientError(response.status)
+          }
           throw new SpatialAssetValidationError(`Provider artifact download returned HTTP ${response.status}.`)
         }
-        if (response.url) validateRemoteUrl(response.url, options)
+        if (response.url) {
+          const responseUrl = validateRemoteUrl(response.url, options)
+          const responseHostname = responseUrl.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+          if (!isExplicitlyAllowedLocalArtifact(responseHostname, options.allowInsecureLocalhost)) {
+            await assertPublicDnsResolution(
+              responseHostname,
+              options.resolveHostname ?? resolveSpatialArtifactHostname,
+            )
+          }
+        }
         const remaining = maximumBatch - totalBytes
         if (remaining <= 0) {
           throw new SpatialAssetValidationError(`Provider artifact batch exceeds ${maximumBatch} bytes.`)

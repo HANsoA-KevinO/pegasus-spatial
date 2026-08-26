@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import tempfile
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -48,7 +49,10 @@ def main() -> None:
     parser.add_argument("--project-text", required=True)
     parser.add_argument("--paper-query", default="73a70")
     parser.add_argument("--base-url", default="http://localhost:3200")
-    parser.add_argument("--screenshot", default="/private/tmp/pegasus-spatial-figure-layout.png")
+    parser.add_argument(
+        "--screenshot",
+        default=str(Path(tempfile.gettempdir()) / "pegasus-spatial-figure-layout.png"),
+    )
     args = parser.parse_args()
 
     token = session_token(args.user_id, args.email, args.name)

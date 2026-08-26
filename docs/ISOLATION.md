@@ -14,7 +14,7 @@
 | Internal HMAC headers | `x-pegasus-spatial-agent-runner-*` |
 | Docker network/volumes | `pegasus-spatial-*` |
 | GridFS media bucket | `pegasus_spatial_media` |
-| OSS object prefix | `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=pegasus-spatial/raster-assets` |
+| OSS object prefix | `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=raster-assets/pegasus-spatial` |
 
 ## 强制规则
 

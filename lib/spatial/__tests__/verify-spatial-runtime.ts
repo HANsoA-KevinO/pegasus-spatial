@@ -139,10 +139,10 @@ function verifyStableWriterAndSanitization(): void {
 
   const secret = 'super-secret-key'
   const message = sanitizeSpatialRuntimeError(
-    new Error(`mongodb://admin:password@db.example/x ${secret}\nnext line`),
-    env({ AHOLO_API_KEY: secret }),
+    new Error(`mongodb://admin:password@db.example/x ${secret} image-tools-secret\nnext line`),
+    env({ AHOLO_API_KEY: secret, LLM_API_KEY_TOOLS: 'image-tools-secret' }),
   )
-  assert.doesNotMatch(message, /admin:password|super-secret-key|\n/)
+  assert.doesNotMatch(message, /admin:password|super-secret-key|image-tools-secret|\n/)
   assert.match(message, /\[redacted\]/)
 }
 

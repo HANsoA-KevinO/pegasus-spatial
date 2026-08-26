@@ -13,6 +13,7 @@ import {
   type ContextUsageState,
   type PublicCompactionStatus,
 } from './chat-compaction-state'
+import { attachPersistedToolResult } from '@/lib/chat/persisted-tool-results'
 
 const ACTIVE_CONVERSATION_KEY = 'sci_pegasus_active_conversation_id'
 
@@ -1089,15 +1090,6 @@ export function useChat(options: UseChatOptions) {
       const chatMessages: ChatMessage[] = []
       const dbMessages = data.messages ?? []
 
-      const toolUseMap = new Map<string, { name: string; input: Record<string, unknown> }>()
-      for (const msg of dbMessages) {
-        for (const block of msg.content ?? []) {
-          if (block.type === 'tool_use') {
-            toolUseMap.set(block.id, { name: block.name, input: block.input })
-          }
-        }
-      }
-
       let i = 0
       while (i < dbMessages.length) {
         const msg = dbMessages[i]
@@ -1176,6 +1168,7 @@ export function useChat(options: UseChatOptions) {
                 parts.push({
                   type: 'tool_call',
                   tool: block.name,
+                  tool_use_id: block.id,
                   file_path: block.input?.file_path as string | undefined,
                   action: summarizeToolAction(block.name, block.input, displayPath),
                   pending: false,
@@ -1190,21 +1183,20 @@ export function useChat(options: UseChatOptions) {
               if (isToolResult) {
                 let hasInterrupted = false
                 for (const block of nextContent) {
-                  if (block.type === 'tool_result' && block.is_error) {
+                  if (block.type !== 'tool_result') continue
+                  attachPersistedToolResult(parts, block)
+                  if (block.is_error) {
                     const isInterrupt = block.content === 'Tool execution interrupted by user.'
                     if (isInterrupt) hasInterrupted = true
-                    const toolInfo = toolUseMap.get(block.tool_use_id)
-                    if (toolInfo) {
-                      for (let j = parts.length - 1; j >= 0; j--) {
-                        const p = parts[j]
-                        if (p.type === 'tool_call' && p.tool === toolInfo.name && !p.is_error) {
-                          parts[j] = {
-                            ...p,
-                            is_error: true,
-                            action: isInterrupt ? (p.action || '') + ' (用户终止)' : p.action,
-                          }
-                          break
+                    for (let j = parts.length - 1; j >= 0; j--) {
+                      const p = parts[j]
+                      if (p.type === 'tool_call' && p.tool_use_id === block.tool_use_id) {
+                        parts[j] = {
+                          ...p,
+                          is_error: true,
+                          action: isInterrupt ? (p.action || '') + ' (用户终止)' : p.action,
                         }
+                        break
                       }
                     }
                   }

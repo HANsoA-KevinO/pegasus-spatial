@@ -349,6 +349,34 @@ for (const testCase of [
   })
 }
 
+// Provider error bodies must never persist or return a configured raw key,
+// even when a gateway echoes it outside an Authorization header.
+{
+  const previousKey = process.env.LLM_API_KEY_TOOLS
+  const secret = 'operator-image-secret-never-print'
+  process.env.LLM_API_KEY_TOOLS = secret
+  try {
+    const adapter = new NewApiChatImageAdapter({
+      apiKey: secret,
+      apiBase: 'https://api.test/v1',
+      allowPaidCalls: true,
+      fetchImpl: (async () => new Response(
+        JSON.stringify({ error: { message: `gateway echoed ${secret}`, api_key: secret } }),
+        { status: 400 },
+      )) as typeof fetch,
+    })
+    await assert.rejects(adapter.generate({ prompt: 'redaction fixture' }), error => {
+      assert.ok(error instanceof ImageGenerationProviderError)
+      assert.doesNotMatch(error.message, new RegExp(secret))
+      assert.match(error.message, /\[REDACTED\]/)
+      return true
+    })
+  } finally {
+    if (previousKey === undefined) delete process.env.LLM_API_KEY_TOOLS
+    else process.env.LLM_API_KEY_TOOLS = previousKey
+  }
+}
+
 // Ambiguous HTTP statuses remain unknown instead of permitting a paid replay.
 for (const status of [408, 409, 425, 499, 502]) {
   const adapter = new NewApiChatImageAdapter({

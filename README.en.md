@@ -6,6 +6,55 @@ The product has one conversational entry point and no object/world mode selector
 
 The default Project Guide is `spatial-creation@1`, and its default Skill catalog contains only `spatial-creation`. The inherited `materials-discovery@1` guide and research Skills remain in the repository for explicit legacy use but are not part of a new spatial project's default surface.
 
+## Judge demo
+
+This is a **judge-safe review mode** for pre-generated, persisted results. The
+competition machine has these one-time prerequisites:
+
+- Docker Desktop or Docker Engine is installed, its daemon is running, and the
+  current user can access it.
+- Docker Compose v2 is installed, and the official `mongo:7` image is cached or
+  can be pulled.
+- `npm install` and `.env.local` setup are complete, with
+  `SPATIAL_PAID_CALLS_ENABLED=0`.
+- A login is explicitly bootstrapped from an interactive terminal:
+
+```bash
+npm run demo:bootstrap -- --email judge@example.com
+```
+
+Password entry is hidden and never logged. The on-site operator must hand it to
+the judge securely. Repeating the command with the same email and password only
+verifies the existing account; it does not overwrite it.
+
+After those prerequisites, the demo starts with one command:
+
+```bash
+npm run demo:up
+```
+
+The command checks Docker/Compose, the prebuilt login, and safe configuration;
+starts and waits for isolated local persistence; then launches the web app in
+the background. Judges only open `http://localhost:3200`; they do not install a
+database client or manage database credentials.
+
+```bash
+npm run demo:status   # configuration, account, persistence, and web health; no secrets
+npm run demo:down     # stops services without deleting the Mongo volume
+```
+
+Demo startup refuses missing configuration, remote Mongo targets, a missing
+prebuilt account, any existing listener on port 3200, or any setting other than
+`SPATIAL_PAID_CALLS_ENABLED=0`. That flag blocks **new paid spatial
+submissions**. A persisted job with a known external ID may still resume
+polling/materialization, and ordinary chat may still use configured NewAPI; do
+not send a new chat prompt during a zero-external-call review.
+
+`demo:up` does not claim that live natural-language generation is enabled. Live
+generation is a team-controlled startup after the H0 download-host allowlists,
+provider operator smoke tests, and budget authorization pass. It is not part of
+the judge-safe one-command review mode.
+
 ## V1 tools
 
 - `GenerateImage`: text-to-image and single-image editing through the single
@@ -24,7 +73,7 @@ Paid spatial tools are Root-only and fail closed unless `SPATIAL_PAID_CALLS_ENAB
 - Web: `http://localhost:3200`
 - Mongo: `127.0.0.1:27019/pegasus_spatial`
 - GridFS bucket: `pegasus_spatial_media`
-- OSS prefix: `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=pegasus-spatial/raster-assets`
+- OSS prefix: `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=raster-assets/pegasus-spatial`
 - Auth cookies and Docker resources use the `pegasus-spatial` namespace.
 
 The internal virtual Workspace path remains `.sci-pegasus/` for compatibility with the tested CAS/version/ACL implementation. Database, media, cookies, networks, and volumes are isolated from Sci-Pegasus.
@@ -34,8 +83,8 @@ The internal virtual Workspace path remains `.sci-pegasus/` for compatibility wi
 ```bash
 cp .env.example .env.local
 # Replace secrets and add provider credentials.
-docker compose up -d mongo
 npm install
+docker compose up -d mongo
 npm run dev
 ```
 
@@ -62,12 +111,19 @@ never passes paid readiness, and remains rejected in production.
 npm run project-prompt:verify
 npm run spatial:verify
 npm run spatial:verify:mongo
+npm run spatial:verify:demo-e2e
 npm run tool-contracts:verify
 npm run multi-agent:verify
 npx tsc --noEmit
 npm run lint
 npm run build
 ```
+
+`spatial:verify:demo-e2e` uses a randomly named loopback-only temporary
+database and terminal fixtures. It verifies login, invite registration,
+authenticated Spatial Job UI/API, refresh, and web-process restart recovery
+without sending chat, model, Aholo, or Lux3D requests. Only that guarded test
+database is removed afterward.
 
 The five spatial Agent behavior cases under `evals/spatial-creation/` are
 definition-only CI contracts. They deliberately allow different useful tool

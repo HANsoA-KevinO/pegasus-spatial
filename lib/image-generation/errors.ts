@@ -22,8 +22,22 @@ export class ImageGenerationReceiptConflictError extends Error {
 
 export function boundedErrorMessage(error: unknown, maxLength = 2_000): string {
   const raw = error instanceof Error ? error.message : String(error)
-  return raw
+  let sanitized = raw
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
     .replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/gi, 'data:image/[REDACTED]')
-    .slice(0, maxLength)
+    .replace(
+      /\b(api[_-]?key|authorization|access[_-]?token|token|secret)(\s*["']?\s*[:=]\s*["']?)([^"'\s,;}\]]+)/gi,
+      '$1$2[REDACTED]',
+    )
+  for (const configured of [
+    process.env.LLM_API_KEY_TOOLS,
+    process.env.AHOLO_API_KEY,
+    process.env.AHOLO_API_TOKEN,
+    process.env.LUX3D_API_KEY,
+    process.env.LUX3D_API_TOKEN,
+  ]) {
+    const secret = configured?.trim()
+    if (secret && secret.length >= 4) sanitized = sanitized.split(secret).join('[REDACTED]')
+  }
+  return sanitized.slice(0, maxLength)
 }

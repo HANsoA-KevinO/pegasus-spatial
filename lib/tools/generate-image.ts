@@ -48,9 +48,11 @@ export interface GenerateImageToolRuntime {
   signal?: AbortSignal
   /** Dependency injection for adapter and crash-window tests. */
   dependencies?: GenerateImageDependencies
+  /** Trusted Operator seam; product calls default to `allow-submit`. */
+  submissionPolicy?: 'allow-submit' | 'prepare-only' | 'forbid-submit'
 }
 
-function defaultDependencies(): GenerateImageDependencies {
+export function createDefaultGenerateImageDependencies(): GenerateImageDependencies {
   return {
     provider: createDefaultImageGenerationProvider(),
     receipts: mongoImageGenerationReceiptStore,
@@ -167,7 +169,7 @@ function receiptInputHash(
       })
 }
 
-function imageJobId(receipt: Pick<ImageGenerationReceipt, 'projectId' | 'runId' | 'toolUseId'>): string {
+export function imageGenerationJobId(receipt: Pick<ImageGenerationReceipt, 'projectId' | 'runId' | 'toolUseId'>): string {
   return `spimg_${stableHash({
     projectId: receipt.projectId,
     runId: receipt.runId,
@@ -201,7 +203,7 @@ function imageEnvelope(
 ): string {
   return JSON.stringify({
     schema_version: 1,
-    job_id: imageJobId(receipt),
+    job_id: imageGenerationJobId(receipt),
     ...(receipt.asset?.assetId ? { artifact_id: receipt.asset.assetId } : {}),
     kind: 'image',
     status,
@@ -229,6 +231,22 @@ function imageEnvelope(
         : {}
     ),
   })
+}
+
+function preparedImageResult(receipt: ImageGenerationReceipt, message: string): ToolResult {
+  return {
+    content: JSON.stringify({
+      schema_version: 1,
+      job_id: imageGenerationJobId(receipt),
+      kind: 'image',
+      status: 'prepared',
+      provider: receipt.provider,
+      message,
+      created_at: receipt.createdAt.toISOString(),
+      updated_at: receipt.updatedAt.toISOString(),
+      elapsed_ms: Math.max(0, receipt.updatedAt.getTime() - receipt.createdAt.getTime()),
+    }),
+  }
 }
 
 function invalid(content: string): ToolResult {
@@ -336,11 +354,15 @@ function statusResult(receipt: ImageGenerationReceipt): ToolResult | null {
   const published = receiptToolResult(receipt)
   if (published) return published
   if (receipt.status === 'failed') {
-    const message = `图片生成未完成（${receipt.errorCode || 'failed'}）：${receipt.errorMessage || '供应商返回失败。'}`
+    const detail = boundedErrorMessage(receipt.errorMessage || '供应商返回失败。')
+    const message = `图片生成未完成（${receipt.errorCode || 'failed'}）：${detail}`
     return { content: imageEnvelope(receipt, 'failed', message), is_error: true }
   }
   if (receipt.status === 'unknown') {
-    const message = `图片生成结果状态未知（${receipt.errorCode || 'unknown'}）：${receipt.errorMessage || '供应商可能已接受请求，系统不会自动重复付费提交。'}`
+    const detail = boundedErrorMessage(
+      receipt.errorMessage || '供应商可能已接受请求，系统不会自动重复付费提交。',
+    )
+    const message = `图片生成结果状态未知（${receipt.errorCode || 'unknown'}）：${detail}`
     return { content: imageEnvelope(receipt, 'unknown', message), is_error: true }
   }
   return null
@@ -373,12 +395,12 @@ async function registerImageArtifact(
   const artifact = receipt.asset
   await dependencies.registerPublishedArtifact({
     artifactId: artifact.assetId,
-    jobId: imageJobId(receipt),
+    jobId: imageGenerationJobId(receipt),
     projectId: receipt.projectId,
     userId: receipt.userId,
     provider: receipt.provider,
     publicationToken: `spimgpub_${stableHash({
-      jobId: imageJobId(receipt),
+      jobId: imageGenerationJobId(receipt),
       assetId: artifact.assetId,
     }).slice(0, 32)}`,
     providerAssetKey: artifact.assetId,
@@ -535,7 +557,8 @@ export async function executeGenerateImage(
 
   const parsed = parseInput(rawInput, workspace)
   if (isToolResult(parsed)) return parsed
-  const dependencies = runtime.dependencies ?? defaultDependencies()
+  const dependencies = runtime.dependencies ?? createDefaultGenerateImageDependencies()
+  const submissionPolicy = runtime.submissionPolicy ?? 'allow-submit'
   const context = runtime.executionContext
   const projectId = context.workspaceId || context.conversationId
   const key: ImageGenerationReceiptKey = {
@@ -544,7 +567,7 @@ export async function executeGenerateImage(
     toolUseId: runtime.invocation.toolUseId,
   }
   const currentCommandHash = commandHash(parsed)
-  const paidSlotHolderKey = imageJobId(key)
+  const paidSlotHolderKey = imageGenerationJobId(key)
   let paidSlot: SpatialPaidSlotClaim | undefined
   let submissionClaimed = false
   let providerSnapshot: ImageGenerationProviderSnapshot | undefined
@@ -579,6 +602,18 @@ export async function executeGenerateImage(
         context.conversationId,
       )
       if (recovered) return recovered
+      if (existing.status === 'prepared' && submissionPolicy !== 'allow-submit') {
+        return preparedImageResult(
+          existing,
+          submissionPolicy === 'prepare-only'
+            ? 'Operator smoke receipt 已准备；未调用图片供应商。'
+            : '该 receipt 仍为 prepared；当前操作禁止进入供应商提交。',
+        )
+      }
+    }
+
+    if (!existing && submissionPolicy === 'forbid-submit') {
+      return invalid('当前操作禁止创建并提交新的 GenerateImage receipt。')
     }
 
     if (runtime.signal?.aborted) return invalid('图片生成已在提交供应商前取消。')
@@ -696,6 +731,17 @@ export async function executeGenerateImage(
     if (paidSlot && dependencies.paidSlots) {
       paidSlot = await dependencies.paidSlots.bind(paidSlot)
       await dependencies.hooks?.afterPaidSlotBound?.()
+    }
+
+    if (submissionPolicy !== 'allow-submit') {
+      await releasePaidSlot(created.receipt, dependencies, paidSlot)
+      paidSlot = undefined
+      return preparedImageResult(
+        created.receipt,
+        submissionPolicy === 'prepare-only'
+          ? 'Operator smoke receipt 已准备；未调用图片供应商。'
+          : '该 receipt 仍为 prepared；当前操作禁止进入供应商提交。',
+      )
     }
 
     if (runtime.signal?.aborted) {

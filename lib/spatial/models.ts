@@ -4,9 +4,13 @@ import {
   SPATIAL_ARTIFACT_RELATIONS,
   SPATIAL_BUILD_KINDS,
   SPATIAL_BUILD_STATUSES,
+  SPATIAL_EXECUTION_GATES,
+  SPATIAL_OPERATOR_SMOKE_PROVIDERS,
+  SPATIAL_OPERATOR_SMOKE_STATES,
   type SpatialArtifactNodeRecord,
   type SpatialBuildJobRecord,
   type SpatialPaidSlotRecord,
+  type SpatialOperatorSmokeIntentRecord,
   type SpatialStagedBatchRecord,
 } from './types'
 
@@ -25,6 +29,7 @@ const SpatialBuildJobSchema = new Schema<SpatialBuildJobRecord>({
   request_snapshot: { type: Schema.Types.Mixed, required: true },
   output_path_prefix: { type: String, required: true },
   status: { type: String, enum: SPATIAL_BUILD_STATUSES, required: true, index: true },
+  execution_gate: { type: String, enum: SPATIAL_EXECUTION_GATES, default: 'worker', index: true },
   active_slot: { type: Number, enum: [0, 1], default: undefined },
   status_revision: { type: Number, default: 0 },
   execution_attempts: { type: Number, default: 0 },
@@ -40,6 +45,7 @@ const SpatialBuildJobSchema = new Schema<SpatialBuildJobRecord>({
   available_at: { type: Date, default: null, index: true },
   last_error: { type: String, default: null },
   unknown_reason: { type: String, default: null },
+  configuration_blocked_hosts: { type: [String], default: [] },
   finished_at: { type: Date, default: null },
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
@@ -135,6 +141,80 @@ const SpatialStagedBatchSchema = new Schema<SpatialStagedBatchRecord>({
 
 SpatialStagedBatchSchema.index({ job_id: 1, publication_token: 1 }, { unique: true })
 
+const SpatialOperatorSmokeIntentSchema = new Schema<SpatialOperatorSmokeIntentRecord>({
+  smoke_id: { type: String, required: true, unique: true, index: true },
+  project_id: { type: String, required: true, index: true },
+  user_id: { type: String, required: true, index: true },
+  conversation_id: { type: String, required: true },
+  provider: { type: String, enum: SPATIAL_OPERATOR_SMOKE_PROVIDERS, required: true, index: true },
+  image_mode: { type: String, enum: ['text', 'edit', null], default: null },
+  phase: { type: String, required: true },
+  purpose: { type: String, required: true },
+  budget_key: { type: String, required: true },
+  provider_fence_key: { type: String, default: undefined, index: true },
+  request_hash: { type: String, required: true },
+  request_snapshot: { type: Schema.Types.Mixed, required: true },
+  run_id: { type: String, required: true },
+  tool_use_id: { type: String, required: true },
+  target_id: { type: String, default: null },
+  state: { type: String, enum: SPATIAL_OPERATOR_SMOKE_STATES, required: true, index: true },
+  authorized_at: { type: Date, default: null },
+  submission_count: { type: Number, default: 0 },
+  artifact_hostnames: { type: [String], default: [] },
+  last_error: { type: String, default: null },
+  unknown_reconciled_at: { type: Date, default: null, index: true },
+  unknown_reconciled_by: { type: String, default: null },
+  unknown_reconciliation_reason: { type: String, default: null },
+  finished_at: { type: Date, default: null },
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+  collection: 'spatial_operator_smoke_intents',
+})
+
+SpatialOperatorSmokeIntentSchema.index(
+  { project_id: 1, phase: 1, purpose: 1 },
+  { unique: true, name: 'operator_smoke_purpose_budget' },
+)
+SpatialOperatorSmokeIntentSchema.index(
+  { project_id: 1, phase: 1, budget_key: 1 },
+  { unique: true, name: 'operator_smoke_provider_budget' },
+)
+SpatialOperatorSmokeIntentSchema.index({
+  project_id: 1,
+  provider_fence_key: 1,
+  state: 1,
+  unknown_reconciled_at: 1,
+})
+
+interface SpatialOperatorProviderSubmissionGuardRecord {
+  project_id: string
+  provider_fence_key: string
+  smoke_id: string
+  created_at: Date
+  updated_at: Date
+}
+
+/**
+ * A single durable owner for the paid provider boundary within one project.
+ * The unique compound index is the concurrency primitive: two phases or image
+ * modes cannot both become authorized for the same provider, even when their
+ * preflight reads race.
+ */
+const SpatialOperatorProviderSubmissionGuardSchema =
+  new Schema<SpatialOperatorProviderSubmissionGuardRecord>({
+    project_id: { type: String, required: true, index: true },
+    provider_fence_key: { type: String, required: true },
+    smoke_id: { type: String, required: true, index: true },
+  }, {
+    timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+    collection: 'spatial_operator_provider_submission_guards',
+  })
+
+SpatialOperatorProviderSubmissionGuardSchema.index(
+  { project_id: 1, provider_fence_key: 1 },
+  { unique: true, name: 'operator_provider_submission_guard' },
+)
+
 export const SpatialBuildJobModel =
   (mongoose.models.SpatialBuildJob as Model<SpatialBuildJobRecord> | undefined)
   ?? mongoose.model<SpatialBuildJobRecord>('SpatialBuildJob', SpatialBuildJobSchema)
@@ -151,9 +231,26 @@ export const SpatialStagedBatchModel =
   (mongoose.models.SpatialStagedBatch as Model<SpatialStagedBatchRecord> | undefined)
   ?? mongoose.model<SpatialStagedBatchRecord>('SpatialStagedBatch', SpatialStagedBatchSchema)
 
+export const SpatialOperatorSmokeIntentModel =
+  (mongoose.models.SpatialOperatorSmokeIntent as Model<SpatialOperatorSmokeIntentRecord> | undefined)
+  ?? mongoose.model<SpatialOperatorSmokeIntentRecord>(
+    'SpatialOperatorSmokeIntent',
+    SpatialOperatorSmokeIntentSchema,
+  )
+
+export const SpatialOperatorProviderSubmissionGuardModel =
+  (mongoose.models.SpatialOperatorProviderSubmissionGuard as
+    Model<SpatialOperatorProviderSubmissionGuardRecord> | undefined)
+  ?? mongoose.model<SpatialOperatorProviderSubmissionGuardRecord>(
+    'SpatialOperatorProviderSubmissionGuard',
+    SpatialOperatorProviderSubmissionGuardSchema,
+  )
+
 export const SPATIAL_MODELS = [
   SpatialBuildJobModel,
   SpatialArtifactNodeModel,
   SpatialPaidSlotModel,
   SpatialStagedBatchModel,
+  SpatialOperatorSmokeIntentModel,
+  SpatialOperatorProviderSubmissionGuardModel,
 ] as const

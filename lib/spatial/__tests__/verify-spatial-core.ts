@@ -8,6 +8,9 @@ import {
   ProviderDefinitelyNotAcceptedError,
   ProviderConfigurationBlockedError,
   SPATIAL_TOOL_RESULT_SCHEMA_VERSION,
+  SpatialArtifactDownloadTransientError,
+  SpatialArtifactDnsResolutionError,
+  SpatialAssetValidationError,
   canTransitionSpatialStatus,
   canonicalSpatialJson,
   createAholoOfficialWireContract,
@@ -22,6 +25,8 @@ import {
 } from '..'
 import { assertSpatialStatusTransition } from '../state-machine'
 import { createLux3DOfficialG1WireContract } from '../adapters/official-contracts'
+
+const resolvePublicFixtureHostname = async (): Promise<readonly string[]> => ['93.184.216.34']
 
 function job(overrides: Partial<SpatialBuildJobRecord> = {}): SpatialBuildJobRecord {
   const now = new Date('2026-08-25T00:00:00.000Z')
@@ -109,6 +114,7 @@ async function verifyByteInspectionAndMirroring(): Promise<void> {
     }],
     publisher,
     allowedHosts: ['assets.example.test'],
+    resolveHostname: resolvePublicFixtureHostname,
     fetchImpl: async () => new Response(new Uint8Array(bytes), {
       status: 200,
       headers: {
@@ -153,6 +159,7 @@ async function verifyByteInspectionAndMirroring(): Promise<void> {
       allowedHosts: ['assets.example.test'],
       maxAssetBytes: 1_024,
       maxBatchBytes: 1_100,
+      resolveHostname: resolvePublicFixtureHostname,
       fetchImpl: async () => new Response(new Uint8Array(largeGlb)),
     }),
     /exceeds 1100 bytes/,
@@ -191,6 +198,8 @@ async function verifyByteInspectionAndMirroring(): Promise<void> {
           remoteUrl: blockedUrl,
         }],
         publisher,
+        // An operator mistake must not turn the allowlist into an SSRF bypass.
+        allowedHosts: [new URL(blockedUrl).hostname.replace(/^\[|\]$/g, '')],
         fetchImpl: async () => {
           fetchCalls += 1
           return new Response(new Uint8Array(bytes))
@@ -200,6 +209,153 @@ async function verifyByteInspectionAndMirroring(): Promise<void> {
     )
     assert.equal(fetchCalls, 0, 'SSRF targets must be rejected before fetch')
   }
+
+  for (const blockedUrl of [
+    'https://user:password@assets.example.test/object.glb',
+    'https://assets.example.test:8443/object.glb',
+  ]) {
+    let fetchCalls = 0
+    await assert.rejects(
+      mirrorRemoteSpatialArtifacts({
+        job: job(),
+        publicationToken: `blocked-url-${fetchCalls}`,
+        artifacts: [{
+          assetKey: `blocked-url-${blockedUrl}`,
+          kind: 'model',
+          fileName: 'blocked-url.glb',
+          remoteUrl: blockedUrl,
+        }],
+        publisher,
+        allowedHosts: ['assets.example.test'],
+        resolveHostname: resolvePublicFixtureHostname,
+        fetchImpl: async () => {
+          fetchCalls += 1
+          return new Response(new Uint8Array(bytes))
+        },
+      }),
+      /userinfo|default HTTPS port/,
+    )
+    assert.equal(fetchCalls, 0, 'userinfo and non-default ports must be rejected before fetch')
+  }
+
+  for (const addresses of [
+    ['127.0.0.1'],
+    ['93.184.216.34', '10.0.0.8'],
+    ['::ffff:7f00:1'],
+  ]) {
+    let fetchCalls = 0
+    await assert.rejects(
+      mirrorRemoteSpatialArtifacts({
+        job: job(),
+        publicationToken: `blocked-dns-${addresses.join('-')}`,
+        artifacts: [{
+          assetKey: `blocked-dns-${addresses.join('-')}`,
+          kind: 'model',
+          fileName: 'blocked-dns.glb',
+          remoteUrl: 'https://assets.example.test/object.glb',
+        }],
+        publisher,
+        allowedHosts: ['assets.example.test'],
+        resolveHostname: async () => addresses,
+        fetchImpl: async () => {
+          fetchCalls += 1
+          return new Response(new Uint8Array(bytes))
+        },
+      }),
+      /private or reserved address/,
+    )
+    assert.equal(fetchCalls, 0, 'private DNS answers must be rejected before fetch')
+  }
+
+  for (const resolveHostname of [
+    async (): Promise<readonly string[]> => { throw new Error('temporary resolver outage') },
+    async (): Promise<readonly string[]> => [],
+  ]) {
+    let fetchCalls = 0
+    await assert.rejects(
+      mirrorRemoteSpatialArtifacts({
+        job: job(),
+        publicationToken: 'transient-dns',
+        artifacts: [{
+          assetKey: 'transient-dns',
+          kind: 'model',
+          fileName: 'transient-dns.glb',
+          remoteUrl: 'https://assets.example.test/object.glb',
+        }],
+        publisher,
+        allowedHosts: ['assets.example.test'],
+        resolveHostname,
+        fetchImpl: async () => {
+          fetchCalls += 1
+          return new Response(new Uint8Array(bytes))
+        },
+      }),
+      SpatialArtifactDnsResolutionError,
+    )
+    assert.equal(fetchCalls, 0, 'DNS lookup failures must remain retryable without fetching')
+  }
+
+  for (const status of [408, 425, 429, 500, 503]) {
+    await assert.rejects(
+      mirrorRemoteSpatialArtifacts({
+        job: job(),
+        publicationToken: `transient-http-${status}`,
+        artifacts: [{
+          assetKey: `transient-http-${status}`,
+          kind: 'model',
+          fileName: 'transient-http.glb',
+          remoteUrl: 'https://assets.example.test/object.glb',
+        }],
+        publisher,
+        allowedHosts: ['assets.example.test'],
+        resolveHostname: resolvePublicFixtureHostname,
+        fetchImpl: async () => new Response(null, { status }),
+      }),
+      SpatialArtifactDownloadTransientError,
+    )
+  }
+  await assert.rejects(
+    mirrorRemoteSpatialArtifacts({
+      job: job(),
+      publicationToken: 'permanent-http-404',
+      artifacts: [{
+        assetKey: 'permanent-http-404',
+        kind: 'model',
+        fileName: 'permanent-http.glb',
+        remoteUrl: 'https://assets.example.test/object.glb',
+      }],
+      publisher,
+      allowedHosts: ['assets.example.test'],
+      resolveHostname: resolvePublicFixtureHostname,
+      fetchImpl: async () => new Response(null, { status: 404 }),
+    }),
+    SpatialAssetValidationError,
+  )
+
+  let redirectMode: RequestRedirect | undefined
+  await assert.rejects(
+    mirrorRemoteSpatialArtifacts({
+      job: job(),
+      publicationToken: 'blocked-redirect',
+      artifacts: [{
+        assetKey: 'blocked-redirect',
+        kind: 'model',
+        fileName: 'blocked-redirect.glb',
+        remoteUrl: 'https://assets.example.test/object.glb',
+      }],
+      publisher,
+      allowedHosts: ['assets.example.test'],
+      resolveHostname: resolvePublicFixtureHostname,
+      fetchImpl: async (_input, init) => {
+        redirectMode = init?.redirect
+        const response = new Response(new Uint8Array(bytes))
+        Object.defineProperty(response, 'url', { value: 'https://redirected.example.test/object.glb' })
+        return response
+      },
+    }),
+    /not allowed/,
+  )
+  assert.equal(redirectMode, 'error')
 }
 
 async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {

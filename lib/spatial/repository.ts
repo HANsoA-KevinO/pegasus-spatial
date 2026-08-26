@@ -112,12 +112,14 @@ function assertSameFrozenRequest(
   requestHash: string,
 ): void {
   const modelSnapshot = input.modelSnapshot?.trim() || null
+  const executionGate = input.executionGate ?? 'worker'
   if (
     existing.user_id !== input.userId.trim()
     || existing.conversation_id !== input.conversationId.trim()
     || existing.kind !== input.kind
     || existing.provider !== input.provider.trim()
     || existing.model_snapshot !== modelSnapshot
+    || (existing.execution_gate ?? 'worker') !== executionGate
     || existing.request_hash !== requestHash
   ) {
     throw new SpatialIdempotencyConflictError(existing.job_id)
@@ -193,7 +195,10 @@ export async function prepareSpatialBuild(
   }).lean<SpatialBuildJobRecord>()
   if (existing) {
     assertSameFrozenRequest(existing, { ...input, projectId, runId, toolUseId }, requestHash)
-    if (!isSpatialTerminalStatus(existing.status)) {
+    const quarantinedOperatorPreparation = existing.status === 'prepared'
+      && existing.execution_gate === 'operator'
+      && existing.active_slot === undefined
+    if (!isSpatialTerminalStatus(existing.status) && !quarantinedOperatorPreparation) {
       let paid
       try {
         paid = await acquireSpatialPaidSlot({
@@ -211,17 +216,19 @@ export async function prepareSpatialBuild(
     return existing
   }
 
-  let paidSlot
-  try {
-    paidSlot = await acquireSpatialPaidSlot({
-      projectId,
-      userId,
-      holderType: 'spatial_build',
-      holderKey: jobId,
-    })
-  } catch (error) {
-    if (error instanceof SpatialPaidCapacityError) throw new SpatialProjectCapacityError(projectId)
-    throw error
+  let paidSlot: Awaited<ReturnType<typeof acquireSpatialPaidSlot>> | undefined
+  if ((input.executionGate ?? 'worker') === 'worker') {
+    try {
+      paidSlot = await acquireSpatialPaidSlot({
+        projectId,
+        userId,
+        holderType: 'spatial_build',
+        holderKey: jobId,
+      })
+    } catch (error) {
+      if (error instanceof SpatialPaidCapacityError) throw new SpatialProjectCapacityError(projectId)
+      throw error
+    }
   }
   const createInSlot = async () => SpatialBuildJobModel.create({
       job_id: jobId,
@@ -238,7 +245,8 @@ export async function prepareSpatialBuild(
       request_snapshot: request,
       output_path_prefix: request.output_path_prefix,
       status: 'prepared',
-      active_slot: paidSlot.slot,
+      execution_gate: input.executionGate ?? 'worker',
+      ...(paidSlot ? { active_slot: paidSlot.slot } : {}),
       status_revision: 0,
       execution_attempts: 0,
       consecutive_failures: 0,
@@ -253,6 +261,7 @@ export async function prepareSpatialBuild(
       available_at: new Date(),
       last_error: null,
       unknown_reason: null,
+      configuration_blocked_hosts: [],
       finished_at: null,
     })
   let created
@@ -271,14 +280,14 @@ export async function prepareSpatialBuild(
           // The durable Job now owns the reservation. A bind fault must fail
           // closed and leave it for startup reconciliation, never free capacity
           // while an active paid Job exists.
-          await bindSpatialPaidSlot(paidSlot)
-        } else await releaseSpatialPaidSlot({
-          projectId,
-          userId,
-          holderType: 'spatial_build',
-          holderKey: jobId,
-          reservationToken: paidSlot.reservationToken,
-        })
+          if (paidSlot) await bindSpatialPaidSlot(paidSlot)
+        } else if (paidSlot) await releaseSpatialPaidSlot({
+            projectId,
+            userId,
+            holderType: 'spatial_build',
+            holderKey: jobId,
+            reservationToken: paidSlot.reservationToken,
+          })
         return winner
       }
       const prefixOwner = await SpatialBuildJobModel.findOne({
@@ -286,30 +295,88 @@ export async function prepareSpatialBuild(
         output_path_prefix: request.output_path_prefix,
       }).select('job_id').lean<{ job_id: string }>()
       if (prefixOwner) {
-        await releaseSpatialPaidSlot({
-          projectId,
-          userId,
-          holderType: 'spatial_build',
-          holderKey: jobId,
-          reservationToken: paidSlot.reservationToken,
-        }).catch(() => false)
+        if (paidSlot) {
+          await releaseSpatialPaidSlot({
+            projectId,
+            userId,
+            holderType: 'spatial_build',
+            holderKey: jobId,
+            reservationToken: paidSlot.reservationToken,
+          }).catch(() => false)
+        }
         throw new SpatialOutputPathConflictError(projectId, request.output_path_prefix)
       }
     }
-    await releaseSpatialPaidSlot({
-      projectId,
-      userId,
-      holderType: 'spatial_build',
-      holderKey: jobId,
-      reservationToken: paidSlot.reservationToken,
-    }).catch(() => false)
+    if (paidSlot) {
+      await releaseSpatialPaidSlot({
+        projectId,
+        userId,
+        holderType: 'spatial_build',
+        holderKey: jobId,
+        reservationToken: paidSlot.reservationToken,
+      }).catch(() => false)
+    }
     throw error
   }
   // Keep this outside the create catch. If Mongo accepted the Job but this
   // bind fails, the reservation deliberately remains fail-closed until
   // reconcileSpatialBuildPaidSlots observes the active Job.
-  await bindSpatialPaidSlot(paidSlot)
+  if (paidSlot) await bindSpatialPaidSlot(paidSlot)
   return created.toObject() as SpatialBuildJobRecord
+}
+
+/** Reserve shared paid capacity only when a quarantined Operator intent is authorized. */
+export async function activateOperatorSpatialBuildPaidSlot(
+  jobIdValue: string,
+): Promise<SpatialBuildJobRecord> {
+  await connectDB()
+  const jobId = requireText('jobId', jobIdValue)
+  const current = await SpatialBuildJobModel.findOne({ job_id: jobId }).lean<SpatialBuildJobRecord>()
+  if (!current) throw new SpatialJobCommandRejectedError()
+  if (current.status !== 'prepared' || current.execution_gate !== 'operator') return current
+  if (current.active_slot !== undefined) return current
+  let paidSlot
+  try {
+    paidSlot = await acquireSpatialPaidSlot({
+      projectId: current.project_id,
+      userId: current.user_id,
+      holderType: 'spatial_build',
+      holderKey: current.job_id,
+    })
+  } catch (error) {
+    if (error instanceof SpatialPaidCapacityError) {
+      throw new SpatialProjectCapacityError(current.project_id)
+    }
+    throw error
+  }
+  const activated = await SpatialBuildJobModel.findOneAndUpdate(
+    {
+      job_id: current.job_id,
+      status: 'prepared',
+      execution_gate: 'operator',
+      active_slot: { $exists: false },
+    },
+    { $set: { active_slot: paidSlot.slot } },
+    { returnDocument: 'after' },
+  ).lean<SpatialBuildJobRecord>()
+  if (!activated) {
+    const winner = await SpatialBuildJobModel.findOne({ job_id: current.job_id }).lean<SpatialBuildJobRecord>()
+    if (winner?.active_slot === paidSlot.slot) {
+      await bindSpatialPaidSlot(paidSlot)
+      return winner
+    }
+    await releaseSpatialPaidSlot({
+      projectId: current.project_id,
+      userId: current.user_id,
+      holderType: 'spatial_build',
+      holderKey: current.job_id,
+      reservationToken: paidSlot.reservationToken,
+    }).catch(() => false)
+    if (!winner) throw new SpatialJobCommandRejectedError()
+    return winner
+  }
+  await bindSpatialPaidSlot(paidSlot)
+  return activated
 }
 
 export async function getSpatialBuildJob(
@@ -329,7 +396,10 @@ export async function countActiveSpatialJobs(scope: SpatialCommandScope): Promis
   return SpatialBuildJobModel.countDocuments({
     project_id: scope.projectId.trim(),
     user_id: scope.userId.trim(),
-    status: { $in: ['prepared', 'submitting', 'submitted', 'running', 'materializing'] },
+    $or: [
+      { status: { $in: ['submitting', 'submitted', 'running', 'materializing'] } },
+      { status: 'prepared', active_slot: { $in: [0, 1] } },
+    ],
   })
 }
 
@@ -345,6 +415,10 @@ export async function claimNextSpatialBuildJob(
   const job = await SpatialBuildJobModel.findOneAndUpdate(
     {
       status: { $in: ['prepared', 'submitted', 'running', 'materializing'] },
+      $or: [
+        { execution_gate: 'worker' },
+        { execution_gate: { $exists: false } },
+      ],
       $and: [unleasedOrExpired(now), availableNow(now)],
     },
     {
@@ -394,6 +468,68 @@ export async function releaseUnstartedSpatialClaim(
     { $set: { lease: null, available_at: new Date() } },
   )
   return result.matchedCount === 1
+}
+
+/**
+ * Claim a quarantined Operator build without exposing all operator-prepared
+ * jobs to the normal worker. `allowKnownExternalJob` is used by --resume and
+ * can only claim states that already have a durable external id; it can never
+ * cross the provider submit boundary.
+ */
+export async function claimSpatialBuildJobForOperator(input: {
+  jobId: string
+  ownerId: string
+  leaseMs?: number
+  allowKnownExternalJob?: boolean
+}): Promise<ClaimedSpatialBuildJob | null> {
+  await connectDB()
+  const ownerId = requireText('ownerId', input.ownerId)
+  const jobId = requireText('jobId', input.jobId)
+  const leaseMs = Math.max(5_000, Number.isFinite(input.leaseMs)
+    ? Number(input.leaseMs)
+    : DEFAULT_LEASE_MS)
+  const now = new Date()
+  const leaseToken = `splease_${randomUUID()}`
+  const stateFilter = input.allowKnownExternalJob
+    ? {
+        status: { $in: ['submitted', 'running', 'materializing'] },
+        external_job_id: { $type: 'string' },
+      }
+    : {
+        status: 'prepared',
+        execution_gate: 'operator',
+        active_slot: { $type: 'number' },
+        $or: [
+          { external_job_id: null },
+          { external_job_id: { $exists: false } },
+        ],
+      }
+  const filter: Record<string, unknown> = {
+      job_id: jobId,
+      ...stateFilter,
+      $and: [
+        unleasedOrExpired(now),
+        ...(input.allowKnownExternalJob ? [] : [availableNow(now)]),
+      ],
+    }
+  const job = await SpatialBuildJobModel.findOneAndUpdate(
+    filter,
+    {
+      $set: {
+        lease: {
+          owner_id: ownerId,
+          token: leaseToken,
+          acquired_at: now,
+          heartbeat_at: now,
+          expires_at: new Date(now.getTime() + leaseMs),
+        },
+        available_at: null,
+      },
+      $inc: { execution_attempts: 1 },
+    },
+    { returnDocument: 'after' },
+  ).lean<SpatialBuildJobRecord>()
+  return job ? { job, ownerId, leaseToken } : null
 }
 
 async function transitionClaimedJob(input: {
@@ -478,6 +614,7 @@ export async function recordSpatialJobSubmitted(
     set: {
       external_job_id: externalJobId,
       provider_status: submission.providerStatus?.trim() || 'submitted',
+      execution_gate: 'worker',
       last_error: null,
     },
   })
@@ -538,6 +675,31 @@ export async function releaseSpatialJobForRetry(
         ...(!countFailure ? { provider_status: 'configuration_blocked' } : {}),
       },
       ...(countFailure ? { $inc: { consecutive_failures: 1 } } : {}),
+    },
+  )
+  return result.matchedCount === 1
+}
+
+export async function recordSpatialConfigurationBlocked(
+  claim: ClaimedSpatialBuildJob,
+  error: string,
+  hostnames: readonly string[],
+  delayMs = 5 * 60_000,
+): Promise<boolean> {
+  await connectDB()
+  const normalizedHosts = [...new Set(hostnames.map(host => host.trim().toLowerCase()).filter(Boolean))]
+    .filter(host => /^[a-z0-9.-]+$/.test(host))
+    .sort()
+  const result = await SpatialBuildJobModel.updateOne(
+    claimFilter(claim, ['submitted', 'running', 'materializing']),
+    {
+      $set: {
+        lease: null,
+        available_at: new Date(Date.now() + Math.max(250, delayMs)),
+        last_error: safeError(error),
+        provider_status: 'configuration_blocked',
+        configuration_blocked_hosts: normalizedHosts,
+      },
     },
   )
   return result.matchedCount === 1

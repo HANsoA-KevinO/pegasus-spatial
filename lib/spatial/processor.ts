@@ -7,10 +7,12 @@ import {
 import {
   mirrorRemoteSpatialArtifacts,
   publishReadySpatialArtifacts,
+  isUnsafeSpatialArtifactHost,
   SpatialAssetValidationError,
   spatialMaxArtifactCountFromEnv,
   spatialMaxAssetBytesFromEnv,
   spatialMaxBatchBytesFromEnv,
+  type SpatialHostnameResolver,
 } from './artifact-mirror'
 import { providerSpatialIdempotencyKey, spatialPublicationToken } from './identity'
 import {
@@ -21,6 +23,7 @@ import {
   markSpatialJobSubmitting,
   markSpatialJobUnknown,
   publishSpatialJob,
+  recordSpatialConfigurationBlocked,
   recordSpatialJobSubmitted,
   recordSpatialSubmissionRetry,
   releaseSpatialJobForRetry,
@@ -37,6 +40,7 @@ export interface ProcessSpatialBuildDependencies {
   adapters: ReadonlyMap<string, SpatialProviderAdapter> | Readonly<Record<string, SpatialProviderAdapter>>
   publisher: SpatialAssetPublisher
   fetchImpl?: typeof fetch
+  resolveArtifactHostname?: SpatialHostnameResolver
   maxAssetBytes?: number
   allowedArtifactHosts?: (provider: string) => readonly string[] | undefined
   artifactMirroringConfigured?: (provider: string) => boolean
@@ -113,6 +117,8 @@ export interface ProcessSpatialBuildOptions {
   signal?: AbortSignal
   providerPollDelayMs?: number
   maxExecutionAttempts?: number
+  /** Product default retains one proven pre-acceptance retry; Operator smoke uses 1. */
+  maxSubmissionAttempts?: number
 }
 
 function adapterFor(
@@ -135,7 +141,8 @@ async function submitSpatialBuild(
   options: ProcessSpatialBuildOptions,
 ): Promise<ClaimedSpatialBuildJob> {
   let claim = await markSpatialJobSubmitting(initial)
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const maxAttempts = Math.max(1, Math.min(2, options.maxSubmissionAttempts ?? 2))
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const submission = await adapter.submit(claim.job, {
         providerIdempotencyKey: providerSpatialIdempotencyKey(claim.job.job_id),
@@ -144,7 +151,7 @@ async function submitSpatialBuild(
       return recordSpatialJobSubmitted(claim, submission)
     } catch (error) {
       if (error instanceof ProviderDefinitelyNotAcceptedError) {
-        if (attempt === 0) {
+        if (attempt + 1 < maxAttempts) {
           claim = await recordSpatialSubmissionRetry(claim, error.message)
           continue
         }
@@ -157,6 +164,30 @@ async function submitSpatialBuild(
     }
   }
   return claim
+}
+
+/** Parse only credential-free hostnames; never persist a signed URL. */
+export function spatialArtifactHostnames(
+  artifacts: readonly ProviderArtifactDescriptor[],
+): string[] {
+  const hosts = new Set<string>()
+  for (const artifact of artifacts) {
+    if (!artifact.remoteUrl) continue
+    try {
+      const parsed = new URL(artifact.remoteUrl)
+      if (
+        parsed.protocol === 'https:'
+        && !parsed.username
+        && !parsed.password
+        && /^[a-z0-9.-]+$/i.test(parsed.hostname)
+        && !isUnsafeSpatialArtifactHost(parsed.hostname)
+      ) hosts.add(parsed.hostname.toLowerCase().replace(/\.$/, ''))
+    } catch {
+      // The normal mirror validation will reject malformed URLs once an
+      // allowlist exists. Discovery itself must remain side-effect free.
+    }
+  }
+  return [...hosts].sort()
 }
 
 /** Process one leased state transition. Long provider work remains external. */
@@ -262,11 +293,15 @@ export async function processClaimedSpatialBuildJob(
   }
 
   if (dependencies.artifactMirroringConfigured?.(claim.job.provider) === false) {
-    await releaseSpatialJobForRetry(
+    const hostnames = spatialArtifactHostnames(polled.artifacts)
+    const observed = hostnames.length > 0
+      ? ` Observed artifact hostnames: ${hostnames.join(', ')}.`
+      : ''
+    await recordSpatialConfigurationBlocked(
       claim,
-      `${claim.job.provider} artifact host allowlist is not configured; paid output remains recoverable.`,
+      `${claim.job.provider} artifact host allowlist is not configured; paid output remains recoverable.${observed}`,
+      hostnames,
       5 * 60_000,
-      false,
     )
     return claim
   }
@@ -277,6 +312,7 @@ export async function processClaimedSpatialBuildJob(
       artifacts: polled.artifacts,
       publisher: dependencies.publisher,
       fetchImpl: dependencies.fetchImpl,
+      resolveHostname: dependencies.resolveArtifactHostname,
       maxAssetBytes: dependencies.maxAssetBytes ?? spatialMaxAssetBytesFromEnv(),
       maxBatchBytes: dependencies.maxBatchBytes?.(claim.job.provider) ?? spatialMaxBatchBytesFromEnv(),
       maxArtifactCount: dependencies.maxArtifactCount?.(claim.job.provider) ?? spatialMaxArtifactCountFromEnv(),

@@ -218,8 +218,8 @@ function providerUrlFromAsset(asset: RasterAssetRef): string {
   } catch {
     throw new Error(`图片资产 ${asset.assetId} 尚未映射到可访问的绝对 URL。`)
   }
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) {
-    throw new Error(`图片资产 ${asset.assetId} 的供应商 URL 不安全。`)
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new Error(`图片资产 ${asset.assetId} 必须映射为无内嵌凭证的公网 HTTPS URL。`)
   }
   return url.toString()
 }

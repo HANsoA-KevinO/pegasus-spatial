@@ -28,23 +28,23 @@ import { isSpatialTool, SpatialJobCard } from './SpatialJobCard'
 // Exported so tests / debug panels can reuse.
 // ============================================================
 export const TOOL_VERB_MAP: Record<string, { pres: string; past: string }> = {
-  Read:           { pres: 'READING',    past: 'READ' },
-  Write:          { pres: 'WRITING',    past: 'WROTE' },
-  Edit:           { pres: 'EDITING',    past: 'EDITED' },
-  WebSearch:      { pres: 'SEARCHING',  past: 'SEARCHED' },
-  Skill:          { pres: 'LOADING',    past: 'LOADED' },
-  Glob:           { pres: 'SEARCHING',  past: 'SEARCHED' },
-  Grep:           { pres: 'SEARCHING',  past: 'SEARCHED' },
-  GenerateImage:  { pres: 'GENERATING', past: 'GENERATED' },
-  CreateObject3D: { pres: 'BUILDING',   past: 'SUBMITTED' },
-  CreateWorld3D:  { pres: 'BUILDING',   past: 'SUBMITTED' },
-  GetSpatialJob:  { pres: 'CHECKING',   past: 'CHECKED' },
-  WaitSpatialJob: { pres: 'WAITING',    past: 'WAITED' },
-  InspectSpatialArtifact: { pres: 'INSPECTING', past: 'INSPECTED' },
+  Read:           { pres: '读取中',     past: '已读取' },
+  Write:          { pres: '写入中',     past: '已写入' },
+  Edit:           { pres: '编辑中',     past: '已编辑' },
+  WebSearch:      { pres: '检索中',     past: '已检索' },
+  Skill:          { pres: '加载中',     past: '已加载' },
+  Glob:           { pres: '查找中',     past: '已查找' },
+  Grep:           { pres: '查找中',     past: '已查找' },
+  GenerateImage:  { pres: '生成中',     past: '已生成' },
+  CreateObject3D: { pres: '创建中',     past: '已发起' },
+  CreateWorld3D:  { pres: '创建中',     past: '已发起' },
+  GetSpatialJob:  { pres: '查询中',     past: '已查询' },
+  WaitSpatialJob: { pres: '等待中',     past: '已等待' },
+  InspectSpatialArtifact: { pres: '检查中', past: '已检查' },
 }
 
 function verbFor(tool: string): { pres: string; past: string } {
-  return TOOL_VERB_MAP[tool] ?? { pres: 'CALLING', past: 'CALLED' }
+  return TOOL_VERB_MAP[tool] ?? { pres: '调用中', past: '已调用' }
 }
 
 // ============================================================

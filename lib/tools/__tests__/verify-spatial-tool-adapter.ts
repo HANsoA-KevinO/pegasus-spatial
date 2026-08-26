@@ -177,6 +177,13 @@ function parsed(content: string): SpatialToolResultEnvelope {
 const workspace = createInMemoryWorkspace()
 await workspace.writeRaster('output/spatial/images/chair.png', raster('asset_chair'))
 await workspace.writeRaster('output/spatial/images/room.png', raster('asset_room'))
+const insecureRaster = raster('asset_insecure_http')
+insecureRaster.urls = {
+  original: 'http://media.example.test/raster-assets/asset_insecure_http/original',
+  model: 'http://media.example.test/raster-assets/asset_insecure_http/model',
+  thumbnail: 'http://media.example.test/raster-assets/asset_insecure_http/thumbnail',
+}
+await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureRaster)
 
 // Workspace paths are resolved to project-owned media locators. The caller
 // cannot inject arbitrary provider URLs into the frozen request.
@@ -209,6 +216,18 @@ await workspace.writeRaster('output/spatial/images/room.png', raster('asset_room
   assert.equal(rejected.is_error, true)
   assert.match(parsed(rejected.content).error ?? '', /Workspace 图片路径|Workspace 中不存在可用图片/)
   assert.equal(state.prepared.length, 1)
+
+  const insecure = await executeCreateObject3D({
+    reference_image_paths: ['output/spatial/images/insecure-http.png'],
+    output_path_prefix: 'output/spatial/objects/insecure-http',
+  }, workspace, {
+    executionContext: { ...rootContext, runId: 'run_insecure_http' },
+    invocation,
+    dependencies: state.dependencies,
+  })
+  assert.equal(insecure.is_error, true)
+  assert.match(parsed(insecure.content).error ?? '', /公网 HTTPS URL/)
+  assert.equal(state.prepared.length, 1, 'HTTP media must fail before a paid Job is prepared')
 }
 
 {

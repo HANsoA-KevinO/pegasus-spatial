@@ -435,7 +435,7 @@ export class AgentTeamService {
             slot: 0,
             display_name: input.rootDisplayName?.trim() || 'Root',
             normalized_name: normalizeAgentName(input.rootDisplayName?.trim() || 'Root'),
-            role: input.rootRole?.trim() || 'Spatial creation coordinator',
+            role: input.rootRole?.trim() || '空间创作协调者',
             instructions: input.rootInstructions?.trim() || null,
             is_root: true,
             created_by_agent_id: null,
@@ -575,7 +575,7 @@ export class AgentTeamService {
       type: 'agent_created',
       actorAgentId: rootAgentId,
       subjectAgentId: rootAgentId,
-      payload: { display_name: input.rootDisplayName?.trim() || 'Root', role: input.rootRole?.trim() || 'Spatial creation coordinator', is_root: true },
+      payload: { display_name: input.rootDisplayName?.trim() || 'Root', role: input.rootRole?.trim() || '空间创作协调者', is_root: true },
       dedupeKey: 'bootstrap:root_agent_created',
     })
   }

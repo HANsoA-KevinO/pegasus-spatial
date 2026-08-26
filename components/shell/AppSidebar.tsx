@@ -171,7 +171,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          {!collapsed && <span className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-faint">Research Navigator</span>}
+          {!collapsed && <span className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-faint">空间创作导航</span>}
           <button
             type="button"
             onClick={handleCreate}

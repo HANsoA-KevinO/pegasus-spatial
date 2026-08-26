@@ -12,6 +12,8 @@ if (!databaseName?.endsWith(TEST_DATABASE_SUFFIX)) {
 process.env.MONGODB_URI = mongoUri
 process.env.MEDIA_PUBLIC_BASE_URL ||= 'https://media.example.test'
 
+const resolvePublicFixtureHostname = async (): Promise<readonly string[]> => ['93.184.216.34']
+
 function glbFixture(): Buffer {
   const buffer = Buffer.alloc(12)
   buffer.write('glTF', 0, 'ascii')
@@ -172,6 +174,7 @@ async function main(): Promise<void> {
       adapters: new Map([['fake', adapter]]),
       publisher,
       allowedArtifactHosts: () => ['assets.example.test'],
+      resolveArtifactHostname: resolvePublicFixtureHostname,
       fetchImpl: async () => new Response(new Uint8Array(bytes), {
         headers: { 'Content-Type': 'model/gltf-binary' },
       }),
@@ -255,6 +258,7 @@ async function main(): Promise<void> {
     const materialized = await processClaimedSpatialBuildJob(materializingTakeover!, {
       adapters: { fake: materializingAdapter },
       publisher,
+      resolveArtifactHostname: resolvePublicFixtureHostname,
       fetchImpl: async () => new Response(new Uint8Array(bytes), {
         headers: { 'Content-Type': 'application/octet-stream' },
       }),
@@ -416,6 +420,7 @@ async function main(): Promise<void> {
     await processClaimedSpatialBuildJob(durableMaterializing, {
       adapters: { fake: shortUrlAdapter },
       publisher: durablePublisher,
+      resolveArtifactHostname: resolvePublicFixtureHostname,
       fetchImpl: async () => {
         durableFetches += 1
         return new Response(new Uint8Array(bytes), {
@@ -507,6 +512,7 @@ async function main(): Promise<void> {
     const restored = await processClaimedSpatialBuildJob(restoredClaim!, {
       adapters: { fake: restoredAdapter },
       publisher,
+      resolveArtifactHostname: resolvePublicFixtureHostname,
       fetchImpl: async () => new Response(new Uint8Array(bytes)),
     })
     assert.equal(restored.job.status, 'published')
@@ -566,6 +572,7 @@ async function main(): Promise<void> {
       adapters: { fake: allowlistAdapter },
       publisher,
       artifactMirroringConfigured: () => allowlistConfigured,
+      resolveArtifactHostname: resolvePublicFixtureHostname,
       fetchImpl: async () => {
         allowlistFetches += 1
         return new Response(new Uint8Array(bytes))
@@ -573,6 +580,157 @@ async function main(): Promise<void> {
     })
     assert.equal(allowlistPublished.job.status, 'published')
     assert.equal(allowlistFetches, 1)
+
+    // A temporary DNS resolver outage must release the known paid task for a
+    // retry. It is not a permanent artifact validation failure and must retain
+    // the external task identity without another submission.
+    const dnsSeed = await prepare('tool_dns_transient')
+    const dnsClaim = await claimNextSpatialBuildJob('worker_dns_transient', 30_000)
+    const dnsSubmitted = await recordSpatialJobSubmitted(
+      await markSpatialJobSubmitting(dnsClaim!),
+      { externalJobId: 'external_dns_transient' },
+    )
+    const dnsAdapter = new FakeSpatialProviderAdapter({
+      pollResults: [1, 2].map(() => ({
+        state: 'succeeded' as const,
+        artifacts: [{
+          assetKey: 'dns-glb',
+          kind: 'model' as const,
+          fileName: 'dns.glb',
+          remoteUrl: 'https://assets.example.test/dns.glb',
+        }],
+      })),
+    })
+    let dnsFetches = 0
+    await processClaimedSpatialBuildJob(dnsSubmitted, {
+      adapters: { fake: dnsAdapter },
+      publisher,
+      allowedArtifactHosts: () => ['assets.example.test'],
+      resolveArtifactHostname: async () => { throw new Error('fixture DNS outage') },
+      fetchImpl: async () => {
+        dnsFetches += 1
+        return new Response(new Uint8Array(bytes))
+      },
+    }, { providerPollDelayMs: 1 })
+    let dnsRecord = await SpatialBuildJobModel.findOne({ job_id: dnsSeed.job_id }).lean()
+    assert.equal(dnsRecord?.status, 'materializing')
+    assert.equal(dnsRecord?.external_job_id, 'external_dns_transient')
+    assert.equal(dnsRecord?.consecutive_failures, 1)
+    assert.equal(dnsFetches, 0)
+    await SpatialBuildJobModel.updateOne(
+      { job_id: dnsSeed.job_id },
+      { $set: { available_at: new Date(0) } },
+    )
+    const dnsRetry = await claimNextSpatialBuildJob('worker_dns_recovered', 30_000)
+    const dnsPublished = await processClaimedSpatialBuildJob(dnsRetry!, {
+      adapters: { fake: dnsAdapter },
+      publisher,
+      allowedArtifactHosts: () => ['assets.example.test'],
+      resolveArtifactHostname: resolvePublicFixtureHostname,
+      fetchImpl: async () => {
+        dnsFetches += 1
+        return new Response(new Uint8Array(bytes))
+      },
+    })
+    assert.equal(dnsPublished.job.status, 'published')
+    assert.equal(dnsAdapter.submissions.length, 0)
+    assert.equal(dnsFetches, 1)
+    dnsRecord = await SpatialBuildJobModel.findOne({ job_id: dnsSeed.job_id }).lean()
+    assert.equal(dnsRecord?.external_job_id, 'external_dns_transient')
+
+    // Retryable artifact HTTP statuses preserve the same paid task, while the
+    // execution-attempt ceiling still guarantees a terminal bound.
+    const httpSeed = await prepare('tool_artifact_http_transient')
+    const httpClaim = await claimNextSpatialBuildJob('worker_artifact_http_transient', 30_000)
+    const httpSubmitted = await recordSpatialJobSubmitted(
+      await markSpatialJobSubmitting(httpClaim!),
+      { externalJobId: 'external_artifact_http_transient' },
+    )
+    const httpAdapter = new FakeSpatialProviderAdapter({
+      pollResults: [1, 2].map(() => ({
+        state: 'succeeded' as const,
+        artifacts: [{
+          assetKey: 'http-glb',
+          kind: 'model' as const,
+          fileName: 'http.glb',
+          remoteUrl: 'https://assets.example.test/http.glb',
+        }],
+      })),
+    })
+    let httpFetchStatus = 503
+    await processClaimedSpatialBuildJob(httpSubmitted, {
+      adapters: { fake: httpAdapter },
+      publisher,
+      allowedArtifactHosts: () => ['assets.example.test'],
+      resolveArtifactHostname: resolvePublicFixtureHostname,
+      fetchImpl: async () => httpFetchStatus === 200
+        ? new Response(new Uint8Array(bytes))
+        : new Response(null, { status: httpFetchStatus }),
+    }, { providerPollDelayMs: 1 })
+    let httpRecord = await SpatialBuildJobModel.findOne({ job_id: httpSeed.job_id }).lean()
+    assert.equal(httpRecord?.status, 'materializing')
+    assert.equal(httpRecord?.external_job_id, 'external_artifact_http_transient')
+    assert.equal(httpRecord?.consecutive_failures, 1)
+    httpFetchStatus = 200
+    await SpatialBuildJobModel.updateOne(
+      { job_id: httpSeed.job_id },
+      { $set: { available_at: new Date(0) } },
+    )
+    const httpRetry = await claimNextSpatialBuildJob('worker_artifact_http_recovered', 30_000)
+    const httpPublished = await processClaimedSpatialBuildJob(httpRetry!, {
+      adapters: { fake: httpAdapter },
+      publisher,
+      allowedArtifactHosts: () => ['assets.example.test'],
+      resolveArtifactHostname: resolvePublicFixtureHostname,
+      fetchImpl: async () => new Response(new Uint8Array(bytes)),
+    })
+    assert.equal(httpPublished.job.status, 'published')
+    assert.equal(httpAdapter.submissions.length, 0)
+    httpRecord = await SpatialBuildJobModel.findOne({ job_id: httpSeed.job_id }).lean()
+    assert.equal(httpRecord?.external_job_id, 'external_artifact_http_transient')
+
+    const exhaustedSeed = await prepare('tool_artifact_http_exhausted')
+    const exhaustedClaim = await claimNextSpatialBuildJob('worker_artifact_http_exhausted_1', 30_000)
+    const exhaustedSubmitted = await recordSpatialJobSubmitted(
+      await markSpatialJobSubmitting(exhaustedClaim!),
+      { externalJobId: 'external_artifact_http_exhausted' },
+    )
+    const exhaustedAdapter = new FakeSpatialProviderAdapter({
+      pollResults: [1, 2].map(() => ({
+        state: 'succeeded' as const,
+        artifacts: [{
+          assetKey: 'exhausted-glb',
+          kind: 'model' as const,
+          fileName: 'exhausted.glb',
+          remoteUrl: 'https://assets.example.test/exhausted.glb',
+        }],
+      })),
+    })
+    const exhaustedDependencies = {
+      adapters: { fake: exhaustedAdapter },
+      publisher,
+      allowedArtifactHosts: () => ['assets.example.test'],
+      resolveArtifactHostname: resolvePublicFixtureHostname,
+      fetchImpl: async () => new Response(null, { status: 503 }),
+    }
+    await processClaimedSpatialBuildJob(
+      exhaustedSubmitted,
+      exhaustedDependencies,
+      { maxExecutionAttempts: 2, providerPollDelayMs: 1 },
+    )
+    await SpatialBuildJobModel.updateOne(
+      { job_id: exhaustedSeed.job_id },
+      { $set: { available_at: new Date(0) } },
+    )
+    const exhaustedRetry = await claimNextSpatialBuildJob('worker_artifact_http_exhausted_2', 30_000)
+    const exhausted = await processClaimedSpatialBuildJob(
+      exhaustedRetry!,
+      exhaustedDependencies,
+      { maxExecutionAttempts: 2, providerPollDelayMs: 1 },
+    )
+    assert.equal(exhausted.job.status, 'failed')
+    assert.equal(exhausted.job.external_job_id, 'external_artifact_http_exhausted')
+    assert.equal(exhaustedAdapter.submissions.length, 0)
 
     // Normal queued/running polls do not consume transient failure budget.
     // After >12 successful progress polls, one transport fault must still retry.
@@ -640,6 +798,7 @@ async function main(): Promise<void> {
     const longPollPublished = await processClaimedSpatialBuildJob(longPollFinish!, {
       adapters: { fake: longPollAdapter },
       publisher,
+      resolveArtifactHostname: resolvePublicFixtureHostname,
       fetchImpl: async () => new Response(new Uint8Array(bytes)),
     })
     assert.equal(longPollPublished.job.status, 'published')
@@ -692,8 +851,8 @@ async function main(): Promise<void> {
     }])
 
     assert.equal(await SpatialBuildJobModel.countDocuments({ status: 'unknown' }), 1)
-    assert.equal(await SpatialBuildJobModel.countDocuments({ status: 'published' }), 6)
-    assert.equal(await SpatialArtifactNodeModel.countDocuments({ state: 'published' }), 13)
+    assert.equal(await SpatialBuildJobModel.countDocuments({ status: 'published' }), 8)
+    assert.equal(await SpatialArtifactNodeModel.countDocuments({ state: 'published' }), 17)
 
     const prefixScope = { projectId: 'project_prefix_race', userId: 'user_prefix_race' }
     const prefixRace = await Promise.allSettled(['left', 'right'].map(toolUseId => prepareSpatialBuild({

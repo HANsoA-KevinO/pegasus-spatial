@@ -246,7 +246,7 @@ export interface AskUserInteraction {
 
 export type DisplayPart =
   | { type: 'text'; text: string }
-  | { type: 'tool_call'; tool: string; file_path?: string; action?: string; is_error?: boolean; pending?: boolean; content?: string; target_path?: string }
+  | { type: 'tool_call'; tool: string; tool_use_id?: string; file_path?: string; action?: string; is_error?: boolean; pending?: boolean; content?: string; target_path?: string }
   | { type: 'thinking'; text: string; pending?: boolean }
   | { type: 'redacted_thinking'; pending?: boolean }
   | {

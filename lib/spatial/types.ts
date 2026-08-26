@@ -14,6 +14,9 @@ export const SPATIAL_BUILD_STATUSES = [
 ] as const
 export type SpatialBuildStatus = typeof SPATIAL_BUILD_STATUSES[number]
 
+export const SPATIAL_EXECUTION_GATES = ['worker', 'operator'] as const
+export type SpatialExecutionGate = typeof SPATIAL_EXECUTION_GATES[number]
+
 export const SPATIAL_TERMINAL_STATUSES = [
   'published',
   'failed',
@@ -62,6 +65,56 @@ export interface SpatialBuildRequestSnapshot {
   [key: string]: unknown
 }
 
+export const SPATIAL_OPERATOR_SMOKE_PROVIDERS = ['aholo', 'lux3d', 'image'] as const
+export type SpatialOperatorSmokeProvider = typeof SPATIAL_OPERATOR_SMOKE_PROVIDERS[number]
+
+export const SPATIAL_OPERATOR_SMOKE_STATES = [
+  'prepared',
+  'authorized',
+  'submitting',
+  'submitted',
+  'running',
+  'materializing',
+  'configuration_blocked',
+  'published',
+  'failed',
+  'unknown',
+] as const
+export type SpatialOperatorSmokeState = typeof SPATIAL_OPERATOR_SMOKE_STATES[number]
+
+export interface SpatialOperatorSmokeIntentRecord {
+  smoke_id: string
+  project_id: string
+  user_id: string
+  conversation_id: string
+  provider: SpatialOperatorSmokeProvider
+  image_mode: 'text' | 'edit' | null
+  phase: string
+  purpose: string
+  budget_key: string
+  /**
+   * Provider-wide ambiguity fence. Older records predate this field, so
+   * readers must fall back to `provider` when it is absent.
+   */
+  provider_fence_key?: string
+  request_hash: string
+  request_snapshot: Record<string, unknown>
+  run_id: string
+  tool_use_id: string
+  target_id: string | null
+  state: SpatialOperatorSmokeState
+  authorized_at: Date | null
+  submission_count: number
+  artifact_hostnames: string[]
+  last_error: string | null
+  unknown_reconciled_at: Date | null
+  unknown_reconciled_by: string | null
+  unknown_reconciliation_reason: string | null
+  created_at: Date
+  updated_at: Date
+  finished_at: Date | null
+}
+
 export interface SpatialBuildJobRecord {
   job_id: string
   idempotency_key: string
@@ -77,6 +130,12 @@ export interface SpatialBuildJobRecord {
   request_snapshot: SpatialBuildRequestSnapshot
   output_path_prefix?: string
   status: SpatialBuildStatus
+  /**
+   * `operator` quarantines a prepared paid smoke build from the ordinary
+   * worker. Once an external job id is durably recorded the gate is switched
+   * back to `worker`, so normal crash recovery can only poll/materialize it.
+   */
+  execution_gate?: SpatialExecutionGate
   active_slot?: 0 | 1
   status_revision: number
   execution_attempts: number
@@ -92,6 +151,8 @@ export interface SpatialBuildJobRecord {
   available_at: Date | null
   last_error: string | null
   unknown_reason: string | null
+  /** Exact, credential-free hostnames observed before the allowlist existed. */
+  configuration_blocked_hosts?: string[]
   created_at: Date
   updated_at: Date
   finished_at: Date | null
@@ -129,6 +190,8 @@ export interface PrepareSpatialBuildInput {
   provider: string
   modelSnapshot?: string | null
   request: SpatialBuildRequestSnapshot
+  /** Trusted operator-only preparation seam; product tools always use worker. */
+  executionGate?: SpatialExecutionGate
 }
 
 export interface ClaimedSpatialBuildJob {

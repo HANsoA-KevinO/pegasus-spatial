@@ -18,7 +18,7 @@ function testEnvironment(overrides: Record<string, string> = {}): NodeJS.Process
     PEGASUS_SPATIAL_IMAGE_MODEL: 'GPT-image-2',
     MEDIA_STORAGE_DRIVER: 'gridfs',
     MEDIA_PUBLIC_BASE_URL: 'https://media.invalid',
-    NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX: 'pegasus-spatial/raster-assets',
+    NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX: 'raster-assets/pegasus-spatial',
     APP_PUBLIC_URL: 'http://localhost:3200',
     AHOLO_API_KEY: 'dummy-aholo-key',
     AHOLO_ASSET_HOST_ALLOWLIST: 'artifacts.aholo.invalid',

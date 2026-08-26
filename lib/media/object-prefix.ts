@@ -3,7 +3,7 @@
 // directly. Keep one NEXT_PUBLIC_* variable instead of a private/public pair
 // that can silently drift apart.
 
-export const DEFAULT_MEDIA_OBJECT_PREFIX = 'pegasus-spatial/raster-assets'
+export const DEFAULT_MEDIA_OBJECT_PREFIX = 'raster-assets/pegasus-spatial'
 export const MEDIA_OBJECT_PREFIX_ENV = 'NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX'
 export const LEGACY_MEDIA_OBJECT_PREFIX_ENV = 'PEGASUS_SPATIAL_MEDIA_PREFIX'
 
