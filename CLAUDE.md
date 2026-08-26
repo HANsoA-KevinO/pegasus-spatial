@@ -17,7 +17,7 @@ Pegasus Spatial（飞马空间 Agent）是自然语言驱动的空间与 3D 资�
 - package / Compose / image：`pegasus-spatial`
 - Web：`3200`
 - Mongo host / database：`27019` / `pegasus_spatial`
-- GridFS / OSS：`pegasus_spatial_media` / `pegasus-spatial/raster-assets/`
+- GridFS / OSS：`pegasus_spatial_media` / `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=pegasus-spatial/raster-assets`
 - Cookie / Docker resources：`pegasus-spatial-*`
 
 不复用 Sci-Pegasus 的 Mongo URI、Cookie、密钥、对象存储前缀、Docker volume 或网络。内部虚拟 Workspace 路径 `.sci-pegasus/` 暂保留，不将其与外部存储隔离混为一谈。

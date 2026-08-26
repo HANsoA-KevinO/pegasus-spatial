@@ -5,7 +5,7 @@ import {
   ImageGenerationProviderError,
   ImageGenerationReceiptConflictError,
 } from '../image-generation/errors'
-import { createDefaultImageGenerationProvider } from '../image-generation/providers/openai-gpt-image-2'
+import { createDefaultImageGenerationProvider } from '../image-generation/providers/newapi-chat-image'
 import { mongoImageGenerationReceiptStore } from '../image-generation/receipt-store'
 import {
   IMAGE_ASPECT_RATIOS,
@@ -15,6 +15,8 @@ import {
   type ImageAspectRatio,
   type ImageGenerationReceipt,
   type ImageGenerationReceiptKey,
+  type ImageGenerationProvider,
+  type ImageGenerationProviderSnapshot,
   type ImageGenerationSource,
 } from '../image-generation/types'
 import { toRasterAssetRef } from '../media/reference'
@@ -87,6 +89,82 @@ function defaultDependencies(): GenerateImageDependencies {
 
 function stableHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+function commandHash(input: GenerateImageInput): string {
+  return stableHash({
+    prompt: input.prompt,
+    outputPath: input.output_path,
+    sourcePath: input.input_image_path || null,
+    aspectRatio: input.aspect_ratio || null,
+  })
+}
+
+/** Reproduces the request identity written by pre-snapshot receipts. */
+function legacyRequestHash(
+  input: GenerateImageInput,
+  provider: Pick<ImageGenerationProviderSnapshot, 'provider' | 'model'>,
+): string {
+  return stableHash({
+    prompt: input.prompt,
+    outputPath: input.output_path,
+    sourcePath: input.input_image_path || null,
+    aspectRatio: input.aspect_ratio || null,
+    provider: provider.provider,
+    model: provider.model,
+  })
+}
+
+function submissionProviderSnapshot(
+  provider: ImageGenerationProvider,
+): ImageGenerationProviderSnapshot {
+  const providerId = provider.provider.trim()
+  const model = provider.model.trim()
+  const configurationFingerprint = provider.configurationFingerprint.trim()
+  if (!providerId || !model) {
+    throw new Error('图片供应商缺少 provider/model 稳定标识。')
+  }
+  if (!/^[a-f0-9]{64}$/.test(configurationFingerprint)) {
+    throw new Error('图片供应商 configurationFingerprint 必须是小写 SHA-256；禁止持久化地址或密钥明文。')
+  }
+  return { provider: providerId, model, configurationFingerprint }
+}
+
+function sameProviderSnapshot(
+  left: ImageGenerationProviderSnapshot | undefined,
+  right: ImageGenerationProviderSnapshot,
+): boolean {
+  return !!left
+    && left.provider === right.provider
+    && left.model === right.model
+    && left.configurationFingerprint === right.configurationFingerprint
+}
+
+function receiptMatchesCommand(
+  receipt: ImageGenerationReceipt,
+  input: GenerateImageInput,
+  currentCommandHash: string,
+): boolean {
+  if (receipt.commandHash) return receipt.commandHash === currentCommandHash
+  return receipt.requestHash === legacyRequestHash(input, receipt)
+}
+
+function receiptInputHash(
+  receipt: Pick<ImageGenerationReceipt, 'commandHash' | 'requestHash'>,
+  parentAssetId: string | null,
+  expectedOutputAssetId: string | null,
+): string {
+  return receipt.commandHash
+    ? stableHash({
+        commandHash: receipt.commandHash,
+        parentAssetId,
+        expectedOutputAssetId,
+      })
+    : stableHash({
+        requestHash: receipt.requestHash,
+        parentAssetId,
+        expectedOutputAssetId,
+      })
 }
 
 function imageJobId(receipt: Pick<ImageGenerationReceipt, 'projectId' | 'runId' | 'toolUseId'>): string {
@@ -238,7 +316,10 @@ async function resolveSource(
   if (!sourcePath) return undefined
   const asset = await workspace.readRaster(sourcePath)
   if (!asset) throw new Error(`Workspace 中不存在可用的源图片：${sourcePath}`)
-  const buffer = await workspace.readRasterBuffer(sourcePath, 'original')
+  // Match the proven Pegasus edit path: send the bounded model variant rather
+  // than an unbounded camera original. The source is still resolved from the
+  // authorized Workspace path and never accepts a caller-supplied remote URL.
+  const buffer = await workspace.readRasterBuffer(sourcePath, 'model')
   if (!buffer) throw new Error(`无法读取源图片字节：${sourcePath}`)
   const stillCurrent = await workspace.readRaster(sourcePath)
   if (!stillCurrent || stillCurrent.assetId !== asset.assetId) {
@@ -462,23 +543,34 @@ export async function executeGenerateImage(
     runId: context.runId,
     toolUseId: runtime.invocation.toolUseId,
   }
-  const requestHash = stableHash({
-    prompt: parsed.prompt,
-    outputPath: parsed.output_path,
-    sourcePath: parsed.input_image_path || null,
-    aspectRatio: parsed.aspect_ratio || null,
-    provider: dependencies.provider.provider,
-    model: dependencies.provider.model,
-  })
+  const currentCommandHash = commandHash(parsed)
   const paidSlotHolderKey = imageJobId(key)
   let paidSlot: SpatialPaidSlotClaim | undefined
   let submissionClaimed = false
+  let providerSnapshot: ImageGenerationProviderSnapshot | undefined
+
+  const getProviderSnapshot = (): ImageGenerationProviderSnapshot => {
+    providerSnapshot ??= submissionProviderSnapshot(dependencies.provider)
+    return providerSnapshot
+  }
 
   try {
     const existing = await dependencies.receipts.get(key)
     if (existing) {
-      if (existing.requestHash !== requestHash) {
+      if (!receiptMatchesCommand(existing, parsed, currentCommandHash)) {
         return invalid('同一 tool_use_id 已绑定到不同的 GenerateImage 输入，拒绝覆盖 durable receipt。')
+      }
+      if (existing.status === 'prepared') {
+        if (!existing.commandHash || !existing.providerSnapshot) {
+          return invalid(
+            '该 prepared receipt 来自旧版且没有供应商协议快照；为避免切换协议后重复付费，系统拒绝自动提交，请发起新的生成请求。',
+          )
+        }
+        if (!sameProviderSnapshot(existing.providerSnapshot, getProviderSnapshot())) {
+          return invalid(
+            '该 prepared receipt 冻结的图片供应商协议或配置已变化；系统不会换协议提交，请发起新的生成请求。',
+          )
+        }
       }
       const recovered = await recoverExistingReceipt(
         existing,
@@ -497,8 +589,12 @@ export async function executeGenerateImage(
     if (outputStat && !outputHead) {
       return invalid(`GenerateImage 输出路径已被非图片文件占用：${parsed.output_path}`)
     }
+    const currentProviderSnapshot = getProviderSnapshot()
+    // Retain the former provider-bound hash only so legacy receipts can be
+    // compared exactly during migration. New command identity is commandHash.
+    const requestHash = legacyRequestHash(parsed, currentProviderSnapshot)
     const inputHash = stableHash({
-      requestHash,
+      commandHash: currentCommandHash,
       parentAssetId: source?.assetId || null,
       expectedOutputAssetId: outputHead?.assetId || null,
     })
@@ -522,15 +618,25 @@ export async function executeGenerateImage(
       userId: context.userId,
       paidSlotHolderKey,
       requestHash,
+      commandHash: currentCommandHash,
       inputHash,
-      provider: dependencies.provider.provider,
-      model: dependencies.provider.model,
+      providerSnapshot: currentProviderSnapshot,
       outputPath: parsed.output_path,
       sourcePath: parsed.input_image_path,
       parentAssetId: source?.assetId,
       expectedOutputAssetId: outputHead?.assetId,
     })
-    if (created.receipt.requestHash !== requestHash || created.receipt.inputHash !== inputHash) {
+    const createdCommandMatches = receiptMatchesCommand(
+      created.receipt,
+      parsed,
+      currentCommandHash,
+    )
+    const expectedReceiptInputHash = receiptInputHash(
+      created.receipt,
+      source?.assetId || null,
+      outputHead?.assetId || null,
+    )
+    if (!createdCommandMatches || created.receipt.inputHash !== expectedReceiptInputHash) {
       if (paidSlot?.state === 'reserved' && dependencies.paidSlots) {
         await dependencies.paidSlots.release({
           projectId,
@@ -557,6 +663,27 @@ export async function executeGenerateImage(
       }
       return invalid('GenerateImage durable receipt 与当前项目容量身份不一致。')
     }
+    if (created.receipt.status === 'prepared') {
+      if (
+        !created.receipt.commandHash
+        || !sameProviderSnapshot(created.receipt.providerSnapshot, currentProviderSnapshot)
+      ) {
+        if (paidSlot?.state === 'reserved' && dependencies.paidSlots) {
+          await dependencies.paidSlots.release({
+            projectId,
+            userId: context.userId,
+            holderKey: paidSlotHolderKey,
+            reservationToken: paidSlot.reservationToken,
+          })
+          paidSlot = undefined
+        }
+        return invalid(
+          created.receipt.commandHash
+            ? 'GenerateImage prepared receipt 的供应商协议快照不匹配；拒绝换协议提交。'
+            : 'GenerateImage 旧版 prepared receipt 没有供应商协议快照；拒绝自动提交。',
+        )
+      }
+    }
     if (!created.created) {
       const recovered = await recoverExistingReceipt(
         created.receipt,
@@ -580,6 +707,7 @@ export async function executeGenerateImage(
       key,
       owner,
       (dependencies.now ?? (() => new Date()))(),
+      currentProviderSnapshot,
     )
     if (!claimed) {
       const current = await dependencies.receipts.get(key)

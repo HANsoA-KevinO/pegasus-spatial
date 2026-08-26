@@ -12,6 +12,7 @@ import sharp from 'sharp'
 import { processImageForContext } from '../agent/image-resizer'
 import { connectDB } from '../db/mongodb'
 import { getMediaStorageDriver, getOSSMediaConfig, type MediaStorageDriver } from './config'
+import { buildRasterAssetObjectKey } from './object-prefix'
 import {
   ImageAsset,
   type AssetVariantDocument,
@@ -22,7 +23,6 @@ import {
 } from './model'
 
 const GRIDFS_BUCKET_NAME = 'pegasus_spatial_media'
-const OSS_OBJECT_PREFIX = `${process.env.PEGASUS_SPATIAL_MEDIA_PREFIX?.trim().replace(/^\/+|\/+$/g, '') || 'pegasus-spatial/raster-assets'}/`
 // v2 keeps the lossless original untouched, but encodes sufficiently large
 // model variants as WebP when that materially reduces transfer size. The
 // transform version participates in per-conversation idempotency, so assets
@@ -282,7 +282,7 @@ async function writeStoredObject(input: {
   metadata: Record<string, unknown>
 }): Promise<string> {
   if (input.driver === 'oss') {
-    const objectKey = `${OSS_OBJECT_PREFIX}${input.assetId}/${input.variant}`
+    const objectKey = buildRasterAssetObjectKey(input.assetId, input.variant)
     await getOSSClient().put(objectKey, input.buffer, {
       headers: {
         'Content-Type': input.mimeType,

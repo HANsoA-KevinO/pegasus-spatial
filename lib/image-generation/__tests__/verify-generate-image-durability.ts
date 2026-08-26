@@ -8,6 +8,7 @@ import {
   type SpatialToolDependencies,
 } from '../../tools/spatial'
 import { ImageGenerationProviderError } from '../errors'
+import { NewApiChatImageAdapter } from '../providers/newapi-chat-image'
 import { imagePaidSlotDisposition } from '../receipt-store'
 import {
   SpatialPaidCapacityError,
@@ -21,6 +22,7 @@ import type {
   GenerateImageDependencies,
   ImageGenerationReceipt,
   ImageGenerationReceiptKey,
+  ImageGenerationProviderSnapshot,
   ImageGenerationReceiptStore,
   NewImageGenerationReceipt,
 } from '../types'
@@ -48,6 +50,8 @@ class MemoryReceiptStore implements ImageGenerationReceiptStore {
     const now = new Date('2026-08-25T00:00:00.000Z')
     const receipt: ImageGenerationReceipt = {
       ...input,
+      provider: input.providerSnapshot.provider,
+      model: input.providerSnapshot.model,
       status: 'prepared',
       createdAt: now,
       updatedAt: now,
@@ -56,9 +60,20 @@ class MemoryReceiptStore implements ImageGenerationReceiptStore {
     return { receipt: clone(receipt), created: true }
   }
 
-  async claimSubmission(key: ImageGenerationReceiptKey, owner: string, now: Date) {
+  async claimSubmission(
+    key: ImageGenerationReceiptKey,
+    owner: string,
+    now: Date,
+    providerSnapshot: ImageGenerationProviderSnapshot,
+  ) {
     const receipt = this.values.get(keyString(key))
     if (!receipt || receipt.status !== 'prepared') return null
+    if (
+      receipt.providerSnapshot?.provider !== providerSnapshot.provider
+      || receipt.providerSnapshot.model !== providerSnapshot.model
+      || receipt.providerSnapshot.configurationFingerprint
+        !== providerSnapshot.configurationFingerprint
+    ) return null
     receipt.status = 'submitting'
     receipt.submissionOwner = owner
     receipt.submissionStartedAt = now
@@ -255,6 +270,18 @@ const input: GenerateImageInput = {
   aspect_ratio: '16:9',
 }
 
+const TEST_IMAGE_PROVIDER_IDENTITY = {
+  provider: 'test-provider',
+  model: 'test-image-model',
+  configurationFingerprint: '1'.repeat(64),
+}
+
+const SWITCHED_IMAGE_PROVIDER_IDENTITY = {
+  provider: 'different-image-contract-v2',
+  model: 'different-image-model',
+  configurationFingerprint: '2'.repeat(64),
+}
+
 function fakeAsset(assetId = 'asset_generated'): RasterAssetRef {
   return {
     assetId,
@@ -278,8 +305,7 @@ function setup(
   let persistedBytes = 0
   const dependencies: GenerateImageDependencies = {
     provider: {
-      provider: 'test-provider',
-      model: 'test-image-model',
+      ...TEST_IMAGE_PROVIDER_IDENTITY,
       async generate(request) {
         providerCalls += 1
         assert.equal(request.prompt, input.prompt)
@@ -342,6 +368,14 @@ function assertByteFree(value: unknown): void {
   assert.equal(firstEnvelope?.elapsed_ms, 10_000)
   assertByteFree(first)
 
+  let switchedProviderCalls = 0
+  state.dependencies.provider = {
+    ...SWITCHED_IMAGE_PROVIDER_IDENTITY,
+    async generate() {
+      switchedProviderCalls += 1
+      throw new Error('published recovery must not call the current provider')
+    },
+  }
   const recovered = await executeGenerateImage(input, workspace, {
     executionContext,
     invocation,
@@ -350,6 +384,7 @@ function assertByteFree(value: unknown): void {
   assert.equal(recovered.is_error, undefined)
   assert.deepEqual(recovered, first)
   assert.equal(state.providerCalls(), 1)
+  assert.equal(switchedProviderCalls, 0)
   assertByteFree(recovered)
 }
 
@@ -415,6 +450,14 @@ function assertByteFree(value: unknown): void {
 
   const recovery = setup(receipts)
   recovery.dependencies.paidSlots = capacity.imageCoordinator
+  let switchedProviderCalls = 0
+  recovery.dependencies.provider = {
+    ...SWITCHED_IMAGE_PROVIDER_IDENTITY,
+    async generate() {
+      switchedProviderCalls += 1
+      throw new Error('asset_stored recovery must not call the current provider')
+    },
+  }
   const second = await executeGenerateImage(input, workspace, {
     executionContext: { ...executionContext, runId: 'run_asset_crash' },
     invocation,
@@ -422,6 +465,7 @@ function assertByteFree(value: unknown): void {
   })
   assert.equal(second.is_error, undefined)
   assert.equal(recovery.providerCalls(), 0)
+  assert.equal(switchedProviderCalls, 0)
   assert.equal(workspace.dumpRasters()[input.output_path].assetId, 'asset_generated')
   assert.equal(capacity.size('project_1'), 0)
   assertByteFree(second)
@@ -529,8 +573,7 @@ function assertByteFree(value: unknown): void {
     return registeredArtifact
   }
   state.dependencies.provider = {
-    provider: 'test-provider',
-    model: 'test-image-model',
+    ...TEST_IMAGE_PROVIDER_IDENTITY,
     async generate(request) {
       receivedParent = request.source?.assetId || ''
       assert.equal(request.source?.buffer.toString(), 'workspace-parent-bytes')
@@ -616,6 +659,188 @@ function assertByteFree(value: unknown): void {
   assert.equal(state.providerCalls(), 1)
 }
 
+// New receipts freeze a provider-independent command hash plus a secret-free
+// transport snapshot. Even a real adapter configuration cannot leak its base
+// URL or API key into Mongo.
+{
+  const workspace = createInMemoryWorkspace()
+  const receipts = new MemoryReceiptStore()
+  const capacity = new MemoryPaidCapacity()
+  const state = setup(receipts, {
+    afterPaidSlotBound() {
+      throw new Error('stop after durable provider snapshot')
+    },
+  })
+  state.dependencies.paidSlots = capacity.imageCoordinator
+  state.dependencies.provider = new NewApiChatImageAdapter({
+    apiKey: 'receipt-secret-must-not-persist',
+    apiBase: 'https://private-gateway.example.invalid/v1',
+    model: 'GPT-image-2',
+  })
+  const context = { ...executionContext, runId: 'run_secret_free_snapshot' }
+  const result = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: state.dependencies,
+  })
+  assert.equal(result.is_error, true)
+  assert.equal(state.providerCalls(), 0)
+  const receipt = receipts.required({
+    projectId: executionContext.workspaceId!,
+    runId: context.runId,
+    toolUseId: invocation.toolUseId,
+  })
+  assert.match(receipt.commandHash || '', /^[a-f0-9]{64}$/)
+  assert.deepEqual(Object.keys(receipt.providerSnapshot || {}).sort(), [
+    'configurationFingerprint',
+    'model',
+    'provider',
+  ])
+  assert.match(receipt.providerSnapshot?.configurationFingerprint || '', /^[a-f0-9]{64}$/)
+  const serialized = JSON.stringify(receipt)
+  assert.doesNotMatch(serialized, /receipt-secret-must-not-persist/)
+  assert.doesNotMatch(serialized, /private-gateway\.example\.invalid/)
+  assert.equal(capacity.size('project_1'), 0)
+}
+
+// A prepared paid command may resume only under its exact frozen provider
+// snapshot. A deployment/config switch fails closed, while restoring the
+// original snapshot can safely perform the first provider submission.
+{
+  const workspace = createInMemoryWorkspace()
+  const receipts = new MemoryReceiptStore()
+  const capacity = new MemoryPaidCapacity()
+  const crashing = setup(receipts, {
+    afterPaidSlotBound() {
+      throw new Error('simulated crash with prepared receipt')
+    },
+  })
+  crashing.dependencies.paidSlots = capacity.imageCoordinator
+  const context = { ...executionContext, runId: 'run_prepared_provider_switch' }
+  const first = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: crashing.dependencies,
+  })
+  assert.equal(first.is_error, true)
+  assert.equal(crashing.providerCalls(), 0)
+
+  const switched = setup(receipts)
+  switched.dependencies.provider = {
+    ...SWITCHED_IMAGE_PROVIDER_IDENTITY,
+    async generate() {
+      throw new Error('mismatched prepared snapshot must not submit')
+    },
+  }
+  const blocked = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: switched.dependencies,
+  })
+  assert.equal(blocked.is_error, true)
+  assert.match(blocked.content, /协议或配置已变化/)
+  assert.equal(receipts.required({
+    projectId: executionContext.workspaceId!,
+    runId: context.runId,
+    toolUseId: invocation.toolUseId,
+  }).status, 'prepared')
+
+  const restored = setup(receipts)
+  const completed = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: restored.dependencies,
+  })
+  assert.equal(completed.is_error, undefined)
+  assert.equal(restored.providerCalls(), 1)
+}
+
+// Legacy terminal receipts still validate the exact former provider-bound
+// request hash and recover without consulting the newly configured provider.
+{
+  const workspace = createInMemoryWorkspace()
+  const receipts = new MemoryReceiptStore()
+  const original = setup(receipts)
+  const context = { ...executionContext, runId: 'run_legacy_published' }
+  const first = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: original.dependencies,
+  })
+  assert.equal(first.is_error, undefined)
+  const legacy = receipts.required({
+    projectId: executionContext.workspaceId!,
+    runId: context.runId,
+    toolUseId: invocation.toolUseId,
+  })
+  delete legacy.commandHash
+  delete legacy.providerSnapshot
+
+  let switchedCalls = 0
+  const recovery = setup(receipts)
+  recovery.dependencies.provider = {
+    ...SWITCHED_IMAGE_PROVIDER_IDENTITY,
+    async generate() {
+      switchedCalls += 1
+      throw new Error('legacy published recovery must not submit')
+    },
+  }
+  const recovered = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: recovery.dependencies,
+  })
+  assert.deepEqual(recovered, first)
+  assert.equal(switchedCalls, 0)
+
+  const conflict = await executeGenerateImage({ ...input, prompt: 'changed legacy command' }, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: recovery.dependencies,
+  })
+  assert.equal(conflict.is_error, true)
+  assert.match(conflict.content, /不同的 GenerateImage 输入/)
+}
+
+// A legacy prepared receipt has no configuration fingerprint proving which
+// paid transport would be used. It therefore fails closed even if its old
+// provider/model labels happen to match the current process.
+{
+  const workspace = createInMemoryWorkspace()
+  const receipts = new MemoryReceiptStore()
+  const capacity = new MemoryPaidCapacity()
+  const crashing = setup(receipts, {
+    afterPaidSlotBound() {
+      throw new Error('simulated legacy prepared crash')
+    },
+  })
+  crashing.dependencies.paidSlots = capacity.imageCoordinator
+  const context = { ...executionContext, runId: 'run_legacy_prepared' }
+  await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: crashing.dependencies,
+  })
+  const legacy = receipts.required({
+    projectId: executionContext.workspaceId!,
+    runId: context.runId,
+    toolUseId: invocation.toolUseId,
+  })
+  delete legacy.commandHash
+  delete legacy.providerSnapshot
+
+  const recovery = setup(receipts)
+  const blocked = await executeGenerateImage(input, workspace, {
+    executionContext: context,
+    invocation,
+    dependencies: recovery.dependencies,
+  })
+  assert.equal(blocked.is_error, true)
+  assert.match(blocked.content, /prepared receipt 来自旧版/)
+  assert.equal(recovery.providerCalls(), 0)
+  assert.equal(legacy.status, 'prepared')
+}
+
 // A createOrGet race can reveal an exact-input conflict only after this
 // process reserved capacity. Release that still-reserved claim immediately.
 {
@@ -651,8 +876,7 @@ function assertByteFree(value: unknown): void {
   const state = setup(receipts)
   let calls = 0
   state.dependencies.provider = {
-    provider: 'test-provider',
-    model: 'test-image-model',
+    ...TEST_IMAGE_PROVIDER_IDENTITY,
     async generate() {
       calls += 1
       throw new ImageGenerationProviderError('socket closed after upload', {
@@ -669,6 +893,13 @@ function assertByteFree(value: unknown): void {
   })
   assert.equal(first.is_error, true)
   assert.match(first.content, /状态未知/)
+  state.dependencies.provider = {
+    ...SWITCHED_IMAGE_PROVIDER_IDENTITY,
+    async generate() {
+      calls += 1
+      throw new Error('unknown recovery must not call the current provider')
+    },
+  }
   const second = await executeGenerateImage(input, workspace, {
     executionContext: context,
     invocation,
@@ -685,8 +916,7 @@ function assertByteFree(value: unknown): void {
   const state = setup(receipts)
   let calls = 0
   state.dependencies.provider = {
-    provider: 'test-provider',
-    model: 'test-image-model',
+    ...TEST_IMAGE_PROVIDER_IDENTITY,
     async generate() {
       calls += 1
       throw new ImageGenerationProviderError('prompt rejected', {
@@ -703,6 +933,13 @@ function assertByteFree(value: unknown): void {
   })
   assert.equal(first.is_error, true)
   assert.match(first.content, /图片生成未完成/)
+  state.dependencies.provider = {
+    ...SWITCHED_IMAGE_PROVIDER_IDENTITY,
+    async generate() {
+      calls += 1
+      throw new Error('failed recovery must not call the current provider')
+    },
+  }
   await executeGenerateImage(input, workspace, {
     executionContext: context,
     invocation,
@@ -736,8 +973,7 @@ function assertByteFree(value: unknown): void {
   let releaseProviders!: () => void
   const providerGate = new Promise<void>(resolve => { releaseProviders = resolve })
   state.dependencies.provider = {
-    provider: 'test-provider',
-    model: 'test-image-model',
+    ...TEST_IMAGE_PROVIDER_IDENTITY,
     async generate() {
       providerStarts += 1
       await providerGate
@@ -787,8 +1023,7 @@ function assertByteFree(value: unknown): void {
   let releaseImage!: () => void
   const imageGate = new Promise<void>(resolve => { releaseImage = resolve })
   state.dependencies.provider = {
-    provider: 'test-provider',
-    model: 'test-image-model',
+    ...TEST_IMAGE_PROVIDER_IDENTITY,
     async generate() {
       imageStarted = true
       await imageGate

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 
 const TEST_DATABASE_SUFFIX = '_test'
 const mongoUri = process.env.SPATIAL_TEST_MONGODB_URI?.trim()
-  || 'mongodb://127.0.0.1:27018/pegasus_spatial_build_test'
+  || 'mongodb://127.0.0.1:27019/pegasus_spatial_build_test'
 const databaseName = mongoUri.match(/\/([^/?]+)(?:\?|$)/)?.[1]
 
 if (!databaseName?.endsWith(TEST_DATABASE_SUFFIX)) {

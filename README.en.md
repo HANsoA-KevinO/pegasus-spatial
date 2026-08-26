@@ -8,7 +8,8 @@ The default Project Guide is `spatial-creation@1`, and its default Skill catalog
 
 ## V1 tools
 
-- `GenerateImage`: text-to-image and single-image editing, defaulting to `gpt-image-2`.
+- `GenerateImage`: text-to-image and single-image editing through the single
+  NewAPI Chat Completions route, using the exact model alias `GPT-image-2`.
 - `CreateObject3D`: text/image to a mirrored Lux3D GLB artifact.
 - `CreateWorld3D`: text/single image to an Aholo World job.
 - `GetSpatialJob` / `WaitSpatialJob`: observe a known durable external job without resubmitting it.
@@ -23,7 +24,7 @@ Paid spatial tools are Root-only and fail closed unless `SPATIAL_PAID_CALLS_ENAB
 - Web: `http://localhost:3200`
 - Mongo: `127.0.0.1:27019/pegasus_spatial`
 - GridFS bucket: `pegasus_spatial_media`
-- OSS prefix: `pegasus-spatial/raster-assets/`
+- OSS prefix: `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=pegasus-spatial/raster-assets`
 - Auth cookies and Docker resources use the `pegasus-spatial` namespace.
 
 The internal virtual Workspace path remains `.sci-pegasus/` for compatibility with the tested CAS/version/ACL implementation. Database, media, cookies, networks, and volumes are isolated from Sci-Pegasus.
@@ -39,6 +40,23 @@ npm run dev
 ```
 
 Open `http://localhost:3200`. Do not enable paid calls before completing live provider smoke tests.
+
+`GenerateImage` reuses `LLM_BASE_URL` and `LLM_API_KEY_TOOLS`; it does not use
+`OPENAI_API_KEY` or a runtime provider selector. The NewAPI base URL must not
+contain embedded credentials, a query string, or a fragment. Paid/production
+configuration requires HTTPS. Plain HTTP is accepted by startup only for a
+non-production loopback URL and is never considered paid-ready by the readiness
+check.
+
+The OSS object prefix is the non-sensitive, intentionally public
+`NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX`. Server writers, server URL builders,
+and browser CDN URLs all consume that one value. Leading/trailing slashes and
+path-traversal segments are rejected. The legacy private variable may coexist
+only when its value is exactly equal; a mismatch fails startup.
+
+For a legacy public-HTTP NewAPI, local development may explicitly set
+`PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP=1`. This is an unsafe escape hatch,
+never passes paid readiness, and remains rejected in production.
 
 ```bash
 npm run project-prompt:verify

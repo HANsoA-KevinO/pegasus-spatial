@@ -9,6 +9,7 @@
 
 import { getMediaStorageDriver, getOSSMediaConfig, type MediaStorageDriver } from './config'
 import type { RasterAssetVariantName } from './model'
+import { buildRasterAssetObjectKey } from './object-prefix'
 import { MEDIA_ASSET_ID_PATTERN } from './browser-url'
 
 export { MEDIA_ASSET_ID_PATTERN } from './browser-url'
@@ -85,7 +86,7 @@ export function buildMediaPublicUrl(
     return new URL(`/api/media/${encodeURIComponent(assetId)}`, getMediaPublicBaseUrl()).toString()
   }
   if (getMediaStorageDriver() === 'oss') {
-    return objectKeyUrl(`raster-assets/${assetId}/${variantOrLegacyDriver}`)
+    return objectKeyUrl(buildRasterAssetObjectKey(assetId, variantOrLegacyDriver))
   }
   return new URL(
     `/api/media/${encodeURIComponent(assetId)}/${variantOrLegacyDriver}`,

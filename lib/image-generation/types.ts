@@ -50,7 +50,25 @@ export interface ImageGenerationOutput {
 export interface ImageGenerationProvider {
   readonly provider: string
   readonly model: string
+  /**
+   * Secret-free hash of the normalized transport configuration. Durable
+   * callers freeze this into their request identity so a prepared receipt
+   * cannot silently move to another gateway or protocol after restart.
+   */
+  readonly configurationFingerprint: string
   generate(input: ImageGenerationRequest): Promise<ImageGenerationOutput>
+}
+
+/**
+ * Secret-free provider identity frozen before a paid submission. `provider`
+ * is a versioned transport-contract id (for example
+ * `newapi-chat-image-v1`), so the snapshot does not need to retain a gateway
+ * URL or any credential material.
+ */
+export interface ImageGenerationProviderSnapshot {
+  provider: string
+  model: string
+  configurationFingerprint: string
 }
 
 export type ImageGenerationReceiptStatus =
@@ -70,11 +88,16 @@ export interface ImageGenerationReceiptKey {
 export interface ImageGenerationReceipt extends ImageGenerationReceiptKey {
   userId: string
   paidSlotHolderKey: string
+  /** Legacy, provider-bound command identity retained for migration checks. */
   requestHash: string
+  /** Provider-independent identity of prompt/output/source/aspect. */
+  commandHash?: string
   inputHash: string
   status: ImageGenerationReceiptStatus
   provider: string
   model: string
+  /** Missing only on receipts written before provider snapshot support. */
+  providerSnapshot?: ImageGenerationProviderSnapshot
   outputPath: string
   sourcePath?: string
   parentAssetId?: string
@@ -95,9 +118,9 @@ export interface NewImageGenerationReceipt extends ImageGenerationReceiptKey {
   userId: string
   paidSlotHolderKey: string
   requestHash: string
+  commandHash: string
   inputHash: string
-  provider: string
-  model: string
+  providerSnapshot: ImageGenerationProviderSnapshot
   outputPath: string
   sourcePath?: string
   parentAssetId?: string
@@ -114,6 +137,7 @@ export interface ImageGenerationReceiptStore {
     key: ImageGenerationReceiptKey,
     owner: string,
     now: Date,
+    providerSnapshot: ImageGenerationProviderSnapshot,
   ): Promise<ImageGenerationReceipt | null>
   markAssetStored(
     key: ImageGenerationReceiptKey,

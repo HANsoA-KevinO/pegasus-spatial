@@ -4,6 +4,7 @@ import mongoose from 'mongoose'
 import { connectDB } from '../lib/db/mongodb'
 import { getOSSMediaConfig } from '../lib/media/config'
 import { ImageAsset } from '../lib/media/model'
+import { buildRasterAssetObjectKey } from '../lib/media/object-prefix'
 import { buildOSSObjectPublicUrl } from '../lib/media/public-url'
 import { loadProjectEnv } from './load-project-env'
 
@@ -61,9 +62,7 @@ async function main() {
     if (writeProbe) {
       // Exercise the exact prefix used by production writers so a least-
       // privilege RAM policy does not need a separate diagnostics grant.
-      const prefix = process.env.PEGASUS_SPATIAL_MEDIA_PREFIX?.trim().replace(/^\/+|\/+$/g, '')
-        || 'pegasus-spatial/raster-assets'
-      probeKey = `${prefix}/${randomBytes(32).toString('base64url')}/original`
+      probeKey = buildRasterAssetObjectKey(randomBytes(32).toString('base64url'), 'original')
       await ossClient().put(probeKey, ONE_PIXEL_PNG, {
         headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' },
       })

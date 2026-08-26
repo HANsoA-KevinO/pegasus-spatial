@@ -1,4 +1,5 @@
 import type { RasterAssetVariant } from '@/lib/types'
+import { buildRasterAssetObjectKey } from './object-prefix'
 
 export const MEDIA_ASSET_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/
 
@@ -47,7 +48,7 @@ export function buildBrowserMediaUrl(
     return `${cdnOrigin}/${encodedPath('llm-images', assetId)}`
   }
 
-  return `${cdnOrigin}/${encodedPath('raster-assets', assetId, variant)}`
+  return `${cdnOrigin}/${encodedPath(...buildRasterAssetObjectKey(assetId, variant).split('/'))}`
 }
 
 export function buildBrowserMediaUrls(

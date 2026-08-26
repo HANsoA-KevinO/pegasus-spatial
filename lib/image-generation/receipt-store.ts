@@ -7,6 +7,7 @@ import {
   IMAGE_GENERATION_SUBMISSION_LEASE_MS,
   type ImageGenerationReceipt,
   type ImageGenerationReceiptKey,
+  type ImageGenerationProviderSnapshot,
   type ImageGenerationReceiptStore,
   type NewImageGenerationReceipt,
 } from './types'
@@ -19,10 +20,12 @@ interface ImageGenerationReceiptDocument {
   tool_use_id: string
   paid_slot_holder_key: string
   request_hash: string
+  command_hash?: string
   input_hash: string
   status: ImageGenerationReceipt['status']
   provider: string
   model: string
+  provider_configuration_fingerprint?: string
   output_path: string
   source_path?: string
   parent_asset_id?: string
@@ -46,6 +49,7 @@ const ReceiptSchema = new Schema<ImageGenerationReceiptDocument>({
   tool_use_id: { type: String, required: true },
   paid_slot_holder_key: { type: String, required: true },
   request_hash: { type: String, required: true },
+  command_hash: String,
   input_hash: { type: String, required: true },
   status: {
     type: String,
@@ -54,6 +58,9 @@ const ReceiptSchema = new Schema<ImageGenerationReceiptDocument>({
   },
   provider: { type: String, required: true },
   model: { type: String, required: true },
+  // `provider` is itself the versioned transport-contract id. Only this
+  // SHA-256 fingerprint is persisted; API base URLs and keys are never stored.
+  provider_configuration_fingerprint: String,
   output_path: { type: String, required: true },
   source_path: String,
   parent_asset_id: String,
@@ -118,6 +125,15 @@ function cloneAsset(asset: RasterAssetRef | undefined): RasterAssetRef | undefin
 }
 
 function fromDocument(doc: ImageGenerationReceiptDocument): ImageGenerationReceipt {
+  const providerSnapshot: ImageGenerationProviderSnapshot | undefined =
+    typeof doc.provider_configuration_fingerprint === 'string'
+      && doc.provider_configuration_fingerprint.length > 0
+      ? {
+          provider: doc.provider,
+          model: doc.model,
+          configurationFingerprint: doc.provider_configuration_fingerprint,
+        }
+      : undefined
   return {
     projectId: doc.project_id,
     userId: doc.user_id,
@@ -125,10 +141,12 @@ function fromDocument(doc: ImageGenerationReceiptDocument): ImageGenerationRecei
     toolUseId: doc.tool_use_id,
     paidSlotHolderKey: doc.paid_slot_holder_key,
     requestHash: doc.request_hash,
+    commandHash: doc.command_hash,
     inputHash: doc.input_hash,
     status: doc.status,
     provider: doc.provider,
     model: doc.model,
+    providerSnapshot,
     outputPath: doc.output_path,
     sourcePath: doc.source_path,
     parentAssetId: doc.parent_asset_id,
@@ -175,10 +193,13 @@ export const mongoImageGenerationReceiptStore: ImageGenerationReceiptStore = {
         tool_use_id: input.toolUseId,
         paid_slot_holder_key: input.paidSlotHolderKey,
         request_hash: input.requestHash,
+        command_hash: input.commandHash,
         input_hash: input.inputHash,
         status: 'prepared',
-        provider: input.provider,
-        model: input.model,
+        provider: input.providerSnapshot.provider,
+        model: input.providerSnapshot.model,
+        provider_configuration_fingerprint:
+          input.providerSnapshot.configurationFingerprint,
         output_path: input.outputPath,
         source_path: input.sourcePath,
         parent_asset_id: input.parentAssetId,
@@ -195,10 +216,17 @@ export const mongoImageGenerationReceiptStore: ImageGenerationReceiptStore = {
     }
   },
 
-  async claimSubmission(key, owner, now) {
+  async claimSubmission(key, owner, now, providerSnapshot) {
     await connectDB()
     const doc = await ImageGenerationReceiptModel.findOneAndUpdate(
-      { ...filter(key), status: 'prepared' },
+      {
+        ...filter(key),
+        status: 'prepared',
+        provider: providerSnapshot.provider,
+        model: providerSnapshot.model,
+        provider_configuration_fingerprint:
+          providerSnapshot.configurationFingerprint,
+      },
       {
         $set: {
           status: 'submitting',

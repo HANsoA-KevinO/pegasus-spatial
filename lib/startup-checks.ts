@@ -5,6 +5,8 @@
  * loud on boot instead of leaving users to trip on obscure errors mid-request.
  */
 
+import * as mediaObjectPrefix from './media/object-prefix'
+
 interface CheckFailure {
   variable: string
   reason: string
@@ -43,9 +45,51 @@ function isProviderReachableHttpsOrigin(value: string | undefined): boolean {
   }
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  return normalized === 'localhost'
+    || normalized === '::1'
+    || /^127(?:\.\d{1,3}){3}$/.test(normalized)
+}
+
+function newApiBaseUrlFailure(
+  value: string,
+  production: boolean,
+  allowInsecureDevelopmentHttp: boolean,
+): string | null {
+  try {
+    const parsed = new URL(value)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return 'must use the HTTP or HTTPS protocol'
+    }
+    if (parsed.username || parsed.password) {
+      return 'must not contain embedded credentials'
+    }
+    if (parsed.search || parsed.hash) {
+      return 'must not contain a query string or fragment'
+    }
+    if (parsed.protocol === 'http:') {
+      if (production) return 'must use HTTPS in production'
+      if (!isLoopbackHostname(parsed.hostname) && !allowInsecureDevelopmentHttp) {
+        return 'plain HTTP is allowed only for loopback development URLs unless PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP=1 is explicitly set'
+      }
+    }
+    return null
+  } catch {
+    return 'must be a complete HTTP(S) URL'
+  }
+}
+
 export function runStartupChecks(): void {
   const failures: CheckFailure[] = []
   const mediaDriver = process.env.MEDIA_STORAGE_DRIVER?.trim().toLowerCase()
+
+  // OSS keys are constructed in both server and browser code. A single
+  // intentionally-public value prevents writers and CDN readers from drifting.
+  failures.push(...mediaObjectPrefix.validateMediaObjectPrefixConfiguration(
+    process.env.NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX,
+    process.env.PEGASUS_SPATIAL_MEDIA_PREFIX,
+  ).failures)
 
   // AUTH_SECRET: NextAuth signs session JWTs with this. A weak/placeholder value
   // in production means anyone can forge sessions.
@@ -64,6 +108,22 @@ export function runStartupChecks(): void {
   // LLM gateway credentials. Without these no request can reach the model.
   for (const key of ['LLM_BASE_URL', 'LLM_API_KEY_ORCHESTRATOR', 'LLM_API_KEY_TOOLS']) {
     if (!process.env[key]) failures.push({ variable: key, reason: 'not set (required)' })
+  }
+  const llmBaseUrl = process.env.LLM_BASE_URL?.trim()
+  if (llmBaseUrl) {
+    const reason = newApiBaseUrlFailure(
+      llmBaseUrl,
+      process.env.NODE_ENV === 'production',
+      process.env.PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP === '1',
+    )
+    if (reason) failures.push({ variable: 'LLM_BASE_URL', reason })
+  }
+  const imageModel = process.env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim() || 'GPT-image-2'
+  if (imageModel !== 'GPT-image-2') {
+    failures.push({
+      variable: 'PEGASUS_SPATIAL_IMAGE_MODEL',
+      reason: 'must be the exact case-sensitive NewAPI alias GPT-image-2',
+    })
   }
 
   // MongoDB URI. Covered by a throw in lib/db/mongodb.ts too, but catching here
@@ -103,9 +163,6 @@ export function runStartupChecks(): void {
         variable: 'SPATIAL_WORKER_ENABLED',
         reason: 'must not be 0 when paid spatial calls are enabled',
       })
-    }
-    for (const key of ['OPENAI_API_KEY']) {
-      if (!process.env[key]?.trim()) failures.push({ variable: key, reason: 'not set (required for paid creation)' })
     }
     const providerMediaVariable = mediaDriver === 'oss'
       ? 'NEXT_PUBLIC_MEDIA_CDN_BASE_URL'

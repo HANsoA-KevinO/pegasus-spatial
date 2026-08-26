@@ -1,3 +1,5 @@
+import { validateMediaObjectPrefixConfiguration } from '../lib/media/object-prefix'
+
 type Check = {
   name: string
   ok: boolean
@@ -46,6 +48,52 @@ function hostsCheck(name: string, value: string | undefined): Check {
   }
 }
 
+function newApiGatewayCheck(): Check {
+  const raw = process.env.LLM_BASE_URL
+  if (!present(raw)) return { name: 'LLM_BASE_URL (NewAPI)', ok: false, detail: '未配置' }
+  try {
+    const url = new URL(raw!)
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return { name: 'LLM_BASE_URL (NewAPI)', ok: false, detail: '必须是 HTTP(S) URL' }
+    }
+    if (url.username || url.password) {
+      return { name: 'LLM_BASE_URL (NewAPI)', ok: false, detail: '禁止在 URL 中内嵌用户名或密码' }
+    }
+    if (url.search || url.hash) {
+      return { name: 'LLM_BASE_URL (NewAPI)', ok: false, detail: 'URL 禁止携带 query 或 fragment' }
+    }
+    if (url.protocol === 'http:') {
+      const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+      const loopback = hostname === 'localhost'
+        || hostname === '::1'
+        || /^127(?:\.\d{1,3}){3}$/.test(hostname)
+      return {
+        name: 'LLM_BASE_URL (NewAPI)',
+        ok: false,
+        detail: loopback
+          ? '回环 HTTP 仅可用于本地开发；明文 HTTP 不能作为正式付费就绪配置'
+          : '非回环 NewAPI 必须使用 HTTPS；明文 HTTP 不能作为正式付费就绪配置',
+      }
+    }
+    return {
+      name: 'LLM_BASE_URL (NewAPI)',
+      ok: true,
+      detail: '已配置为无内嵌凭证的 HTTPS URL（未输出地址）',
+    }
+  } catch {
+    return { name: 'LLM_BASE_URL (NewAPI)', ok: false, detail: '不是有效 URL' }
+  }
+}
+
+function imageModelCheck(): Check {
+  const model = process.env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim() || 'GPT-image-2'
+  return {
+    name: 'PEGASUS_SPATIAL_IMAGE_MODEL',
+    ok: model === 'GPT-image-2',
+    detail: model === 'GPT-image-2' ? 'GPT-image-2（NewAPI 精确别名）' : '必须精确设置为 GPT-image-2',
+  }
+}
+
 function providerReachableMediaCheck(): Check {
   const driver = process.env.MEDIA_STORAGE_DRIVER?.trim().toLowerCase() || 'gridfs'
   const raw = driver === 'oss'
@@ -66,15 +114,37 @@ function providerReachableMediaCheck(): Check {
   }
 }
 
+function mediaObjectPrefixCheck(): Check {
+  const result = validateMediaObjectPrefixConfiguration(
+    process.env.NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX,
+    process.env.PEGASUS_SPATIAL_MEDIA_PREFIX,
+  )
+  if (result.failures.length > 0) {
+    return {
+      name: 'MEDIA object prefix',
+      ok: false,
+      detail: result.failures.map(failure => `${failure.variable}: ${failure.reason}`).join('; '),
+    }
+  }
+  return {
+    name: 'MEDIA object prefix',
+    ok: true,
+    detail: `${result.prefix}/（server/browser 一致）`,
+  }
+}
+
 const checks: Check[] = [
   urlCheck('APP_PUBLIC_URL', process.env.APP_PUBLIC_URL, { port: '3200' }),
   urlCheck('MONGODB_URI', process.env.MONGODB_URI, { pathname: 'pegasus_spatial' }),
+  newApiGatewayCheck(),
   {
-    name: 'OPENAI_API_KEY',
-    ok: present(process.env.OPENAI_API_KEY),
-    detail: present(process.env.OPENAI_API_KEY) ? '已配置（未输出）' : '未配置',
+    name: 'LLM_API_KEY_TOOLS (GenerateImage)',
+    ok: present(process.env.LLM_API_KEY_TOOLS),
+    detail: present(process.env.LLM_API_KEY_TOOLS) ? '已配置（未输出）' : '未配置',
   },
+  imageModelCheck(),
   providerReachableMediaCheck(),
+  mediaObjectPrefixCheck(),
   urlCheck('AHOLO_API_BASE_URL', process.env.AHOLO_API_BASE_URL || 'https://api.aholo3d.cn', { protocol: 'https:' }),
   {
     name: 'AHOLO_API_KEY',
@@ -95,6 +165,7 @@ const paidEnabled = process.env.SPATIAL_PAID_CALLS_ENABLED === '1'
 const report = {
   product: 'Pegasus Spatial',
   checked_at: new Date().toISOString(),
+  image_route: 'NewAPI Chat Completions / GPT-image-2',
   paid_calls_enabled: paidEnabled,
   live_submission_performed: false,
   checks,

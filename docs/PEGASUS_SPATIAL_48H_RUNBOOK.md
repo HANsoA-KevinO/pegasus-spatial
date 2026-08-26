@@ -4,16 +4,25 @@
 
 ## 1. H0–H4 真实能力冻结
 
-1. 从 `.env.example` 创建全新的 `.env.local`，不得复制 Pegasus 或 Sci-Pegasus 的密钥。
+1. 从 `.env.example` 创建 `.env.local`。图像生成复用受控的既有 NewAPI 配置：填写 `LLM_BASE_URL` 与
+   `LLM_API_KEY_TOOLS`，不要增加 `OPENAI_API_KEY`；不得把任何真实密钥写入仓库、报告或日志。
+   `LLM_BASE_URL` 不得包含用户名、密码、query 或 fragment。正式付费配置必须使用 HTTPS；回环
+   HTTP 只用于非生产本机开发，不能通过正式付费 readiness。
+   若旧 NewAPI 尚无 HTTPS，只能在隔离的非生产联调环境显式设置
+   `PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP=1`；该配置会暴露传输风险，生产启动与正式 readiness
+   仍会拒绝它，现场演示前必须撤销或补上 HTTPS。
 2. 保持 `SPATIAL_PAID_CALLS_ENABLED=0`，运行：
 
    ```bash
-   node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/check-spatial-readiness.ts
+   npm run spatial:preflight:local
    ```
 
-3. 分别用官方账号做一次 GPT Image、Aholo World、Lux3D G1 最小真实请求；记录请求时间、任务 ID、最终状态、响应字段、产物 MIME、文件 magic、字节数和 SHA-256。
+   若启用 OSS，确认非敏感的 `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX` 在构建和运行环境中取同一值；
+   readiness 会拒绝非法前缀或与旧 `PEGASUS_SPATIAL_MEDIA_PREFIX` 冲突的配置。
+
+3. 分别做一次 NewAPI `GPT-image-2` 文生图、单图修订、Aholo World 和 Lux3D G1 最小真实请求；记录请求时间、任务 ID、最终状态、响应字段、产物 MIME、文件 magic、字节数和 SHA-256。
 4. 从真实成功响应中提取 Aholo/Lux3D 产物 hostname，写入精确的 `*_ASSET_HOST_ALLOWLIST`。禁止使用通配符、任意 URL 或重定向扩展白名单。
-5. GPT Image 2 只有在官方 Images API 的生成和单图编辑都成功后才作为静态供应商。如果凭证或能力不通过，先实现并验证固定的替代 adapter；运行期不得自动换供应商。
+5. 图像路由必须保持唯一：`LLM_BASE_URL` 上的 `/chat/completions`、`LLM_API_KEY_TOOLS` 和区分大小写的精确别名 `GPT-image-2`。不测试或配置 `/images/generations`、`/images/edits`、provider selector 或自动 fallback；任一真实图像用例失败时先修复这条固定路由。
 6. 再次运行 readiness。只有全部门禁通过，才可显式设置 `SPATIAL_PAID_CALLS_ENABLED=1`。
 
 ## 2. 发布前自动验收
