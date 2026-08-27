@@ -135,6 +135,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     setShimmering(true)
     setTimeout(() => setShimmering(false), 850)
     handleNewChat()
+    if (pathname !== '/') router.push('/')
   }
 
   const selectConversation = (id: string) => {

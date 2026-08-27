@@ -16,10 +16,10 @@ const CREATION_CONTEXTS = [
   '现实空间重建',
 ]
 
-const QUESTION_MIN_HEIGHT = 148
-const QUESTION_MAX_HEIGHT = 320
-const CONTEXT_MIN_HEIGHT = 104
-const CONTEXT_MAX_HEIGHT = 240
+const QUESTION_MIN_HEIGHT = 108
+const QUESTION_MAX_HEIGHT = 240
+const CONTEXT_MIN_HEIGHT = 76
+const CONTEXT_MAX_HEIGHT = 160
 
 interface WorkbenchSelectOption {
   value: string
@@ -141,6 +141,7 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
   const { model, setModel, loadConversation } = useChatContext()
   const { models, isLoading: modelsLoading } = useModels()
   const { conversations } = useConversations()
+  const hasSidebarContent = conversations.length > 0
 
   const submit = () => {
     const trimmed = question.trim()
@@ -150,7 +151,7 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
   }
 
   return (
-    <div className="relative h-full w-full overflow-y-auto bg-surface px-6 py-9 lg:px-14 lg:py-12">
+    <div className="relative h-full w-full overflow-y-auto bg-surface px-6 py-7 lg:px-12 lg:py-9">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 opacity-55 dark:opacity-35 [background-size:36px_36px]"
@@ -161,21 +162,21 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
           ].join(','),
         }}
       />
-      <div className="mx-auto grid max-w-6xl gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="relative overflow-hidden rounded-[10px] border border-[var(--paper-edge)] bg-[var(--paper)] p-7 shadow-[var(--shadow-paper)] lg:p-10">
+      <div className={`mx-auto grid gap-6 ${hasSidebarContent ? 'max-w-6xl xl:grid-cols-[minmax(0,1fr)_300px]' : 'max-w-4xl'}`}>
+        <section className="relative overflow-hidden rounded-[10px] border border-[var(--paper-edge)] bg-[var(--paper)] p-6 shadow-[var(--shadow-paper)] lg:p-8">
           <div aria-hidden="true" className="absolute inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,var(--primary-deep)_0_28%,var(--primary)_28%_46%,transparent_46%)]" />
-          <div className="mb-8 flex items-center gap-3">
-            <BrandMark className="h-11 w-11" />
+          <div className="mb-5 flex items-center gap-3">
+            <BrandMark className="h-10 w-10" />
             <div>
               <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">Agentic spatial creation</p>
-              <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-ink lg:text-4xl">描述一个想进入的世界</h1>
+              <h1 className="mt-1 text-[28px] font-bold tracking-[-0.035em] text-ink lg:text-[32px]">描述一个想进入的世界</h1>
             </div>
           </div>
-          <p className="mb-8 max-w-3xl text-sm leading-7 text-ink-secondary">
-            飞马空间 Agent 会根据你的目标自主选择当前已接入的图像生成、3D 造物与世界生成工具。你不需要预先决定执行顺序；每次付费提交、后台状态和派生关系都会被持久记录。现实重建会在对应工具完成真实接入后开放。
+          <p className="mb-5 max-w-3xl text-sm leading-6 text-ink-secondary">
+            描述空间体验与必要约束，Agent 会自动选择已接入的图像、3D 造物和世界生成工具。
           </p>
 
-          <div className="space-y-5">
+          <div className="space-y-4">
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-ink">你想创造什么？</span>
               <textarea
@@ -189,7 +190,7 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
                   }
                 }}
                 placeholder="例如：创造一间可以进入的深夜电台，狭长空间、低照度钨丝灯、吸音木墙和一张用于直播的环形控制台。"
-                className="w-full resize-none overflow-y-hidden rounded-2xl border border-ghost-border/70 bg-surface-lowest px-4 py-4 text-base leading-7 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
+                className="w-full resize-none overflow-y-hidden rounded-xl border border-ghost-border/70 bg-surface-lowest px-4 py-3.5 text-[15px] leading-6 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
                 style={{ minHeight: QUESTION_MIN_HEIGHT, maxHeight: QUESTION_MAX_HEIGHT }}
               />
             </label>
@@ -201,7 +202,7 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
                 value={context}
                 onChange={event => setContext(event.target.value)}
                 placeholder="可说明参考图路径、空间用途、材质、光线、镜头、不能出现的元素，或希望先得到独立 GLB 物体。"
-                className="w-full resize-none overflow-y-hidden rounded-2xl border border-ghost-border/70 bg-surface-lowest px-4 py-4 text-sm leading-6 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
+                className="w-full resize-none overflow-y-hidden rounded-xl border border-ghost-border/70 bg-surface-lowest px-4 py-3 text-sm leading-5 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
                 style={{ minHeight: CONTEXT_MIN_HEIGHT, maxHeight: CONTEXT_MAX_HEIGHT }}
               />
             </label>
@@ -229,25 +230,17 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-              <p className="text-xs text-ink-muted">⌘ / Ctrl + Enter 开始 · 付费提交和资产版本会进入审计记录</p>
-              <button type="button" onClick={submit} disabled={!question.trim()} className="rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-on-primary shadow-lg shadow-primary/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <p className="text-[11px] text-ink-muted">⌘ / Ctrl + Enter 开始</p>
+              <button type="button" onClick={submit} disabled={!question.trim()} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary shadow-lg shadow-primary/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40">
                 开始空间创作
               </button>
             </div>
           </div>
         </section>
 
-        <aside className="space-y-5">
-          <div className="rounded-2xl border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
-            <h2 className="text-sm font-semibold text-ink">给 Agent 的创作简报</h2>
-            <ul className="mt-4 space-y-3 text-sm text-ink-secondary">
-              {['你真正想得到的体验', '可选的创作语境', '素材、风格与硬约束'].map(item => (
-                <li key={item} className="flex gap-3"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" /><span className="leading-5">{item}</span></li>
-              ))}
-            </ul>
-          </div>
-          {conversations.length > 0 && (
+        {hasSidebarContent && (
+          <aside className="space-y-5">
             <div className="rounded-2xl border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
               <h2 className="mb-3 text-sm font-semibold text-ink">最近项目</h2>
               <div className="space-y-1">
@@ -258,8 +251,8 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
                 ))}
               </div>
             </div>
-          )}
-        </aside>
+          </aside>
+        )}
       </div>
     </div>
   )
