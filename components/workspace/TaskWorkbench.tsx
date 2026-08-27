@@ -283,10 +283,16 @@ export function TaskWorkbench({ onSubmit }: {
           </header>
 
           <div className="overflow-visible rounded-[14px] border border-ghost-border/75 bg-surface-lowest p-3.5 shadow-[0_12px_36px_color-mix(in_srgb,var(--ink)_8%,transparent)] sm:p-4">
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink">你想创造什么？</span>
+            <span className="mb-2 block text-sm font-semibold text-ink">你想创造什么？</span>
+            <div
+              id="workbench-composer"
+              onDrop={handleDrop}
+              onDragOver={event => event.preventDefault()}
+              className="overflow-visible rounded-[11px] border border-ghost-border/70 bg-surface transition-[border-color,box-shadow] focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/15"
+            >
               <textarea
                 ref={questionRef}
+                aria-label="你想创造什么？"
                 value={question}
                 onChange={event => setQuestion(event.target.value)}
                 onKeyDown={event => {
@@ -296,45 +302,12 @@ export function TaskWorkbench({ onSubmit }: {
                   }
                 }}
                 placeholder="描述空间、用途、材质、光线、镜头与必须保留的元素，例如：一间狭长的深夜电台，低照度钨丝灯、吸音木墙和环形直播控制台。"
-                className="w-full resize-none overflow-y-hidden rounded-[10px] border border-ghost-border/70 bg-surface px-3.5 py-3 text-[15px] leading-6 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
+                className="block w-full resize-none overflow-y-hidden rounded-t-[10px] bg-transparent px-3.5 pb-2 pt-3 text-[15px] leading-6 text-ink outline-none placeholder:text-ink-muted"
                 style={{ minHeight: QUESTION_MIN_HEIGHT, maxHeight: QUESTION_MAX_HEIGHT }}
-              />
-            </label>
-
-            <div
-              onDrop={handleDrop}
-              onDragOver={event => event.preventDefault()}
-              className="mt-3 rounded-[10px] border border-dashed border-primary/30 bg-primary/[0.035] p-2.5 transition-colors hover:border-primary/50 hover:bg-primary/[0.055]"
-            >
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingCount > 0 || attachments.length >= MAX_ATTACHMENTS}
-                className="flex min-h-[68px] w-full items-center justify-center gap-3 rounded-lg px-3 text-left transition hover:bg-surface-low disabled:cursor-wait disabled:opacity-55"
-              >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V4.5m0 0L7.5 9M12 4.5 16.5 9M5.25 13.5v4.25a1.75 1.75 0 0 0 1.75 1.75h10a1.75 1.75 0 0 0 1.75-1.75V13.5" />
-                  </svg>
-                </span>
-                <span>
-                  <strong className="block text-sm font-semibold text-ink">添加参考文件</strong>
-                  <small className="mt-0.5 block text-[11px] leading-4 text-ink-muted">
-                    图片、TXT、Markdown、CSV、JSON 与常见代码文件；图片 ≤ 20MB，文本 ≤ 256KB
-                  </small>
-                </span>
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={ACCEPTED_UPLOAD_TYPES.join(',')}
-                multiple
-                onChange={handleFileChange}
-                className="hidden"
               />
 
               {attachments.length > 0 && (
-                <div className="grid gap-2 border-t border-ghost-border/55 pt-2.5 sm:grid-cols-2">
+                <div className="grid gap-2 border-t border-ghost-border/55 px-3 py-2.5 sm:grid-cols-2">
                   {attachments.map(item => (
                     <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-ghost-border/60 bg-surface-lowest px-2.5 py-2">
                       {item.kind === 'image' ? (
@@ -361,69 +334,90 @@ export function TaskWorkbench({ onSubmit }: {
                   ))}
                 </div>
               )}
-            </div>
 
-            {(uploadingCount > 0 || attachmentError) && (
-              <p className={`mt-2 text-[11px] ${attachmentError ? 'text-danger' : 'text-ink-muted'}`}>
-                {attachmentError || `正在处理 ${uploadingCount} 个文件…`}
-              </p>
-            )}
+              {(uploadingCount > 0 || attachmentError) && (
+                <p className={`border-t border-ghost-border/55 px-3 py-2 text-[11px] ${attachmentError ? 'text-danger' : 'text-ink-muted'}`}>
+                  {attachmentError || `正在处理 ${uploadingCount} 个文件…`}
+                </p>
+              )}
 
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-ghost-border/55 pt-3">
-              <div ref={modelControlRef} className="relative min-w-0 flex-1 sm:max-w-[360px]">
+              <div className="flex flex-wrap items-center gap-2 border-t border-ghost-border/55 px-2.5 py-2.5">
                 <button
                   type="button"
-                  aria-expanded={modelOptionsOpen}
-                  aria-controls="workbench-model-options"
-                  onClick={() => setModelOptionsOpen(current => !current)}
-                  className={`flex h-10 max-w-full items-center gap-2 rounded-[9px] border px-3 text-left text-xs font-medium transition ${modelOptionsOpen ? 'border-primary/45 bg-primary/8 text-primary' : 'border-ghost-border/70 bg-surface-low text-ink-secondary hover:border-primary/30 hover:text-ink'}`}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingCount > 0 || attachments.length >= MAX_ATTACHMENTS}
+                  title="支持图片、TXT、Markdown、CSV、JSON 与常见代码文件"
+                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-[9px] border border-ghost-border/70 bg-surface-low px-3 text-xs font-medium text-ink-secondary transition hover:border-primary/30 hover:text-ink disabled:cursor-wait disabled:opacity-55"
                 >
-                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
-                    <path strokeLinecap="round" d="M3 5h14M5.5 10h9M8 15h4" />
-                    <circle cx="7" cy="5" r="1.25" fill="currentColor" stroke="none" />
-                    <circle cx="12" cy="10" r="1.25" fill="currentColor" stroke="none" />
-                    <circle cx="10" cy="15" r="1.25" fill="currentColor" stroke="none" />
+                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.65} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m7.25 10.75 4.9-4.9a2.3 2.3 0 1 1 3.25 3.25l-6.55 6.55a4 4 0 0 1-5.66-5.66l6.2-6.2" />
                   </svg>
-                  <span className="shrink-0">推理模型</span>
-                  <span className="truncate text-ink-muted">{selectedModelName}</span>
-                  <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${modelOptionsOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m5.5 7.75 4.5 4.5 4.5-4.5" /></svg>
+                  添加参考文件
                 </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPTED_UPLOAD_TYPES.join(',')}
+                  multiple
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
 
-                {modelOptionsOpen && (
-                  <div id="workbench-model-options" role="listbox" aria-label="推理模型" className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(360px,calc(100vw-4rem))] overflow-y-auto rounded-[10px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-1.5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
-                    {modelsLoading ? (
-                      <p className="px-3 py-4 text-center text-xs text-ink-muted">正在读取模型…</p>
-                    ) : models.map(item => {
-                      const active = item.id === model
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          role="option"
-                          aria-selected={active}
-                          onClick={() => {
-                            setModel(item.id as ModelProvider)
-                            setModelOptionsOpen(false)
-                          }}
-                          className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition ${active ? 'bg-primary/12 text-primary' : 'text-ink-secondary hover:bg-surface-low hover:text-ink'}`}
-                        >
-                          <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? 'border-primary bg-primary text-on-primary' : 'border-outline-variant/35 text-transparent'}`}>
-                            <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2.2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m3.5 8 3 3 6-6" /></svg>
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <strong className="block truncate text-[13px] font-semibold">{item.name}</strong>
-                            {item.description && <small className="mt-0.5 block truncate text-[10.5px] font-normal text-ink-muted">{item.description}</small>}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
+                <div ref={modelControlRef} className="relative min-w-0">
+                  <button
+                    type="button"
+                    aria-expanded={modelOptionsOpen}
+                    aria-controls="workbench-model-options"
+                    onClick={() => setModelOptionsOpen(current => !current)}
+                    className={`flex h-9 max-w-[260px] items-center gap-2 rounded-[9px] border px-3 text-left text-xs font-medium transition ${modelOptionsOpen ? 'border-primary/45 bg-primary/8 text-primary' : 'border-ghost-border/70 bg-surface-low text-ink-secondary hover:border-primary/30 hover:text-ink'}`}
+                  >
+                    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
+                      <path strokeLinecap="round" d="M3 5h14M5.5 10h9M8 15h4" />
+                      <circle cx="7" cy="5" r="1.25" fill="currentColor" stroke="none" />
+                      <circle cx="12" cy="10" r="1.25" fill="currentColor" stroke="none" />
+                      <circle cx="10" cy="15" r="1.25" fill="currentColor" stroke="none" />
+                    </svg>
+                    <span className="shrink-0">推理模型</span>
+                    <span className="truncate text-ink-muted">{selectedModelName}</span>
+                    <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${modelOptionsOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m5.5 7.75 4.5 4.5 4.5-4.5" /></svg>
+                  </button>
+
+                  {modelOptionsOpen && (
+                    <div id="workbench-model-options" role="listbox" aria-label="推理模型" className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(360px,calc(100vw-4rem))] overflow-y-auto rounded-[10px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-1.5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
+                      {modelsLoading ? (
+                        <p className="px-3 py-4 text-center text-xs text-ink-muted">正在读取模型…</p>
+                      ) : models.map(item => {
+                        const active = item.id === model
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            onClick={() => {
+                              setModel(item.id as ModelProvider)
+                              setModelOptionsOpen(false)
+                            }}
+                            className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition ${active ? 'bg-primary/12 text-primary' : 'text-ink-secondary hover:bg-surface-low hover:text-ink'}`}
+                          >
+                            <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? 'border-primary bg-primary text-on-primary' : 'border-outline-variant/35 text-transparent'}`}>
+                              <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2.2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m3.5 8 3 3 6-6" /></svg>
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <strong className="block truncate text-[13px] font-semibold">{item.name}</strong>
+                              {item.description && <small className="mt-0.5 block truncate text-[10.5px] font-normal text-ink-muted">{item.description}</small>}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <button type="button" onClick={submit} disabled={!canSubmit} className="ml-auto rounded-[9px] bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-lg shadow-primary/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40">
+                  开始空间创作
+                </button>
               </div>
-
-              <button type="button" onClick={submit} disabled={!canSubmit} className="rounded-[10px] bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary shadow-lg shadow-primary/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40">
-                开始空间创作
-              </button>
             </div>
           </div>
         </section>
