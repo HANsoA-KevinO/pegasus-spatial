@@ -31,7 +31,7 @@ const expectedIds = [
   'direct-world-request',
   'reference-image-edit',
   'ambiguous-object-or-world',
-  'extra-candidate-after-success',
+  'scene-observation-adjustment',
 ]
 assert.deepEqual(cases.map(value => value.id).sort(), expectedIds.sort())
 
@@ -47,10 +47,9 @@ assert.deepEqual(byId.get('direct-object-request')?.must_call_one_of, ['CreateOb
 assert.deepEqual(byId.get('direct-world-request')?.must_call_one_of, ['CreateWorld3D'])
 assert.deepEqual(byId.get('reference-image-edit')?.must_call_one_of, ['GenerateImage'])
 assert.deepEqual(byId.get('ambiguous-object-or-world')?.must_call_one_of, ['AskUserQuestion'])
-assert.deepEqual(
-  byId.get('extra-candidate-after-success')?.must_not_call,
-  ['GenerateImage', 'CreateObject3D', 'CreateWorld3D'],
-)
+assert.deepEqual(byId.get('scene-observation-adjustment')?.must_call_one_of, ['TransformSceneObject'])
+assert.deepEqual(byId.get('scene-observation-adjustment')?.must_eventually_call, ['CaptureSceneView'])
+assert.equal(byId.get('scene-observation-adjustment')?.cost_only_ask_forbidden, true)
 for (const id of ['direct-object-request', 'direct-world-request']) {
   assert.deepEqual(byId.get(id)?.optional_before_target, ['GenerateImage'])
 }

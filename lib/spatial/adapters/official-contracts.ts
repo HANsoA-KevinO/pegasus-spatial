@@ -30,6 +30,24 @@ function frozenSourceImages(job: SpatialBuildJobRecord): string[] {
   return [...new Set(values)]
 }
 
+type LuxOutputFormat = 'glb' | 'ply'
+
+function frozenLuxOutputFormats(job: SpatialBuildJobRecord): LuxOutputFormat[] {
+  const configured = providerOptions(job).output_formats
+  if (configured === undefined) return ['glb']
+  if (!Array.isArray(configured) || configured.length < 1 || configured.length > 2) {
+    throw new TypeError('Lux3D G1 output_formats must contain one or two formats.')
+  }
+  const formats = configured.map(value => optionalText(value)?.toLowerCase())
+  if (formats.some(value => value !== 'glb' && value !== 'ply')) {
+    throw new TypeError('Lux3D G1 output_formats only supports glb and ply.')
+  }
+  if (new Set(formats).size !== formats.length) {
+    throw new TypeError('Lux3D G1 output_formats cannot contain duplicates.')
+  }
+  return formats as LuxOutputFormat[]
+}
+
 function safeRemoteFilename(urlValue: string, fallback: string): string {
   try {
     const name = posix.basename(new URL(urlValue).pathname)
@@ -162,6 +180,7 @@ export function createLux3DOfficialG1WireContract(): SpatialHttpWireContract {
     pollPath: job => `/lux3d/v1/generate/task/get?taskid=${encodeURIComponent(job.external_job_id || '')}`,
     encodeSubmission(job) {
       const images = frozenSourceImages(job)
+      const outputFormats = frozenLuxOutputFormats(job)
       if (images.length > 32) throw new TypeError('Lux3D G1 accepts at most 32 frozen source images.')
       const prompt = optionalText(job.request_snapshot.prompt)
       if (prompt && images.length > 1) {
@@ -174,7 +193,7 @@ export function createLux3DOfficialG1WireContract(): SpatialHttpWireContract {
         ...(images.length === 1 ? { img: images[0] } : {}),
         ...(images.length > 1 ? { imgs: images } : {}),
         ...(prompt ? { prompt } : {}),
-        outputFormat: ['glb'],
+        outputFormat: outputFormats,
         version: 'G1',
         faceCount: 60000,
         enablePbr: true,
@@ -190,7 +209,7 @@ export function createLux3DOfficialG1WireContract(): SpatialHttpWireContract {
       if (!taskId) throw new TypeError('Lux3D creation response did not contain d:taskId.')
       return { externalJobId: taskId, providerStatus: optionalText(root.m) || 'submitted' }
     },
-    decodePoll(payload): SpatialProviderPollResult {
+    decodePoll(payload, job): SpatialProviderPollResult {
       const root = object(payload, 'Lux3D task response')
       const data = object(root.d, 'Lux3D task response.d')
       const status = Number(data.status)
@@ -206,20 +225,42 @@ export function createLux3DOfficialG1WireContract(): SpatialHttpWireContract {
       if (status !== 3) {
         throw new TypeError(`Lux3D task response contained unknown status: ${String(data.status)}`)
       }
+      // G1 uses fixed response slots, not request order: ZIP, GLB, then the
+      // optional PLY. The ZIP is a source package with Lux-specific texture
+      // channels; the standalone GLB is the portable runtime asset. Preserve
+      // GLB and the explicitly requested PLY, while deliberately not treating
+      // the ZIP as either format.
+      const outputFormats = frozenLuxOutputFormats(job)
       const outputs = Array.isArray(data.outputs) ? data.outputs : []
-      const artifacts = outputs.flatMap((entry, index): ProviderArtifactDescriptor[] => {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
-        const url = optionalText((entry as Record<string, unknown>).content)
-        if (!url) return []
-        return [{
-          assetKey: `g1-glb-${index + 1}`,
+      const outputUrl = (index: number): string | null => {
+        const entry = outputs[index]
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+        const value = optionalText((entry as Record<string, unknown>).content)
+        return value && value !== 'NOT_REQUESTED' ? value : null
+      }
+      const artifacts: ProviderArtifactDescriptor[] = []
+      const glbUrl = outputUrl(1)
+      if (glbUrl) {
+        artifacts.push({
+          assetKey: 'g1-mesh-glb',
           kind: 'model',
-          fileName: outputs.length === 1 ? 'model.glb' : `model-${index + 1}.glb`,
-          remoteUrl: url,
+          fileName: 'model.glb',
+          remoteUrl: glbUrl,
           claimedMimeType: 'model/gltf-binary',
-          metadata: { output_index: index },
-        }]
-      })
+          metadata: { output_index: 1, output_format: 'glb' },
+        })
+      }
+      const plyUrl = outputFormats.includes('ply') ? outputUrl(2) : null
+      if (plyUrl) {
+        artifacts.push({
+          assetKey: 'g1-gaussian-ply',
+          kind: 'point_cloud',
+          fileName: 'gaussian.ply',
+          remoteUrl: plyUrl,
+          claimedMimeType: 'application/octet-stream',
+          metadata: { output_index: 2, output_format: 'ply' },
+        })
+      }
       if (!artifacts.length) {
         throw new TypeError('Lux3D status=3 response contained no downloadable outputs[].content.')
       }

@@ -25,6 +25,16 @@ const CORE_TOOLS = [
   'GenerateImage',
   'CreateObject3D',
   'CreateWorld3D',
+  'CreateSpatialScene',
+  'SetSceneWorld',
+  'AddSceneObject',
+  'TransformSceneObject',
+  'RemoveSceneObject',
+  'InspectSpatialScene',
+  'RestoreSpatialScene',
+  'SetSceneViewpoint',
+  'FocusSceneObject',
+  'CaptureSceneView',
   'GetSpatialJob',
   'WaitSpatialJob',
   'InspectSpatialArtifact',
@@ -101,11 +111,22 @@ function verifySchemas(): void {
     supportsVision: true,
     isRoot: false,
   }).map(item => item.name)
-  for (const expensive of ['GenerateImage', 'CreateObject3D', 'CreateWorld3D']) {
+  for (const expensive of [
+    'GenerateImage', 'CreateObject3D', 'CreateWorld3D', 'CreateSpatialScene', 'SetSceneWorld',
+    'AddSceneObject', 'TransformSceneObject', 'RemoveSceneObject', 'RestoreSpatialScene',
+    'SetSceneViewpoint', 'FocusSceneObject', 'CaptureSceneView',
+  ]) {
     assert.ok(!memberNames.includes(expensive), `Member wildcard surface must exclude ${expensive}`)
   }
   assert.ok(memberNames.includes('GetSpatialJob'))
   assert.ok(memberNames.includes('InspectSpatialArtifact'))
+  assert.ok(memberNames.includes('InspectSpatialScene'))
+  const explicitlyDelegated = getToolSchemasForCapabilities({
+    supportsVision: true,
+    isRoot: false,
+    allowedTools: ['GenerateImage', 'AddSceneObject'],
+  }).map(item => item.name)
+  assert.deepEqual(explicitlyDelegated, ['GenerateImage', 'AddSceneObject'])
 
   const spatialNames = getToolSchemasForCapabilities({
     supportsVision: true,

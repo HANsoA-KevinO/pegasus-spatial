@@ -31,7 +31,8 @@ for (const component of ['SpatialImageViewer', 'SpatialModelViewer', 'SpatialWor
 }
 assert.match(viewers, /camera-controls/)
 assert.match(viewers, /下载 GLB/)
-assert.match(viewers, /在 Aholo 中打开/)
+assert.match(viewers, /进入空间舞台/)
+assert.match(viewers, /Aholo 原始页面/)
 assert.match(viewers, /safeHttpUrl/)
 assert.match(explorer, /label: '3D'/)
 

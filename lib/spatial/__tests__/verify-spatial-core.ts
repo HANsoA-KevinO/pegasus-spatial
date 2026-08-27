@@ -448,7 +448,14 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
       return request.method === 'POST'
         ? Response.json({ d: 4815162342, m: 'ok', c: 0 })
         : Response.json({
-            d: { status: 3, outputs: [{ content: 'https://assets.example.test/lux/model.glb' }] },
+            d: {
+              status: 3,
+              outputs: [
+                { content: 'https://assets.example.test/lux/package.zip' },
+                { content: 'https://assets.example.test/lux/model.glb' },
+                { content: 'https://assets.example.test/lux/gaussian.ply' },
+              ],
+            },
             m: 'ok',
             c: 0,
           })
@@ -458,14 +465,17 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
     provider: 'lux3d',
     request_snapshot: {
       output_path_prefix: 'output/spatial/objects/official-lux',
-      provider_options: { source_image_url: 'https://media.example.test/authorized.png' },
+      provider_options: {
+        source_image_url: 'https://media.example.test/authorized.png',
+        output_formats: ['glb', 'ply'],
+      },
     },
   })
   const officialLuxSubmission = await officialLux.submit(imageLuxJob, { providerIdempotencyKey: 'lux-idem' })
   assert.match(officialLuxRequests[0].url, /\/lux3d\/v1\/generate\/img-to-3d\/task\/create$/)
   assert.deepEqual(await officialLuxRequests[0].json(), {
     img: 'https://media.example.test/authorized.png',
-    outputFormat: ['glb'],
+    outputFormat: ['glb', 'ply'],
     version: 'G1',
     faceCount: 60000,
     enablePbr: true,
@@ -480,17 +490,26 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
   assert.equal(officialLuxPoll.state, 'succeeded')
   if (officialLuxPoll.state === 'succeeded') {
     assert.equal(officialLuxPoll.artifacts[0].fileName, 'model.glb')
+    assert.equal(officialLuxPoll.artifacts[1].fileName, 'gaussian.ply')
+    assert.equal(officialLuxPoll.artifacts[1].kind, 'point_cloud')
   }
   const luxWire = createLux3DOfficialG1WireContract()
-  assert.equal(luxWire.decodePoll({ d: { status: 0 }, c: 0 }).state, 'queued')
-  assert.equal(luxWire.decodePoll({ d: { status: 1 }, c: 0 }).state, 'running')
+  assert.equal(luxWire.decodePoll({ d: { status: 0 }, c: 0 }, imageLuxJob).state, 'queued')
+  assert.equal(luxWire.decodePoll({ d: { status: 1 }, c: 0 }, imageLuxJob).state, 'running')
   assert.equal(luxWire.decodePoll({
-    d: { status: 3, outputs: [{ content: 'https://assets.example.test/lux/fixture.glb' }] },
+    d: {
+      status: 3,
+      outputs: [
+        { content: 'https://assets.example.test/lux/fixture.zip' },
+        { content: 'https://assets.example.test/lux/fixture.glb' },
+        { content: 'https://assets.example.test/lux/fixture.ply' },
+      ],
+    },
     c: 0,
-  }).state, 'succeeded')
-  assert.equal(luxWire.decodePoll({ d: { status: 4, message: 'failed' }, c: 0 }).state, 'failed')
+  }, imageLuxJob).state, 'succeeded')
+  assert.equal(luxWire.decodePoll({ d: { status: 4, message: 'failed' }, c: 0 }, imageLuxJob).state, 'failed')
   assert.throws(
-    () => luxWire.decodePoll({ d: { status: 2 }, c: 0 }),
+    () => luxWire.decodePoll({ d: { status: 2 }, c: 0 }, imageLuxJob),
     /unknown status: 2/,
   )
 
@@ -583,7 +602,7 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
     assert.equal(aholoPoll.artifacts[1].metadata?.up_axis, 'Y')
   }
   assert.throws(
-    () => createAholoOfficialWireContract().decodePoll({ status: 'completed', assets: {} }),
+    () => createAholoOfficialWireContract().decodePoll({ status: 'completed', assets: {} }, fixtureJob),
     /unsupported status/,
   )
 }

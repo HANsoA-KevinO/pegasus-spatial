@@ -62,6 +62,7 @@ function manifestArtifacts(
     size_bytes: artifact.sizeBytes,
     sha256: artifact.sha256,
     relations: artifact.relations,
+    metadata: artifact.metadata,
   }))
   const preview = paths.find(asset => asset.kind === 'thumbnail' || asset.kind === 'image')?.path
   const upAxis = artifacts

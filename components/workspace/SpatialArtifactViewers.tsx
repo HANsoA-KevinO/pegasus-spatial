@@ -1,6 +1,7 @@
 'use client'
 
 import { createElement, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import type { WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
 import { ProgressiveImage } from '@/components/media/ProgressiveImage'
 
@@ -197,11 +198,19 @@ export function SpatialWorldViewer({ artifact, conversationId, content }: {
               {[manifest?.provider ?? 'Aholo', manifest?.world_id ? `世界 ${manifest.world_id}` : null, manifest?.up_axis ? `${manifest.up_axis}-up` : null].filter(Boolean).join(' · ')}
             </p>
           </div>
-          {viewerUrl && (
-            <a href={viewerUrl} target="_blank" rel="noreferrer" className="rounded-md bg-[#dce8ff] px-4 py-2.5 text-xs font-semibold text-[#172033] transition hover:bg-white">
-              在 Aholo 中打开 ↗
-            </a>
-          )}
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href={`/spatial/${encodeURIComponent(conversationId)}?manifest=${encodeURIComponent(artifact.path)}`}
+              className="rounded-md bg-[#dce8ff] px-4 py-2.5 text-xs font-semibold text-[#172033] transition hover:bg-white"
+            >
+              进入空间舞台
+            </Link>
+            {viewerUrl && (
+              <a href={viewerUrl} target="_blank" rel="noreferrer" className="rounded-md border border-white/15 px-4 py-2.5 text-xs font-semibold text-white/70 transition hover:border-white/30 hover:text-white">
+                Aholo 原始页面 ↗
+              </a>
+            )}
+          </div>
         </header>
 
         {previewUrl ? (

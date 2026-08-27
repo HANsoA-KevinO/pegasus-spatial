@@ -948,7 +948,7 @@ function assertByteFree(value: unknown): void {
   assert.equal(calls, 1)
 }
 
-// Tool-level defense in depth rejects Member Agents before receipt/provider work.
+// Explicitly delegated Members use the same durable receipt/provider path.
 {
   const workspace = createInMemoryWorkspace()
   const state = setup()
@@ -957,9 +957,8 @@ function assertByteFree(value: unknown): void {
     invocation,
     dependencies: state.dependencies,
   })
-  assert.equal(memberResult.is_error, true)
-  assert.match(memberResult.content, /Root Agent/)
-  assert.equal(state.providerCalls(), 0)
+  assert.equal(memberResult.is_error, undefined)
+  assert.equal(state.providerCalls(), 1)
 }
 
 // Operator prepare/resume reuses the production receipt without crossing the

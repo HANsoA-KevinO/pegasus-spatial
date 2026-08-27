@@ -107,6 +107,7 @@ import {
   executeSpatialTool,
   type SpatialToolName,
 } from '../tools/spatial'
+import { executeSpatialSceneTool, type SpatialSceneToolName } from '../tools/spatial-scene'
 
 // ==================== Provider Factory ====================
 
@@ -127,6 +128,8 @@ interface ProviderConfig {
    *  fed image content (output token count drops to 0). */
   supportsVision?: boolean
   executionContext?: AgentExecutionContext
+  /** Privileged public Workspace used only by explicitly delegated publication tools. */
+  publicationWorkspace?: WorkspaceInstance
 }
 
 interface ProviderCallbacks {
@@ -419,25 +422,6 @@ export function createAgentProvider(
       if (!canExecuteTool(config.executionContext, name)) {
         return { content: `Tool is not granted to this Agent: ${name}`, is_error: true }
       }
-      // Paid spatial capabilities have a second execution-time privilege
-      // boundary. Tool-schema visibility and wildcard expansion are not
-      // treated as authorization.
-      if (
-        ['GenerateImage', 'CreateObject3D', 'CreateWorld3D'].includes(name)
-        && config.executionContext?.isRoot !== true
-      ) {
-        return {
-          content: JSON.stringify({
-            schema_version: 1,
-            kind: name === 'GenerateImage' ? 'image' : name === 'CreateObject3D' ? 'object' : 'world',
-            status: 'failed',
-            provider: name === 'GenerateImage' ? 'image' : name === 'CreateObject3D' ? 'lux3d' : 'aholo',
-            error: `${name} 仅允许 Root Agent 调用。`,
-            updated_at: new Date().toISOString(),
-          }),
-          is_error: true,
-        }
-      }
       if (isAgentTeamTool(name)) {
         return executeAgentTeamTool(name, input, config.executionContext, invocation)
       }
@@ -551,6 +535,7 @@ export function createAgentProvider(
             executionContext: config.executionContext!,
             invocation: invocation!,
             signal: config.abortSignal,
+            publicationWorkspace: config.publicationWorkspace,
           })
         case 'CreateObject3D':
         case 'CreateWorld3D':
@@ -558,6 +543,21 @@ export function createAgentProvider(
         case 'WaitSpatialJob':
         case 'InspectSpatialArtifact':
           return executeSpatialTool(name as SpatialToolName, input, workspace, {
+            executionContext: config.executionContext,
+            invocation,
+            signal: config.abortSignal,
+          })
+        case 'CreateSpatialScene':
+        case 'SetSceneWorld':
+        case 'AddSceneObject':
+        case 'TransformSceneObject':
+        case 'RemoveSceneObject':
+        case 'InspectSpatialScene':
+        case 'RestoreSpatialScene':
+        case 'SetSceneViewpoint':
+        case 'FocusSceneObject':
+        case 'CaptureSceneView':
+          return executeSpatialSceneTool(name as SpatialSceneToolName, input, {
             executionContext: config.executionContext,
             invocation,
             signal: config.abortSignal,
@@ -675,6 +675,16 @@ export function summarizeToolCall(
     case 'GetSpatialJob': action = `查看了空间任务 ${input.job_id ?? ''}`.trim(); break
     case 'WaitSpatialJob': action = `等待了空间任务 ${input.job_id ?? ''}`.trim(); break
     case 'InspectSpatialArtifact': action = `检查了空间资产 ${input.artifact_id ?? ''}`.trim(); break
+    case 'CreateSpatialScene': action = `创建了 Scene「${input.title ?? ''}」`; break
+    case 'SetSceneWorld': action = `更新了 Scene ${input.scene_id ?? ''} 的整体 World`.trim(); break
+    case 'AddSceneObject': action = `向 Scene ${input.scene_id ?? ''} 添加了物体`.trim(); break
+    case 'TransformSceneObject': action = `调整了物体 ${input.instance_id ?? ''} 的绝对变换`.trim(); break
+    case 'RemoveSceneObject': action = `从 Scene 移除了物体 ${input.instance_id ?? ''}`.trim(); break
+    case 'InspectSpatialScene': action = `检查了 Scene ${input.scene_id ?? ''}`.trim(); break
+    case 'RestoreSpatialScene': action = `将 Scene 恢复为基于 v${input.revision_version ?? ''} 的新版本`.trim(); break
+    case 'SetSceneViewpoint': action = `设置了 Scene ${input.scene_id ?? ''} 的 Agent 相机`.trim(); break
+    case 'FocusSceneObject': action = `将 Agent 相机聚焦到 ${input.instance_id ?? ''}`.trim(); break
+    case 'CaptureSceneView': action = `从 Scene ${input.scene_id ?? ''} 捕获了真实渲染画面`.trim(); break
     case 'Agent': action = `创建了 Agent ${input.name ?? input.description ?? ''}`.trim(); break
     case 'SendMessage': action = `向 ${input.to ?? 'Agent'} 发送了消息`; break
     case 'TaskCreate': action = `创建了任务「${input.subject ?? '未命名任务'}」`; break

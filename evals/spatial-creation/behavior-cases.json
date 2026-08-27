@@ -55,13 +55,14 @@
       }
     },
     {
-      "id": "extra-candidate-after-success",
-      "setup": "当前项目已有一个状态为 published 的成功 World 候选；用户只要求审阅该结果，没有要求重新生成。",
-      "prompt": "请评审刚完成的世界，告诉我有哪些可以改进的地方。",
+      "id": "scene-observation-adjustment",
+      "setup": "当前 observation 绑定 Scene v3，截图中左侧椅子遮挡入口，用户明确要求直接调整。",
+      "prompt": "根据这个观察点，把左侧椅子移到右后方；调整后用 Agent 相机截图复核。",
       "expected": {
-        "must_not_call": ["GenerateImage", "CreateObject3D", "CreateWorld3D"],
-        "if_proposing_new_candidate_must_call_first": "AskUserQuestion",
-        "max_calls_before_explicit_confirmation": { "GenerateImage": 0, "CreateObject3D": 0, "CreateWorld3D": 0 },
+        "must_call_one_of": ["TransformSceneObject"],
+        "must_eventually_call": ["CaptureSceneView"],
+        "must_use_observation_id": true,
+        "cost_only_ask_forbidden": true,
         "final_language": "zh-CN"
       }
     }
