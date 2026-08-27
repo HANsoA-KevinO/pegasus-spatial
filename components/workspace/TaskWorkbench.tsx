@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useChatContext } from '@/contexts/ChatContext'
 import { useModels } from '@/hooks/useModels'
 import { useConversations } from '@/hooks/useConversation'
@@ -16,6 +16,31 @@ const CREATION_CONTEXTS = [
   '现实空间重建',
 ]
 
+const QUESTION_MIN_HEIGHT = 148
+const QUESTION_MAX_HEIGHT = 320
+const CONTEXT_MIN_HEIGHT = 104
+const CONTEXT_MAX_HEIGHT = 240
+
+function useAutoResizeTextarea(value: string, minHeight: number, maxHeight: number) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    textarea.style.overflowY = 'hidden'
+    textarea.style.height = `${minHeight}px`
+
+    const contentHeight = textarea.scrollHeight
+    const nextHeight = Math.min(maxHeight, Math.max(minHeight, contentHeight))
+
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
+  }, [maxHeight, minHeight, value])
+
+  return textareaRef
+}
+
 export function buildResearchProjectMessage(question: string, domain: string, context: string): string {
   return [
     `空间创作目标：${question.trim()}`,
@@ -28,6 +53,8 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
   const [question, setQuestion] = useState('')
   const [context, setContext] = useState('')
   const [domain, setDomain] = useState('开放空间创作')
+  const questionRef = useAutoResizeTextarea(question, QUESTION_MIN_HEIGHT, QUESTION_MAX_HEIGHT)
+  const contextRef = useAutoResizeTextarea(context, CONTEXT_MIN_HEIGHT, CONTEXT_MAX_HEIGHT)
   const { model, setModel, loadConversation } = useChatContext()
   const { models, isLoading: modelsLoading } = useModels()
   const { conversations } = useConversations()
@@ -69,6 +96,7 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-ink">你想创造什么？</span>
               <textarea
+                ref={questionRef}
                 value={question}
                 onChange={event => setQuestion(event.target.value)}
                 onKeyDown={event => {
@@ -77,20 +105,21 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
                     submit()
                   }
                 }}
-                rows={5}
                 placeholder="例如：创造一间可以进入的深夜电台，狭长空间、低照度钨丝灯、吸音木墙和一张用于直播的环形控制台。"
-                className="w-full resize-y rounded-2xl border border-ghost-border/70 bg-surface-lowest px-5 py-4 text-base leading-7 text-ink outline-none transition placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
+                className="w-full resize-none overflow-y-hidden rounded-2xl border border-ghost-border/70 bg-surface-lowest px-5 py-4 text-base leading-7 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
+                style={{ minHeight: QUESTION_MIN_HEIGHT, maxHeight: QUESTION_MAX_HEIGHT }}
               />
             </label>
 
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-ink">已有素材、风格与必须保留的约束（可选）</span>
               <textarea
+                ref={contextRef}
                 value={context}
                 onChange={event => setContext(event.target.value)}
-                rows={3}
                 placeholder="可说明参考图路径、空间用途、材质、光线、镜头、不能出现的元素，或希望先得到独立 GLB 物体。"
-                className="w-full resize-y rounded-2xl border border-ghost-border/70 bg-surface-lowest px-5 py-4 text-sm leading-6 text-ink outline-none transition placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
+                className="w-full resize-none overflow-y-hidden rounded-2xl border border-ghost-border/70 bg-surface-lowest px-5 py-4 text-sm leading-6 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
+                style={{ minHeight: CONTEXT_MIN_HEIGHT, maxHeight: CONTEXT_MAX_HEIGHT }}
               />
             </label>
 

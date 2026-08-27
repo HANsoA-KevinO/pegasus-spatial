@@ -247,7 +247,7 @@ export function ConversationList({
                     if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
                   }}
                   onClick={(e) => e.stopPropagation()}
-                  className="flex-1 min-w-0 bg-surface-low border border-primary/40 rounded-ctrl px-1.5 py-0.5 text-[13px] text-ink outline-none focus:border-primary"
+                  className="flex-1 min-w-0 bg-surface-low border border-primary/40 rounded-ctrl px-1.5 py-0.5 text-[14px] text-ink outline-none focus:border-primary"
                   style={{ fontFamily: 'var(--font-manrope), Manrope, system-ui', fontVariationSettings: "'wght' 400" }}
                   maxLength={200}
                 />
@@ -278,7 +278,7 @@ export function ConversationList({
         )
       })}
       {conversations.length === 0 && (
-        <div className="px-3 py-2 text-[10px] text-ink-muted tracking-wider">
+        <div className="px-3 py-2 text-[12px] text-ink-muted tracking-wide">
           暂无项目
         </div>
       )}
