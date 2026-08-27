@@ -1,108 +1,53 @@
 'use client'
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import { useChatContext } from '@/contexts/ChatContext'
 import { useModels } from '@/hooks/useModels'
 import { useConversations } from '@/hooks/useConversation'
-import type { ModelProvider } from '@/lib/types'
+import type { ImageAttachment, ModelProvider } from '@/lib/types'
+import { buildBrowserMediaUrl } from '@/lib/media/browser-url'
+import { ProgressiveImage } from '@/components/media/ProgressiveImage'
 import { BrandMark } from '@/components/shell/BrandMark'
 
-const CREATION_CONTEXTS = [
-  '开放空间创作',
-  '室内与居住空间',
-  '展陈、零售与活动',
-  '游戏与虚拟世界',
-  '家具、产品与道具',
-  '现实空间重建',
+const DEFAULT_CREATION_CONTEXT = '开放空间创作'
+const QUESTION_MIN_HEIGHT = 104
+const QUESTION_MAX_HEIGHT = 220
+const MAX_ATTACHMENTS = 6
+const MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024
+const MAX_TEXT_FILE_SIZE = 256 * 1024
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const TEXT_EXTENSIONS = new Set([
+  'txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'yaml', 'yml', 'xml',
+  'html', 'css', 'js', 'jsx', 'ts', 'tsx', 'py', 'sh', 'sql',
+])
+const ACCEPTED_UPLOAD_TYPES = [
+  ...IMAGE_TYPES,
+  ...Array.from(TEXT_EXTENSIONS, extension => `.${extension}`),
 ]
 
-const QUESTION_MIN_HEIGHT = 108
-const QUESTION_MAX_HEIGHT = 240
-const CONTEXT_MIN_HEIGHT = 76
-const CONTEXT_MAX_HEIGHT = 160
-
-interface WorkbenchSelectOption {
-  value: string
-  label: string
-  description?: string
+interface WorkbenchTextAttachment {
+  name: string
+  mimeType: string
+  content: string
 }
 
-function WorkbenchSelect({ value, options, disabled = false, loadingLabel, ariaLabel, onChange }: {
-  value: string
-  options: WorkbenchSelectOption[]
-  disabled?: boolean
-  loadingLabel?: string
-  ariaLabel: string
-  onChange: (value: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const selected = options.find(option => option.value === value)
-
-  useEffect(() => {
-    if (!open) return
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+type PendingAttachment =
+  | {
+      id: string
+      kind: 'image'
+      name: string
+      mimeType: string
+      size: number
+      image: ImageAttachment
     }
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+  | {
+      id: string
+      kind: 'text'
+      name: string
+      mimeType: string
+      size: number
+      content: string
     }
-    document.addEventListener('mousedown', closeOnOutsideClick)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('mousedown', closeOnOutsideClick)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [open])
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={() => setOpen(current => !current)}
-        className={`flex h-12 w-full items-center justify-between gap-3 rounded-[10px] border bg-surface-lowest px-3.5 text-left text-sm text-ink outline-none transition-[border-color,box-shadow,background-color] disabled:cursor-wait disabled:opacity-60 ${open ? 'border-primary/55 bg-surface-low shadow-[0_0_0_3px_color-mix(in_srgb,var(--primary)_12%,transparent)]' : 'border-ghost-border/70 hover:border-primary/35 hover:bg-surface-low'}`}
-      >
-        <span className="min-w-0 flex-1 truncate font-medium">{disabled ? loadingLabel ?? '加载中…' : selected?.label ?? value}</span>
-        <svg className={`h-4 w-4 shrink-0 text-ink-muted transition-transform duration-200 ${open ? 'rotate-180 text-primary' : ''}`} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.7} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="m5.5 7.75 4.5 4.5 4.5-4.5" />
-        </svg>
-      </button>
-
-      {open && (
-        <div role="listbox" aria-label={`${ariaLabel}选项`} className="absolute inset-x-0 bottom-full z-30 mb-2 overflow-hidden rounded-[10px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-1.5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
-          {options.map(option => {
-            const active = option.value === value
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="option"
-                aria-selected={active}
-                onClick={() => {
-                  onChange(option.value)
-                  setOpen(false)
-                }}
-                className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition ${active ? 'bg-primary/12 text-primary' : 'text-ink-secondary hover:bg-surface-low hover:text-ink'}`}
-              >
-                <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? 'border-primary bg-primary text-on-primary' : 'border-outline-variant/35 text-transparent'}`}>
-                  <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2.2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m3.5 8 3 3 6-6" /></svg>
-                </span>
-                <span className="min-w-0 flex-1">
-                  <strong className="block truncate text-[13px] font-semibold">{option.label}</strong>
-                  {option.description && <small className="mt-0.5 block truncate text-[10.5px] font-normal text-ink-muted">{option.description}</small>}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function useAutoResizeTextarea(value: string, minHeight: number, maxHeight: number) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -124,31 +69,194 @@ function useAutoResizeTextarea(value: string, minHeight: number, maxHeight: numb
   return textareaRef
 }
 
-export function buildResearchProjectMessage(question: string, domain: string, context: string): string {
+function fileExtension(fileName: string): string {
+  return fileName.split('.').pop()?.toLowerCase() ?? ''
+}
+
+function isTextAttachment(file: File): boolean {
+  return file.type.startsWith('text/')
+    || ['application/json', 'application/xml', 'application/yaml', 'application/x-yaml', 'application/javascript'].includes(file.type)
+    || TEXT_EXTENSIONS.has(fileExtension(file.name))
+}
+
+function escapeAttribute(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+export function buildResearchProjectMessage(
+  question: string,
+  domain: string,
+  context: string,
+  textAttachments: WorkbenchTextAttachment[] = [],
+): string {
+  const fileContext = textAttachments.map(file => [
+    `<reference-file name="${escapeAttribute(file.name)}" mime_type="${escapeAttribute(file.mimeType || 'text/plain')}">`,
+    file.content.trim(),
+    '</reference-file>',
+  ].join('\n')).join('\n\n')
+
   return [
     `空间创作目标：${question.trim()}`,
     `创作语境：${domain}`,
     context.trim() ? `已有素材与约束：\n${context.trim()}` : '',
+    fileContext ? `上传的参考文件：\n${fileContext}` : '',
   ].filter(Boolean).join('\n\n')
 }
 
-export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain: string) => void }) {
+export function TaskWorkbench({ onSubmit }: {
+  onSubmit: (message: string, domain: string, images?: ImageAttachment[]) => void
+}) {
   const [question, setQuestion] = useState('')
-  const [context, setContext] = useState('')
-  const [domain, setDomain] = useState('开放空间创作')
+  const [modelOptionsOpen, setModelOptionsOpen] = useState(false)
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [uploadingCount, setUploadingCount] = useState(0)
+  const [attachmentError, setAttachmentError] = useState('')
   const questionRef = useAutoResizeTextarea(question, QUESTION_MIN_HEIGHT, QUESTION_MAX_HEIGHT)
-  const contextRef = useAutoResizeTextarea(context, CONTEXT_MIN_HEIGHT, CONTEXT_MAX_HEIGHT)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const modelControlRef = useRef<HTMLDivElement>(null)
   const { model, setModel, loadConversation } = useChatContext()
   const { models, isLoading: modelsLoading } = useModels()
   const { conversations } = useConversations()
   const hasSidebarContent = conversations.length > 0
+  const selectedModel = models.find(item => item.id === model)
+  const selectedModelName = selectedModel?.name ?? (modelsLoading ? '正在读取模型…' : model)
+  const pendingImages = attachments.filter((item): item is Extract<PendingAttachment, { kind: 'image' }> => item.kind === 'image')
+  const pendingTextFiles = attachments.filter((item): item is Extract<PendingAttachment, { kind: 'text' }> => item.kind === 'text')
+  const hasUnsupportedImages = pendingImages.length > 0 && !modelsLoading && selectedModel?.supportsVision !== true
+
+  useEffect(() => {
+    if (!modelOptionsOpen) return
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!modelControlRef.current?.contains(event.target as Node)) setModelOptionsOpen(false)
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setModelOptionsOpen(false)
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [modelOptionsOpen])
+
+  useEffect(() => {
+    if (hasUnsupportedImages) {
+      setAttachmentError('当前模型不支持图片。附件已保留，请在“推理模型”中切换到多模态模型。')
+    } else if (attachmentError.startsWith('当前模型不支持图片')) {
+      setAttachmentError('')
+    }
+  }, [attachmentError, hasUnsupportedImages])
+
+  const processFiles = useCallback(async (files: File[]) => {
+    const remaining = Math.max(0, MAX_ATTACHMENTS - attachments.length)
+    const candidates = files.slice(0, remaining)
+    if (candidates.length === 0) {
+      setAttachmentError(`最多添加 ${MAX_ATTACHMENTS} 个参考文件。`)
+      return
+    }
+
+    setAttachmentError(files.length > remaining ? `最多添加 ${MAX_ATTACHMENTS} 个参考文件，多余文件已忽略。` : '')
+    setUploadingCount(candidates.length)
+    const accepted: PendingAttachment[] = []
+    const errors: string[] = []
+
+    for (const file of candidates) {
+      const id = `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`
+      try {
+        if (IMAGE_TYPES.includes(file.type)) {
+          if (file.size > MAX_IMAGE_FILE_SIZE) {
+            errors.push(`${file.name} 超过 20MB`)
+            continue
+          }
+          const form = new FormData()
+          form.append('file', file)
+          const response = await fetch('/api/media/upload', { method: 'POST', body: form })
+          const payload = await response.json().catch(() => ({})) as { error?: string; image?: ImageAttachment }
+          if (!response.ok || !payload.image || !('assetId' in payload.image)) {
+            throw new Error(payload.error ?? '图片上传失败')
+          }
+          accepted.push({
+            id,
+            kind: 'image',
+            name: file.name,
+            mimeType: payload.image.mimeType,
+            size: file.size,
+            image: payload.image,
+          })
+          continue
+        }
+
+        if (!isTextAttachment(file)) {
+          errors.push(`${file.name} 的格式暂不支持`)
+          continue
+        }
+        if (file.size > MAX_TEXT_FILE_SIZE) {
+          errors.push(`${file.name} 超过 256KB`)
+          continue
+        }
+        accepted.push({
+          id,
+          kind: 'text',
+          name: file.name,
+          mimeType: file.type || 'text/plain',
+          size: file.size,
+          content: (await file.text()).replaceAll('\0', ''),
+        })
+      } catch (cause) {
+        errors.push(`${file.name}：${cause instanceof Error ? cause.message : '上传失败'}`)
+      }
+    }
+
+    setAttachments(current => [...current, ...accepted].slice(0, MAX_ATTACHMENTS))
+    setUploadingCount(0)
+    if (errors.length > 0) setAttachmentError(errors.join('；'))
+  }, [attachments.length])
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    event.target.value = ''
+    if (files.length > 0) void processFiles(files)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const files = Array.from(event.dataTransfer.files ?? [])
+    if (files.length > 0) void processFiles(files)
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments(current => current.filter(item => item.id !== id))
+    setAttachmentError('')
+  }
 
   const submit = () => {
     const trimmed = question.trim()
-    if (!trimmed) return
-    const message = buildResearchProjectMessage(trimmed, domain, context)
-    onSubmit(message, domain)
+    if (!trimmed || uploadingCount > 0 || hasUnsupportedImages) return
+    const message = buildResearchProjectMessage(
+      trimmed,
+      DEFAULT_CREATION_CONTEXT,
+      '',
+      pendingTextFiles.map(file => ({ name: file.name, mimeType: file.mimeType, content: file.content })),
+    )
+    onSubmit(
+      message,
+      DEFAULT_CREATION_CONTEXT,
+      pendingImages.length > 0 ? pendingImages.map(item => item.image) : undefined,
+    )
   }
+
+  const canSubmit = Boolean(question.trim()) && uploadingCount === 0 && !hasUnsupportedImages
 
   return (
     <div className="relative h-full w-full overflow-y-auto bg-surface px-6 py-7 lg:px-12 lg:py-9">
@@ -162,21 +270,19 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
           ].join(','),
         }}
       />
-      <div className={`mx-auto grid gap-6 ${hasSidebarContent ? 'max-w-6xl xl:grid-cols-[minmax(0,1fr)_300px]' : 'max-w-4xl'}`}>
-        <section className="relative overflow-hidden rounded-[10px] border border-[var(--paper-edge)] bg-[var(--paper)] p-6 shadow-[var(--shadow-paper)] lg:p-8">
-          <div aria-hidden="true" className="absolute inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,var(--primary-deep)_0_28%,var(--primary)_28%_46%,transparent_46%)]" />
-          <div className="mb-5 flex items-center gap-3">
-            <BrandMark className="h-10 w-10" />
+      <div className={`relative mx-auto grid gap-6 ${hasSidebarContent ? 'max-w-6xl xl:grid-cols-[minmax(0,1fr)_300px]' : 'max-w-4xl'}`}>
+        <section className="rounded-[12px] border border-[var(--paper-edge)] bg-[var(--paper)] p-5 shadow-[var(--shadow-paper)] lg:p-7">
+          <header className="mb-5 flex items-start gap-3">
+            <BrandMark className="mt-0.5 h-10 w-10 shrink-0" />
             <div>
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">Agentic spatial creation</p>
-              <h1 className="mt-1 text-[28px] font-bold tracking-[-0.035em] text-ink lg:text-[32px]">描述一个想进入的世界</h1>
+              <h1 className="text-[28px] font-bold tracking-[-0.035em] text-ink lg:text-[31px]">描述一个想进入的世界</h1>
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-secondary">
+                说清体验与约束，Agent 会选择合适的图像、3D 造物和世界生成工具。
+              </p>
             </div>
-          </div>
-          <p className="mb-5 max-w-3xl text-sm leading-6 text-ink-secondary">
-            描述空间体验与必要约束，Agent 会自动选择已接入的图像、3D 造物和世界生成工具。
-          </p>
+          </header>
 
-          <div className="space-y-4">
+          <div className="overflow-visible rounded-[14px] border border-ghost-border/75 bg-surface-lowest p-3.5 shadow-[0_12px_36px_color-mix(in_srgb,var(--ink)_8%,transparent)] sm:p-4">
             <label className="block">
               <span className="mb-2 block text-sm font-semibold text-ink">你想创造什么？</span>
               <textarea
@@ -189,50 +295,133 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
                     submit()
                   }
                 }}
-                placeholder="例如：创造一间可以进入的深夜电台，狭长空间、低照度钨丝灯、吸音木墙和一张用于直播的环形控制台。"
-                className="w-full resize-none overflow-y-hidden rounded-xl border border-ghost-border/70 bg-surface-lowest px-4 py-3.5 text-[15px] leading-6 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
+                placeholder="描述空间、用途、材质、光线、镜头与必须保留的元素，例如：一间狭长的深夜电台，低照度钨丝灯、吸音木墙和环形直播控制台。"
+                className="w-full resize-none overflow-y-hidden rounded-[10px] border border-ghost-border/70 bg-surface px-3.5 py-3 text-[15px] leading-6 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
                 style={{ minHeight: QUESTION_MIN_HEIGHT, maxHeight: QUESTION_MAX_HEIGHT }}
               />
             </label>
 
-            <label className="block">
-              <span className="mb-2 block text-sm font-semibold text-ink">已有素材、风格与必须保留的约束（可选）</span>
-              <textarea
-                ref={contextRef}
-                value={context}
-                onChange={event => setContext(event.target.value)}
-                placeholder="可说明参考图路径、空间用途、材质、光线、镜头、不能出现的元素，或希望先得到独立 GLB 物体。"
-                className="w-full resize-none overflow-y-hidden rounded-xl border border-ghost-border/70 bg-surface-lowest px-4 py-3 text-sm leading-5 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
-                style={{ minHeight: CONTEXT_MIN_HEIGHT, maxHeight: CONTEXT_MAX_HEIGHT }}
+            <div
+              onDrop={handleDrop}
+              onDragOver={event => event.preventDefault()}
+              className="mt-3 rounded-[10px] border border-dashed border-primary/30 bg-primary/[0.035] p-2.5 transition-colors hover:border-primary/50 hover:bg-primary/[0.055]"
+            >
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingCount > 0 || attachments.length >= MAX_ATTACHMENTS}
+                className="flex min-h-[68px] w-full items-center justify-center gap-3 rounded-lg px-3 text-left transition hover:bg-surface-low disabled:cursor-wait disabled:opacity-55"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V4.5m0 0L7.5 9M12 4.5 16.5 9M5.25 13.5v4.25a1.75 1.75 0 0 0 1.75 1.75h10a1.75 1.75 0 0 0 1.75-1.75V13.5" />
+                  </svg>
+                </span>
+                <span>
+                  <strong className="block text-sm font-semibold text-ink">添加参考文件</strong>
+                  <small className="mt-0.5 block text-[11px] leading-4 text-ink-muted">
+                    图片、TXT、Markdown、CSV、JSON 与常见代码文件；图片 ≤ 20MB，文本 ≤ 256KB
+                  </small>
+                </span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPTED_UPLOAD_TYPES.join(',')}
+                multiple
+                onChange={handleFileChange}
+                className="hidden"
               />
-            </label>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-ink-muted">创作语境（不锁定工具）</span>
-                <WorkbenchSelect
-                  value={domain}
-                  ariaLabel="创作语境（不锁定工具）"
-                  options={CREATION_CONTEXTS.map(item => ({ value: item, label: item }))}
-                  onChange={setDomain}
-                />
-              </div>
-              <div className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-ink-muted">推理模型</span>
-                <WorkbenchSelect
-                  value={model}
-                  disabled={modelsLoading}
-                  loadingLabel="正在读取模型…"
-                  ariaLabel="推理模型"
-                  options={models.map(item => ({ value: item.id, label: item.name, description: item.description }))}
-                  onChange={value => setModel(value as ModelProvider)}
-                />
-              </div>
+              {attachments.length > 0 && (
+                <div className="grid gap-2 border-t border-ghost-border/55 pt-2.5 sm:grid-cols-2">
+                  {attachments.map(item => (
+                    <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-ghost-border/60 bg-surface-lowest px-2.5 py-2">
+                      {item.kind === 'image' ? (
+                        <ProgressiveImage
+                          src={'assetId' in item.image
+                            ? buildBrowserMediaUrl(item.image.assetId, 'thumbnail', item.image.storageDriver)
+                            : item.image.url}
+                          alt={item.name}
+                          fit="cover"
+                          frameClassName="h-9 w-9 shrink-0 rounded-md"
+                          imageClassName="h-9 w-9 object-cover"
+                        />
+                      ) : (
+                        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-primary/8 font-mono text-[10px] font-bold uppercase text-primary">
+                          {fileExtension(item.name).slice(0, 4) || 'TXT'}
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <strong className="block truncate text-xs font-medium text-ink">{item.name}</strong>
+                        <small className="mt-0.5 block text-[10px] text-ink-muted">{formatFileSize(item.size)}</small>
+                      </span>
+                      <button type="button" onClick={() => removeAttachment(item.id)} className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-ink-muted transition hover:bg-primary/10 hover:text-primary" aria-label={`移除 ${item.name}`}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-              <p className="text-[11px] text-ink-muted">⌘ / Ctrl + Enter 开始</p>
-              <button type="button" onClick={submit} disabled={!question.trim()} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary shadow-lg shadow-primary/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40">
+            {(uploadingCount > 0 || attachmentError) && (
+              <p className={`mt-2 text-[11px] ${attachmentError ? 'text-danger' : 'text-ink-muted'}`}>
+                {attachmentError || `正在处理 ${uploadingCount} 个文件…`}
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-ghost-border/55 pt-3">
+              <div ref={modelControlRef} className="relative min-w-0 flex-1 sm:max-w-[360px]">
+                <button
+                  type="button"
+                  aria-expanded={modelOptionsOpen}
+                  aria-controls="workbench-model-options"
+                  onClick={() => setModelOptionsOpen(current => !current)}
+                  className={`flex h-10 max-w-full items-center gap-2 rounded-[9px] border px-3 text-left text-xs font-medium transition ${modelOptionsOpen ? 'border-primary/45 bg-primary/8 text-primary' : 'border-ghost-border/70 bg-surface-low text-ink-secondary hover:border-primary/30 hover:text-ink'}`}
+                >
+                  <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
+                    <path strokeLinecap="round" d="M3 5h14M5.5 10h9M8 15h4" />
+                    <circle cx="7" cy="5" r="1.25" fill="currentColor" stroke="none" />
+                    <circle cx="12" cy="10" r="1.25" fill="currentColor" stroke="none" />
+                    <circle cx="10" cy="15" r="1.25" fill="currentColor" stroke="none" />
+                  </svg>
+                  <span className="shrink-0">推理模型</span>
+                  <span className="truncate text-ink-muted">{selectedModelName}</span>
+                  <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${modelOptionsOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m5.5 7.75 4.5 4.5 4.5-4.5" /></svg>
+                </button>
+
+                {modelOptionsOpen && (
+                  <div id="workbench-model-options" role="listbox" aria-label="推理模型" className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(360px,calc(100vw-4rem))] overflow-y-auto rounded-[10px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-1.5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
+                    {modelsLoading ? (
+                      <p className="px-3 py-4 text-center text-xs text-ink-muted">正在读取模型…</p>
+                    ) : models.map(item => {
+                      const active = item.id === model
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          role="option"
+                          aria-selected={active}
+                          onClick={() => {
+                            setModel(item.id as ModelProvider)
+                            setModelOptionsOpen(false)
+                          }}
+                          className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition ${active ? 'bg-primary/12 text-primary' : 'text-ink-secondary hover:bg-surface-low hover:text-ink'}`}
+                        >
+                          <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${active ? 'border-primary bg-primary text-on-primary' : 'border-outline-variant/35 text-transparent'}`}>
+                            <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2.2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m3.5 8 3 3 6-6" /></svg>
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <strong className="block truncate text-[13px] font-semibold">{item.name}</strong>
+                            {item.description && <small className="mt-0.5 block truncate text-[10.5px] font-normal text-ink-muted">{item.description}</small>}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button type="button" onClick={submit} disabled={!canSubmit} className="rounded-[10px] bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary shadow-lg shadow-primary/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40">
                 开始空间创作
               </button>
             </div>
