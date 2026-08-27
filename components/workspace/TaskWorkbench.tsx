@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import { useChatContext } from '@/contexts/ChatContext'
 import { useModels } from '@/hooks/useModels'
-import { useConversations } from '@/hooks/useConversation'
 import type { ImageAttachment, ModelProvider } from '@/lib/types'
 import { buildBrowserMediaUrl } from '@/lib/media/browser-url'
 import { ProgressiveImage } from '@/components/media/ProgressiveImage'
@@ -124,10 +123,8 @@ export function TaskWorkbench({ onSubmit }: {
   const questionRef = useAutoResizeTextarea(question, QUESTION_MIN_HEIGHT, QUESTION_MAX_HEIGHT)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modelControlRef = useRef<HTMLDivElement>(null)
-  const { model, setModel, loadConversation } = useChatContext()
+  const { model, setModel } = useChatContext()
   const { models, isLoading: modelsLoading } = useModels()
-  const { conversations } = useConversations()
-  const hasSidebarContent = conversations.length > 0
   const selectedModel = models.find(item => item.id === model)
   const selectedModelName = selectedModel?.name ?? (modelsLoading ? '正在读取模型…' : model)
   const pendingImages = attachments.filter((item): item is Extract<PendingAttachment, { kind: 'image' }> => item.kind === 'image')
@@ -270,7 +267,7 @@ export function TaskWorkbench({ onSubmit }: {
           ].join(','),
         }}
       />
-      <div className={`relative mx-auto grid gap-6 ${hasSidebarContent ? 'max-w-6xl xl:grid-cols-[minmax(0,1fr)_300px]' : 'max-w-4xl'}`}>
+      <div className="relative mx-auto max-w-4xl">
         <section className="rounded-[12px] border border-[var(--paper-edge)] bg-[var(--paper)] p-5 shadow-[var(--shadow-paper)] lg:p-7">
           <header className="mb-5 flex items-center gap-3">
             <BrandMark className="h-10 w-10 shrink-0" />
@@ -417,20 +414,6 @@ export function TaskWorkbench({ onSubmit }: {
           </div>
         </section>
 
-        {hasSidebarContent && (
-          <aside className="space-y-5">
-            <div className="rounded-2xl border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
-              <h2 className="mb-3 text-sm font-semibold text-ink">最近项目</h2>
-              <div className="space-y-1">
-                {conversations.slice(0, 4).map(item => (
-                  <button key={item.conversation_id} type="button" onClick={() => loadConversation(item.conversation_id)} className="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-secondary transition hover:bg-surface-low hover:text-ink">
-                    <span className="block truncate font-medium">{item.title}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </aside>
-        )}
       </div>
     </div>
   )
