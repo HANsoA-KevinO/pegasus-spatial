@@ -70,11 +70,17 @@ function flyGhost(srcRect: DOMRect | null, text: string) {
 }
 
 export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQuote, contextUsage }: ChatInputProps) {
-  const { model, setModel } = useChatContext()
+  const {
+    model,
+    setModel,
+    spatialObservationDraft,
+    clearSpatialObservationDraft,
+  } = useChatContext()
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([])
   const [uploadingImages, setUploadingImages] = useState(0)
   const [imageUploadError, setImageUploadError] = useState('')
+  const [submittingObservation, setSubmittingObservation] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -123,21 +129,62 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
     setTimeout(() => setShimmering(false), 850)
   }
 
-  const handleSend = () => {
-    if (uploadingImages > 0 || !(input.trim() || pendingImages.length > 0)) return
-    if (pendingImages.length > 0 && !supportsVision) {
+  const handleSend = async () => {
+    const hasDraft = Boolean(spatialObservationDraft)
+    if (uploadingImages > 0 || submittingObservation || !(input.trim() || (!hasDraft && pendingImages.length > 0))) return
+    if ((pendingImages.length > 0 || hasDraft) && !supportsVision) {
       setImageUploadError('当前模型不支持图片。请移除图片，或切换到支持图片的模型。')
       return
     }
-    triggerShimmer()
 
     const userText = input.trim() || '请分析这张图片'
     let message = userText
+    let attachments = pendingImages
+
+    if (spatialObservationDraft) {
+      setSubmittingObservation(true)
+      setImageUploadError('')
+      try {
+        const response = await fetch(
+          `/api/conversations/${encodeURIComponent(spatialObservationDraft.conversationId)}/spatial/scenes/${encodeURIComponent(spatialObservationDraft.sceneId)}/observations`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              asset_id: spatialObservationDraft.image.assetId,
+              revision_id: spatialObservationDraft.revisionId,
+              comment: userText,
+              viewpoint: spatialObservationDraft.viewpoint,
+              selected_instance_id: spatialObservationDraft.selectedInstanceId,
+              visible_instance_ids: spatialObservationDraft.visibleInstanceIds,
+            }),
+          },
+        )
+        const body = await response.json().catch(() => null) as {
+          error?: string
+          observation?: { observation_id: string; revision_id: string; screenshot_workspace_path: string }
+          image?: { assetId: string; mimeType: string }
+        } | null
+        if (!response.ok || !body?.observation) throw new Error(body?.error ?? '空间观察提交失败。')
+
+        const selected = spatialObservationDraft.selectedInstanceId
+          ? ` selected_instance_id="${spatialObservationDraft.selectedInstanceId}"`
+          : ''
+        message = `<spatial-observation observation_id="${body.observation.observation_id}" scene_id="${spatialObservationDraft.sceneId}" scene_version="${spatialObservationDraft.sceneVersion}" revision_id="${body.observation.revision_id}"${selected}>\n修改要求：${userText}\n相机：${JSON.stringify(spatialObservationDraft.viewpoint)}\n截图：${body.observation.screenshot_workspace_path}\n</spatial-observation>`
+        attachments = [body.image ?? spatialObservationDraft.image, ...pendingImages].slice(0, MAX_IMAGES)
+      } catch (cause) {
+        setImageUploadError(cause instanceof Error ? cause.message : '空间观察提交失败。')
+        setSubmittingObservation(false)
+        return
+      }
+    }
+
+    triggerShimmer()
     if (quotedSelection) {
       const lines = quotedSelection.startLine && quotedSelection.endLine
         ? ` lines="${quotedSelection.startLine}-${quotedSelection.endLine}"`
         : ''
-      message = `<quoted-selection path="${quotedSelection.path}"${lines}>\n${quotedSelection.content}\n</quoted-selection>\n\n${userText}`
+      message = `<quoted-selection path="${quotedSelection.path}"${lines}>\n${quotedSelection.content}\n</quoted-selection>\n\n${message}`
       onClearQuote?.()
     }
 
@@ -147,16 +194,18 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
     const ghostText = userText.length > 200 ? userText.slice(0, 200) + '…' : userText
     flyGhost(srcRect, ghostText)
 
-    onSend(message, pendingImages.length > 0 ? pendingImages : undefined)
+    onSend(message, attachments.length > 0 ? attachments : undefined)
     setInput('')
     setPendingImages([])
+    clearSpatialObservationDraft()
+    setSubmittingObservation(false)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 
@@ -245,16 +294,17 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
   }
 
   const canSend = uploadingImages === 0
-    && !!(input.trim() || pendingImages.length > 0)
-    && (supportsVision || pendingImages.length === 0)
+    && !submittingObservation
+    && !!(input.trim() || (!spatialObservationDraft && pendingImages.length > 0))
+    && (supportsVision || (pendingImages.length === 0 && !spatialObservationDraft))
 
   useEffect(() => {
-    if (!modelsLoading && pendingImages.length > 0 && !supportsVision) {
+    if (!modelsLoading && (pendingImages.length > 0 || spatialObservationDraft) && !supportsVision) {
       setImageUploadError('当前模型不支持图片。附件已保留，请移除图片或切换模型。')
     } else if (supportsVision && imageUploadError.startsWith('当前模型不支持图片')) {
       setImageUploadError('')
     }
-  }, [imageUploadError, modelsLoading, pendingImages.length, supportsVision])
+  }, [imageUploadError, modelsLoading, pendingImages.length, spatialObservationDraft, supportsVision])
 
   return (
     <div
@@ -287,6 +337,29 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
             <div className="text-ink-secondary line-clamp-3 whitespace-pre-wrap font-mono text-[11px]">
               {quotedSelection.content}
             </div>
+          </div>
+        )}
+
+        {spatialObservationDraft && (
+          <div className="mb-3 flex items-center gap-3 rounded-card border border-primary/20 bg-primary/[0.07] px-3 py-2.5">
+            <ProgressiveImage
+              src={buildBrowserMediaUrl(spatialObservationDraft.image.assetId, 'thumbnail')}
+              alt="当前 Scene 观察截图"
+              fit="cover"
+              frameClassName="h-14 w-20 shrink-0 rounded-ctrl"
+              imageClassName="h-14 w-20 object-cover"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] font-semibold tracking-[0.1em] text-primary">SCENE OBSERVATION</span>
+                <span className="rounded-full bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] text-primary">v{spatialObservationDraft.sceneVersion}</span>
+              </div>
+              <p className="mt-1 truncate text-[12px] text-ink-secondary">
+                {spatialObservationDraft.selectedInstanceLabel ? `已选择：${spatialObservationDraft.selectedInstanceLabel}` : '已附加当前相机视角'}
+              </p>
+              <p className="mt-0.5 text-[10px] text-ink-muted">输入修改要求后，截图与视角会一起交给 Agent。</p>
+            </div>
+            <button type="button" onClick={clearSpatialObservationDraft} className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-ink-muted transition hover:bg-primary/10 hover:text-primary" aria-label="移除 Scene 观察">×</button>
           </div>
         )}
 
@@ -328,6 +401,7 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
             state and active state share one composer visual language. */}
         <div className="pmo-input-shell">
           <textarea
+            id="pegasus-chat-input"
             ref={textareaRef}
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -336,6 +410,7 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
             onPaste={handlePaste}
             placeholder={
               isLoading ? '输入追加消息…'
+              : spatialObservationDraft ? '描述你希望 Agent 如何修改这个视角中的空间…'
               : pendingImages.length > 0 ? '描述你想要的操作…'
               : quotedSelection ? '描述你想要的修改…'
               : '描述你想创造、修订或审阅的空间与 3D 资产…'
@@ -448,7 +523,8 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
                 {input.trim() && (
                   <button
                     type="button"
-                    onClick={handleSend}
+                    onClick={() => void handleSend()}
+                    disabled={submittingObservation}
                     className={`pmo-send-btn append ${shimmering ? 'fire' : ''}`}
                     title="追加"
                   >
@@ -467,12 +543,12 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
             ) : (
               <button
                 type="button"
-                onClick={handleSend}
+                onClick={() => void handleSend()}
                 disabled={!canSend}
                 className={`pmo-send-btn ${shimmering ? 'fire' : ''}`}
-                title="发送"
+                title={submittingObservation ? '正在提交空间观察' : '发送'}
               >
-                ↑
+                {submittingObservation ? '…' : '↑'}
               </button>
             )}
           </div>

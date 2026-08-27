@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useChatContext } from '@/contexts/ChatContext'
 import { BrandMark } from './BrandMark'
 
 const STATIC_NAV_LINKS = [
@@ -13,14 +12,6 @@ const STATIC_NAV_LINKS = [
 
 export function TopNavBar() {
   const pathname = usePathname()
-  const { conversationId } = useChatContext()
-  const navLinks = conversationId
-    ? [
-        STATIC_NAV_LINKS[0],
-        { href: `/spatial/${encodeURIComponent(conversationId)}`, label: '空间舞台' },
-        ...STATIC_NAV_LINKS.slice(1),
-      ]
-    : STATIC_NAV_LINKS
 
   return (
     <nav className="fixed top-0 z-50 flex h-16 w-full items-center justify-between border-b border-[var(--glass-panel-border)] bg-[color-mix(in_srgb,var(--glass-panel-bg)_70%,transparent)] px-8 backdrop-blur-xl">
@@ -30,7 +21,7 @@ export function TopNavBar() {
           <span className="text-lg font-bold tracking-tight text-ink">Pegasus Spatial</span>
         </Link>
         <div className="hidden items-center gap-6 md:flex">
-          {navLinks.map(link => {
+          {STATIC_NAV_LINKS.map(link => {
             const active = link.href === '/' ? pathname === '/' : pathname.startsWith(link.href)
             return (
               <Link

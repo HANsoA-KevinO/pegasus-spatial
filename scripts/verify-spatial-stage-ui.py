@@ -22,6 +22,10 @@ def main() -> None:
         "--screenshot",
         default=str(Path(tempfile.gettempdir()) / "pegasus-spatial-stage.png"),
     )
+    parser.add_argument(
+        "--embedded-screenshot",
+        default=str(Path(tempfile.gettempdir()) / "pegasus-spatial-stage-embedded.png"),
+    )
     args = parser.parse_args()
     base_url = args.base_url.rstrip("/")
 
@@ -29,7 +33,7 @@ def main() -> None:
     failed_responses: list[str] = []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1600, "height": 1000})
+        page = browser.new_page(viewport={"width": 1600, "height": 1000}, color_scheme="dark")
         page.on(
             "console",
             lambda message: console_errors.append(message.text)
@@ -43,6 +47,14 @@ def main() -> None:
             else None,
         )
         page.route(
+            "**/api/conversations",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body="[]",
+            ),
+        )
+        page.route(
             f"**/api/conversations/{args.conversation_id}",
             lambda route: route.fulfill(
                 status=200,
@@ -51,6 +63,19 @@ def main() -> None:
                     '{"conversation_id":"stage-empty-browser-smoke",'
                     '"title":"空世界舞台浏览器测试","messages":[],"settings":{},'
                     '"output":{"files":{},"manifest":{}},"is_running":false}'
+                ),
+            ),
+        )
+        page.route(
+            f"**/api/conversations/{args.conversation_id}/team",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=(
+                    '{"team":{"team_id":"team_fixture","status":"completed",'
+                    '"created_at":"2026-08-27T00:00:00.000Z","updated_at":"2026-08-27T00:00:00.000Z"},'
+                    '"agents":[],"counts":{"total":0,"running":0,"standby":0,"completed":0,"failed":0},'
+                    '"latest_root_run":null,"latest_event_seq":0}'
                 ),
             ),
         )
@@ -133,11 +158,34 @@ def main() -> None:
         screenshot = Path(args.screenshot)
         screenshot.parent.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(screenshot), full_page=True)
+
+        page.get_by_role("link", name="返回 Agent").click()
+        page.wait_for_url(f"{base_url}/")
+        page.get_by_role("tab", name="场景").click()
+        page.get_by_role("button", name="v2 可编辑客厅 scene_fixture").click()
+        page.get_by_text("SCENE · v2", exact=True).wait_for(state="visible")
+        page.get_by_role("button", name="对象 0").wait_for(state="visible")
+        page.get_by_role("button", name="版本 2").click()
+        page.get_by_text("版本历史 · 只读", exact=True).wait_for(state="visible")
+        page.get_by_role("button", name="从这里提出修改").wait_for(state="visible")
+        page.locator("#pegasus-chat-input").wait_for(state="visible")
+        page.get_by_text("空间舞台", exact=True).wait_for(state="detached")
+
+        embedded_overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        assert embedded_overflow <= 1, f"embedded stage has horizontal overflow: {embedded_overflow}px"
+        embedded_screenshot = Path(args.embedded_screenshot)
+        embedded_screenshot.parent.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(embedded_screenshot), full_page=True)
         assert not failed_responses, f"failed responses: {failed_responses}"
         assert not console_errors, f"browser console errors: {console_errors}"
         browser.close()
 
-    print(f"spatial-stage-ui passed screenshot={args.screenshot} provider_calls=0")
+    print(
+        "spatial-stage-ui passed "
+        f"screenshot={args.screenshot} embedded_screenshot={args.embedded_screenshot} provider_calls=0"
+    )
 
 
 if __name__ == "__main__":

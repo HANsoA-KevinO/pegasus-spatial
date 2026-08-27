@@ -2633,6 +2633,8 @@ button.pmo-memory-node:hover {
   color: var(--on-surface);
   padding: 16px 18px 12px;
   min-height: 64px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 .pmo-input-textarea::placeholder {
   color: var(--ink-faint);

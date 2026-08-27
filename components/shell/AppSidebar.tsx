@@ -8,6 +8,8 @@ import { useConversationTitle } from '@/hooks/useConversation'
 import { useLiteraturePaperSummaries } from '@/hooks/useLiteraturePaperSummaries'
 import { parsePaperSummaryFile } from '@/lib/literature/paper-summaries'
 import { WorkspaceFileExplorer } from '@/components/workspace/WorkspaceFileExplorer'
+import { SpatialSceneList } from '@/components/spatial-stage/SpatialSceneList'
+import { useSpatialScenes } from '@/hooks/useSpatialScenes'
 import { ConversationList } from './ConversationList'
 import { FeedbackDialog } from './FeedbackDialog'
 
@@ -43,7 +45,7 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
   active: boolean
   disabled?: boolean
   label: string
-  icon: 'projects' | 'files'
+  icon: 'projects' | 'scenes' | 'files'
   count?: number
   onClick: () => void
 }) {
@@ -58,10 +60,12 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
     >
       {icon === 'projects' ? (
         <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25A2.25 2.25 0 0 1 6 3h3.19c.6 0 1.17.24 1.59.66l.56.56c.42.42.99.66 1.59.66H18A2.25 2.25 0 0 1 20.25 7.1v10.65A2.25 2.25 0 0 1 18 20H6a2.25 2.25 0 0 1-2.25-2.25V5.25Z" /></svg>
+      ) : icon === 'scenes' ? (
+        <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 7.5 7.5-4 7.5 4-7.5 4-7.5-4Z" /><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12 7.5 4 7.5-4M4.5 16.5l7.5 4 7.5-4" /></svg>
       ) : (
         <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3.75h7.69c.4 0 .78.16 1.06.44l2.31 2.31c.28.28.44.66.44 1.06v12.69h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.25a1.5 1.5 0 0 1 1.5-1.5Z" /><path strokeLinecap="round" d="M14.25 3.75V7.5h3.75M8.5 12h6.5M8.5 15h6.5" /></svg>
       )}
-      {count !== undefined && count > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 font-mono text-[7px] leading-4 text-on-primary shadow-sm">{count > 99 ? '99+' : count}</span>}
+      {count !== undefined && count > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 font-mono text-[9px] leading-4 text-on-primary shadow-sm">{count > 99 ? '99+' : count}</span>}
     </button>
   )
 }
@@ -75,6 +79,8 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     artifacts,
     activeArtifactPath,
     setActiveArtifactPath,
+    activeSceneId,
+    setActiveSceneId,
     inFlightPaths,
     runningConversationIds,
     waitingForUserIds,
@@ -95,6 +101,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const canBrowseFiles = pathname === '/' && Boolean(conversationId)
   const effectiveView = canBrowseFiles ? sidebarView : 'projects'
+  const spatialScenes = useSpatialScenes(canBrowseFiles ? conversationId : null, canBrowseFiles)
   const { title: activeProjectTitle } = useConversationTitle(canBrowseFiles ? conversationId : null)
   const paperFingerprint = useMemo(() => {
     const bundles = new Map<string, Set<string>>()
@@ -134,6 +141,17 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     loadConversation(id)
   }
 
+  const openScenes = () => {
+    if (!canBrowseFiles) return
+    setSidebarView('scenes')
+    if (!activeSceneId && spatialScenes.scenes[0]) setActiveSceneId(spatialScenes.scenes[0].scene_id)
+  }
+
+  useEffect(() => {
+    if (!spatialScenes.hasLoaded || !activeSceneId) return
+    if (!spatialScenes.scenes.some(scene => scene.scene_id === activeSceneId)) setActiveSceneId(null)
+  }, [activeSceneId, setActiveSceneId, spatialScenes.hasLoaded, spatialScenes.scenes])
+
   // Close menu on outside click
   useEffect(() => {
     if (!showMenu) return
@@ -171,7 +189,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          {!collapsed && <span className="min-w-0 flex-1 text-[11.5px] font-semibold uppercase tracking-[0.14em] text-ink-faint">空间创作导航</span>}
+          {!collapsed && <span className="min-w-0 flex-1 text-[12.5px] font-semibold uppercase tracking-[0.12em] text-ink-muted">空间创作导航</span>}
           <button
             type="button"
             onClick={handleCreate}
@@ -198,6 +216,17 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               icon="projects"
             />
             <CollapsedNavigationButton
+              active={effectiveView === 'scenes'}
+              disabled={!canBrowseFiles}
+              label={canBrowseFiles ? `场景，共 ${spatialScenes.scenes.length} 个` : '请先打开项目'}
+              count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
+              onClick={() => {
+                openScenes()
+                setSidebarCollapsed(false)
+              }}
+              icon="scenes"
+            />
+            <CollapsedNavigationButton
               active={effectiveView === 'files'}
               disabled={!canBrowseFiles}
               label={canBrowseFiles ? `文件，共 ${artifacts.length} 个` : '请先打开项目'}
@@ -213,11 +242,18 @@ export function AppSidebar({ className = '' }: { className?: string }) {
         ) : (
           <>
             <div className="shrink-0 px-4 pb-2">
-              <div role="tablist" aria-label="导航模式" className="grid grid-cols-2 gap-1 rounded-card bg-surface-low/65 p-1">
+              <div role="tablist" aria-label="导航模式" className="grid grid-cols-3 gap-1 rounded-card bg-surface-low/65 p-1">
                 <SidebarModeTab
                   selected={effectiveView === 'projects'}
                   label="项目"
                   onClick={() => setSidebarView('projects')}
+                />
+                <SidebarModeTab
+                  selected={effectiveView === 'scenes'}
+                  disabled={!canBrowseFiles}
+                  label="场景"
+                  count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
+                  onClick={openScenes}
                 />
                 <SidebarModeTab
                   selected={effectiveView === 'files'}
@@ -250,6 +286,19 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                   waitingForUserIds={waitingForUserIds}
                   onSelectConversation={selectConversation}
                   onDeleteConversation={handleDeleteConversation}
+                />
+              </div>
+            ) : effectiveView === 'scenes' ? (
+              <div role="tabpanel" aria-label="场景" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                <SpatialSceneList
+                  scenes={spatialScenes.scenes}
+                  activeSceneId={activeSceneId}
+                  isLoading={spatialScenes.isLoading}
+                  error={spatialScenes.error}
+                  onSelect={sceneId => {
+                    setActiveSceneId(sceneId)
+                    setSidebarView('scenes')
+                  }}
                 />
               </div>
             ) : (

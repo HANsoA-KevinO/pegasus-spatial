@@ -22,13 +22,14 @@ export default function WorkspacePage() {
     quotedSelection,
     setQuotedSelection,
     conversationId,
+    activeSceneId,
   } = useChatContext()
 
   if (isLoadingConversation) {
     return <div className="h-full min-w-0 flex-1 overflow-hidden"><Skeleton variant="workspace" /></div>
   }
 
-  if (messages.length === 0 && !isLoading) {
+  if (messages.length === 0 && !isLoading && !activeSceneId) {
     return (
       <TaskWorkbench
         onSubmit={(message, domain) => {

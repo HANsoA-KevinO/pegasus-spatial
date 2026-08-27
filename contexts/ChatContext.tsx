@@ -9,11 +9,25 @@ import {
   type RootAgentRunEventDetail,
 } from '@/hooks/useAgentTeam'
 import type { QuotedSelection } from '@/components/chat/ChatContainer'
+import type { SceneViewpoint } from '@/lib/spatial/scene-types'
 
 const ACTIVE_CONVERSATION_KEY = 'pegasus_spatial_active_conversation_id'
 const ACTIVE_ARTIFACT_KEY_PREFIX = 'pegasus_spatial_workspace_active_file:'
+const ACTIVE_SCENE_KEY_PREFIX = 'pegasus_spatial_workspace_active_scene:'
 
-export type SidebarView = 'projects' | 'files'
+export type SidebarView = 'projects' | 'scenes' | 'files'
+
+export interface SpatialObservationDraft {
+  conversationId: string
+  sceneId: string
+  sceneVersion: number
+  revisionId: string
+  selectedInstanceId: string | null
+  selectedInstanceLabel?: string
+  visibleInstanceIds: string[]
+  viewpoint: SceneViewpoint
+  image: { assetId: string; mimeType: string }
+}
 
 interface ChatContextValue {
   model: ModelProvider
@@ -41,6 +55,11 @@ interface ChatContextValue {
   showWorkspace: boolean
   activeArtifactPath: string | null
   setActiveArtifactPath: (path: string | null) => void
+  activeSceneId: string | null
+  setActiveSceneId: (sceneId: string | null) => void
+  spatialObservationDraft: SpatialObservationDraft | null
+  setSpatialObservationDraft: (draft: SpatialObservationDraft | null) => void
+  clearSpatialObservationDraft: () => void
   inFlightPaths: Set<string>
   quotedSelection: QuotedSelection | null
   setQuotedSelection: (selection: QuotedSelection | null) => void
@@ -61,6 +80,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarView, setSidebarView] = useState<SidebarView>('projects')
   const [activeArtifactPath, setActiveArtifactPathState] = useState<string | null>(null)
+  const [activeSceneId, setActiveSceneIdState] = useState<string | null>(null)
+  const [spatialObservationDraft, setSpatialObservationDraft] = useState<SpatialObservationDraft | null>(null)
   const previousConversationIdRef = useRef<string | null>(null)
   const handleConversationLoaded = useCallback((settings: {
     orchestrator_model?: string
@@ -105,13 +126,32 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const setActiveArtifactPath = useCallback((path: string | null) => {
     setActiveArtifactPathState(path)
+    if (path) {
+      setActiveSceneIdState(null)
+      setSpatialObservationDraft(null)
+    }
     if (!chat.conversationId) return
     try {
       const key = `${ACTIVE_ARTIFACT_KEY_PREFIX}${chat.conversationId}`
       if (path) localStorage.setItem(key, path)
       else localStorage.removeItem(key)
+      if (path) localStorage.removeItem(`${ACTIVE_SCENE_KEY_PREFIX}${chat.conversationId}`)
     } catch { /* localStorage may be unavailable in privacy modes */ }
   }, [chat.conversationId])
+
+  const setActiveSceneId = useCallback((sceneId: string | null) => {
+    setActiveSceneIdState(sceneId)
+    setSpatialObservationDraft(null)
+    if (sceneId) setActiveArtifactPathState(null)
+    if (!chat.conversationId) return
+    try {
+      const key = `${ACTIVE_SCENE_KEY_PREFIX}${chat.conversationId}`
+      if (sceneId) localStorage.setItem(key, sceneId)
+      else localStorage.removeItem(key)
+    } catch { /* localStorage may be unavailable in privacy modes */ }
+  }, [chat.conversationId])
+
+  const clearSpatialObservationDraft = useCallback(() => setSpatialObservationDraft(null), [])
 
   // The active file belongs to a project, not to the global application. A
   // project switch restores its last file without letting newly streamed files
@@ -123,16 +163,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     if (!nextConversationId) {
       setActiveArtifactPathState(null)
+      setActiveSceneIdState(null)
+      setSpatialObservationDraft(null)
       setSidebarView('projects')
       return
     }
 
     if (changedProject) {
       setQuotedSelection(null)
+      setSpatialObservationDraft(null)
       let savedPath: string | null = null
+      let savedSceneId: string | null = null
       try { savedPath = localStorage.getItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${nextConversationId}`) } catch { /* ignore */ }
-      setActiveArtifactPathState(savedPath)
-      setSidebarView('files')
+      try { savedSceneId = localStorage.getItem(`${ACTIVE_SCENE_KEY_PREFIX}${nextConversationId}`) } catch { /* ignore */ }
+      setActiveSceneIdState(savedSceneId)
+      setActiveArtifactPathState(savedSceneId ? null : savedPath)
+      setSidebarView(savedSceneId ? 'scenes' : 'files')
     }
   }, [chat.conversationId])
 
@@ -155,7 +201,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return preferred.path
     })
   }, [artifacts, chat.conversationId])
-  const showWorkspace = artifacts.length > 0 || (chat.isLoading && chat.hasMutatorStarted)
+  const showWorkspace = Boolean(activeSceneId) || artifacts.length > 0 || (chat.isLoading && chat.hasMutatorStarted)
   const inFlightPaths = useMemo(() => {
     const result = new Set<string>()
     for (const part of assistantParts) {
@@ -167,6 +213,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const handleNewChat = useCallback(() => {
     setQuotedSelection(null)
     setActiveArtifactPathState(null)
+    setActiveSceneIdState(null)
+    setSpatialObservationDraft(null)
     setSidebarView('projects')
     chat.resetChat()
   }, [chat])
@@ -212,6 +260,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     showWorkspace,
     activeArtifactPath,
     setActiveArtifactPath,
+    activeSceneId,
+    setActiveSceneId,
+    spatialObservationDraft,
+    setSpatialObservationDraft,
+    clearSpatialObservationDraft,
     inFlightPaths,
     quotedSelection,
     setQuotedSelection,
@@ -227,6 +280,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     chat.waitingForUserIds, chat.sendMessage, chat.stopGeneration,
     chat.loadConversation, chat.answerQuestion, chat.resetChat,
     artifacts, showWorkspace, activeArtifactPath, setActiveArtifactPath,
+    activeSceneId, setActiveSceneId, spatialObservationDraft, clearSpatialObservationDraft,
     inFlightPaths, quotedSelection, sidebarCollapsed, sidebarView,
     handleNewChat, handleDeleteConversation,
   ])
