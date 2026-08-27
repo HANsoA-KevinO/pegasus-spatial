@@ -184,6 +184,20 @@ async function main(): Promise<void> {
     assert.equal(adapter.polls.length, 1)
     assert.equal(published.job.published_artifact_ids.length, 2)
 
+    const terminalSeed = await prepare('tool_provider_terminal_status')
+    const providerTerminalClaim = await claimNextSpatialBuildJob('worker_terminal_status', 30_000)
+    assert.equal(providerTerminalClaim?.job.job_id, terminalSeed.job_id)
+    const terminalSubmitting = await markSpatialJobSubmitting(providerTerminalClaim!)
+    const terminalSubmitted = await recordSpatialJobSubmitted(terminalSubmitting, {
+      externalJobId: 'external_terminal_status', providerStatus: 'running',
+    })
+    const terminalResult = await processClaimedSpatialBuildJob(terminalSubmitted, {
+      adapters: { fake: new FakeSpatialProviderAdapter({ pollResults: [{ state: 'failed', providerStatus: 'rejected' }] }) },
+      publisher: new InMemorySpatialAssetPublisher(),
+    })
+    assert.equal(terminalResult.job.status, 'failed')
+    assert.equal(terminalResult.job.provider_status, 'rejected', 'terminal provider status must replace stale running diagnostics')
+
     const result = await getSpatialJobResult({ jobId: published.job.job_id, scope })
     assert.equal(result.status, 'published')
     assert.deepEqual(result.workspace_paths, [

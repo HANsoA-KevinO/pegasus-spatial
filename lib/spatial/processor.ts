@@ -279,7 +279,11 @@ export async function processClaimedSpatialBuildJob(
       if (claim.job.status === 'materializing') {
         await dependencies.publisher.discardJobStages({ job: claim.job, publicationToken }).catch(() => 0)
       }
-      return failSpatialJob(claim, polled.error || 'Provider reported spatial generation failure.')
+      return failSpatialJob(
+        claim,
+        polled.error || 'Provider reported spatial generation failure.',
+        polled.providerStatus,
+      )
     }
     if (claim.job.status === 'materializing') {
       await dependencies.publisher.discardJobStages({ job: claim.job, publicationToken }).catch(() => 0)

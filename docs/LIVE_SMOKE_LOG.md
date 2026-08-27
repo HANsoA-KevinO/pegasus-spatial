@@ -117,6 +117,23 @@
 - 结论：`provider pass / product publication failed before slot-mapping fix`
 - 后续动作：`物体主运行格式冻结为 standalone GLB；PLY 仅作为可选高保真视觉层，下一轮补固定槽位回归与可恢复发布测试`
 
+### `aholo / spsmoke_551f72e84a6fa32f7b842622577f4c50`
+
+- 固定 purpose / phase budget key：`H2 / mixed-scene-world-baseline-v1`
+- 是否由赛前技术测试提前执行：`是；用户明确授权赛事 Aholo 额度用于真实对照`
+- 开始时间：`2026-08-27 14:59 JST`
+- 结束/最后观察时间：`2026-08-27 15:01 JST`
+- 本方 job/receipt ID：`spjob_3ea14bf04478b406d651e3804aba4c71f0f2df6b`
+- 外部任务 ID：`SHA-256 7f493b9692b26b9e77a5e731120541d45358098c84c8b4b3e545301fbf30a4be`
+- 输入 hash：`e06828d49ed2f595715d22728443290868c5d3d1278c4a077f185a507082bca7`
+- 状态轨迹：`prepared → pending → running → failed`
+- 是否出现 ambiguous/unknown：`否`
+- 提交次数：`1`
+- 供应商状态：`终态失败；旧代码保留了前一状态 running，未保存终态枚举`
+- 产物 hostname / Workspace 路径：`无；未进入产物物化`
+- 结论：`供应商未生成可用 World；没有重复提交`
+- 后续动作：`已修复终态 provider_status 持久化并加入 Mongo 回归；此 intent 保持 terminal，不重开或伪称真实混合验收通过`
+
 ## T+2 结论
 
 - Aholo：`[Full-scope Go / Degraded Go / No-Go]`
