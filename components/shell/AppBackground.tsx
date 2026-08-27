@@ -1,38 +1,46 @@
 'use client'
 
 import type { JSX } from 'react'
+import { BreathingAirMass } from './BreathingAirMass'
 
 export type AppBackgroundState = 'landing' | 'idle' | 'running'
 
 /** Lightweight application atmosphere, intentionally independent of Canvas. */
-export function AppBackground({ state }: { state: AppBackgroundState }): JSX.Element {
-  const active = state === 'running'
-  const landing = state === 'landing'
-
+export function AppBackground({
+  state,
+  sidebarWidth = 0,
+  conversationPaneWidth = null,
+}: {
+  state: AppBackgroundState
+  sidebarWidth?: number
+  conversationPaneWidth?: string | null
+}): JSX.Element {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-surface"
+      className="pointer-events-none fixed inset-0 z-0 isolate overflow-hidden bg-surface"
     >
+      {sidebarWidth > 0 && (
+        <div
+          data-layer="sidebar-background"
+          className="absolute inset-y-0 left-0 bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)] transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+          style={{ width: sidebarWidth }}
+        />
+      )}
+      {conversationPaneWidth && (
+        <div
+          data-layer="conversation-background"
+          className="absolute bottom-0 right-0 top-16 bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)]"
+          style={{ width: conversationPaneWidth }}
+        />
+      )}
       <div
-        className="absolute inset-0 transition-opacity duration-700"
-        style={{
-          opacity: active ? 0.95 : landing ? 0.7 : 0.45,
-          background: [
-            'radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--primary) 20%, transparent) 0, transparent 34%)',
-            'radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--tertiary, var(--primary)) 16%, transparent) 0, transparent 32%)',
-            'radial-gradient(circle at 58% 88%, color-mix(in srgb, var(--primary-container) 18%, transparent) 0, transparent 38%)',
-          ].join(','),
-        }}
-      />
-      <div
-        className="absolute inset-0 opacity-[0.16] dark:opacity-[0.12]"
-        style={{
-          backgroundImage: 'radial-gradient(circle, var(--ink-muted) 0.75px, transparent 0.9px)',
-          backgroundSize: '22px 22px',
-          maskImage: 'linear-gradient(to bottom, black, transparent 90%)',
-        }}
-      />
+        data-layer="breathing-air-region"
+        className="absolute bottom-0 right-0 top-16 overflow-hidden transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+        style={{ left: sidebarWidth }}
+      >
+        <BreathingAirMass state={state} />
+      </div>
       <div
         className="absolute inset-0 transition-all duration-700"
         style={{

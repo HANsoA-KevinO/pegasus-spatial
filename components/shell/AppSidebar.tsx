@@ -169,12 +169,11 @@ export function AppSidebar({ className = '' }: { className?: string }) {
 
   return (
     <>
-      {/* 玻璃岛(W3b):侧栏面板底从 bg-surface-sidebar 硬底校准到玻璃 token——
-          区域玻璃取 --glass-panel-bg 的 55%(与顶栏/hero 同比),活背景从侧栏
-          下透过;右缘 1px 硬发丝分隔线 → 极淡玻璃边。 */}
+      {/* 侧栏底色由 AppBackground 放在“呼吸气团”下方；aside 自身只负责
+          毛玻璃合成和内容，使文字、图标与控件始终位于气团之上。 */}
       <aside
         aria-label="项目与文件导航"
-        className={`h-screen fixed left-0 top-0 pt-16 flex flex-col bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)] backdrop-blur-[20px] backdrop-saturate-150 z-40 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+        className={`h-screen fixed left-0 top-0 pt-16 flex flex-col bg-transparent backdrop-blur-[20px] backdrop-saturate-150 z-40 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
           collapsed ? 'w-16' : 'w-[280px]'
         } ${className}`}
         style={{ boxShadow: '1px 0 0 rgba(20,26,38,0.08), 10px 0 30px -18px rgba(16,20,32,0.15)' }}
