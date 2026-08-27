@@ -272,14 +272,9 @@ export function TaskWorkbench({ onSubmit }: {
       />
       <div className={`relative mx-auto grid gap-6 ${hasSidebarContent ? 'max-w-6xl xl:grid-cols-[minmax(0,1fr)_300px]' : 'max-w-4xl'}`}>
         <section className="rounded-[12px] border border-[var(--paper-edge)] bg-[var(--paper)] p-5 shadow-[var(--shadow-paper)] lg:p-7">
-          <header className="mb-5 flex items-start gap-3">
-            <BrandMark className="mt-0.5 h-10 w-10 shrink-0" />
-            <div>
-              <h1 className="text-[28px] font-bold tracking-[-0.035em] text-ink lg:text-[31px]">描述一个想进入的世界</h1>
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-ink-secondary">
-                说清体验与约束，Agent 会选择合适的图像、3D 造物和世界生成工具。
-              </p>
-            </div>
+          <header className="mb-5 flex items-center gap-3">
+            <BrandMark className="h-10 w-10 shrink-0" />
+            <h1 className="text-[28px] font-bold tracking-[-0.035em] text-ink lg:text-[31px]">描述一个想进入的世界</h1>
           </header>
 
           <div className="overflow-visible rounded-[14px] border border-ghost-border/75 bg-surface-lowest p-3.5 shadow-[0_12px_36px_color-mix(in_srgb,var(--ink)_8%,transparent)] sm:p-4">
@@ -301,8 +296,8 @@ export function TaskWorkbench({ onSubmit }: {
                     submit()
                   }
                 }}
-                placeholder="描述空间、用途、材质、光线、镜头与必须保留的元素，例如：一间狭长的深夜电台，低照度钨丝灯、吸音木墙和环形直播控制台。"
-                className="block w-full resize-none overflow-y-hidden rounded-t-[10px] bg-transparent px-3.5 pb-2 pt-3 text-[15px] leading-6 text-ink outline-none placeholder:text-ink-muted"
+                placeholder="描述你想进入的空间。可以补充用途、氛围、材质、光线，以及需要保留或避免的元素。"
+                className="block w-full resize-none overflow-y-hidden rounded-t-[10px] bg-transparent px-3.5 pb-2 pt-3 text-[15px] leading-6 text-ink outline-none placeholder:text-ink-muted/60 focus:placeholder:text-transparent"
                 style={{ minHeight: QUESTION_MIN_HEIGHT, maxHeight: QUESTION_MAX_HEIGHT }}
               />
 
@@ -341,7 +336,7 @@ export function TaskWorkbench({ onSubmit }: {
                 </p>
               )}
 
-              <div className="flex flex-wrap items-center gap-2 border-t border-ghost-border/55 px-2.5 py-2.5">
+              <div className="flex flex-wrap items-center gap-2 px-2.5 py-2.5">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
