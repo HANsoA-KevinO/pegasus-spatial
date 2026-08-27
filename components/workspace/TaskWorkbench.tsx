@@ -40,11 +40,20 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
   }
 
   return (
-    <div className="relative h-full w-full overflow-y-auto bg-[#f3f5f8] px-6 py-9 lg:px-14 lg:py-12">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-55 [background-image:linear-gradient(rgba(64,87,125,.055)_1px,transparent_1px),linear-gradient(90deg,rgba(64,87,125,.055)_1px,transparent_1px)] [background-size:36px_36px]" />
+    <div className="relative h-full w-full overflow-y-auto bg-surface px-6 py-9 lg:px-14 lg:py-12">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-55 dark:opacity-35 [background-size:36px_36px]"
+        style={{
+          backgroundImage: [
+            'linear-gradient(color-mix(in srgb, var(--primary) 10%, transparent) 1px, transparent 1px)',
+            'linear-gradient(90deg, color-mix(in srgb, var(--primary) 10%, transparent) 1px, transparent 1px)',
+          ].join(','),
+        }}
+      />
       <div className="mx-auto grid max-w-6xl gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="relative overflow-hidden rounded-[10px] border border-[#cfd7e4] bg-white/90 p-7 shadow-[0_22px_70px_rgba(31,47,73,.10)] backdrop-blur-xl lg:p-10">
-          <div aria-hidden="true" className="absolute inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,#285ca8_0_28%,#93acd0_28%_46%,transparent_46%)]" />
+        <section className="relative overflow-hidden rounded-[10px] border border-[var(--paper-edge)] bg-[var(--paper)] p-7 shadow-[var(--shadow-paper)] lg:p-10">
+          <div aria-hidden="true" className="absolute inset-x-0 top-0 h-[3px] bg-[linear-gradient(90deg,var(--primary-deep)_0_28%,var(--primary)_28%_46%,transparent_46%)]" />
           <div className="mb-8 flex items-center gap-3">
             <BrandMark className="h-11 w-11" />
             <div>
@@ -70,7 +79,7 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
                 }}
                 rows={5}
                 placeholder="例如：创造一间可以进入的深夜电台，狭长空间、低照度钨丝灯、吸音木墙和一张用于直播的环形控制台。"
-                className="w-full resize-y rounded-2xl border border-outline-variant/20 bg-surface-lowest/70 px-5 py-4 text-base leading-7 text-ink outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+                className="w-full resize-y rounded-2xl border border-ghost-border/70 bg-surface-lowest px-5 py-4 text-base leading-7 text-ink outline-none transition placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
               />
             </label>
 
@@ -81,14 +90,14 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
                 onChange={event => setContext(event.target.value)}
                 rows={3}
                 placeholder="可说明参考图路径、空间用途、材质、光线、镜头、不能出现的元素，或希望先得到独立 GLB 物体。"
-                className="w-full resize-y rounded-2xl border border-outline-variant/20 bg-surface-lowest/70 px-5 py-4 text-sm leading-6 text-ink outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10"
+                className="w-full resize-y rounded-2xl border border-ghost-border/70 bg-surface-lowest px-5 py-4 text-sm leading-6 text-ink outline-none transition placeholder:text-ink-muted focus:border-primary/70 focus:ring-4 focus:ring-primary/15"
               />
             </label>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-ink-muted">创作语境（不锁定工具）</span>
-                <select value={domain} onChange={event => setDomain(event.target.value)} className="w-full rounded-xl border border-outline-variant/20 bg-surface-lowest/80 px-4 py-3 text-sm text-ink outline-none focus:border-primary/50">
+                <select value={domain} onChange={event => setDomain(event.target.value)} className="w-full rounded-xl border border-ghost-border/70 bg-surface-lowest px-4 py-3 text-sm text-ink outline-none focus:border-primary/70 focus:ring-4 focus:ring-primary/15">
                   {CREATION_CONTEXTS.map(item => <option key={item}>{item}</option>)}
                 </select>
               </label>
@@ -98,7 +107,7 @@ export function TaskWorkbench({ onSubmit }: { onSubmit: (message: string, domain
                   value={model}
                   disabled={modelsLoading}
                   onChange={event => setModel(event.target.value as ModelProvider)}
-                  className="w-full rounded-xl border border-outline-variant/20 bg-surface-lowest/80 px-4 py-3 text-sm text-ink outline-none focus:border-primary/50 disabled:opacity-60"
+                  className="w-full rounded-xl border border-ghost-border/70 bg-surface-lowest px-4 py-3 text-sm text-ink outline-none focus:border-primary/70 focus:ring-4 focus:ring-primary/15 disabled:opacity-60"
                 >
                   {models.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>

@@ -20,6 +20,8 @@
    ============================================================ */
 
 :root {
+  color-scheme: light;
+
   /* System font stacks keep local and container builds fully offline. */
   --font-manrope: "Avenir Next", Avenir, "Helvetica Neue", Arial;
   --font-noto-sc: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei";
@@ -149,6 +151,8 @@
    Dark Mode — Editorial Night
    ============================================================ */
 .dark {
+  color-scheme: dark;
+
   --surface:                 #111318;
   --surface-container-low:   #191c22;
   --surface-container:       #1e2128;
@@ -171,7 +175,7 @@
   /* Dark-mode counterparts for the aliases defined above in :root */
   --ink-secondary:           var(--on-surface-variant);
   --ink-muted:               var(--secondary-text);
-  --ink-faint:               #5d6370;
+  --ink-faint:               #818997;
   --hairline:                #3d4250;
   --surface-sink:            #282c34;
 
