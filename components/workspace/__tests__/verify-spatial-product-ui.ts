@@ -19,6 +19,8 @@ const chatInput = source('components', 'chat', 'ChatInput.tsx')
 const topNav = source('components', 'shell', 'TopNavBar.tsx')
 const workspacePage = source('app', '(shell)', 'page.tsx')
 const shellLayout = source('app', '(shell)', 'layout.tsx')
+const libraryPage = source('app', '(shell)', 'library', 'page.tsx')
+const projectCard = source('components', 'library', 'ProjectCard.tsx')
 
 assert.match(artifacts, /'image' \| 'model3d' \| 'world'/)
 assert.match(artifacts, /entry\.storage === 'asset' && entry\.kind === 'raster'/)
@@ -112,5 +114,13 @@ assert.match(sidebar, /创建或打开项目后，可在“场景”查看空间
 assert.match(sidebar, /\{collapsed && \(/)
 assert.doesNotMatch(workbench, /bg-\[#f3f5f8\]|bg-white\/90/)
 assert.doesNotMatch(workbench, /物体模式|世界模式|固定流水线/)
+
+assert.match(libraryPage, /max-w-6xl/)
+assert.match(libraryPage, /sm:grid-cols-2 xl:grid-cols-3/)
+assert.match(libraryPage, /handleNewChat\(\)/)
+assert.match(libraryPage, /新建项目/)
+assert.match(projectCard, /min-h-\[176px\]/)
+assert.match(projectCard, /fileCount/)
+assert.match(projectCard, /更新于/)
 
 console.log('spatial-product-ui:verify passed')
