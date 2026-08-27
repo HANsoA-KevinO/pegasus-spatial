@@ -62,6 +62,7 @@ function manifestArtifacts(
     size_bytes: artifact.sizeBytes,
     sha256: artifact.sha256,
     relations: artifact.relations,
+    metadata: artifact.metadata,
   }))
   const preview = paths.find(asset => asset.kind === 'thumbnail' || asset.kind === 'image')?.path
   const upAxis = artifacts
@@ -278,7 +279,11 @@ export async function processClaimedSpatialBuildJob(
       if (claim.job.status === 'materializing') {
         await dependencies.publisher.discardJobStages({ job: claim.job, publicationToken }).catch(() => 0)
       }
-      return failSpatialJob(claim, polled.error || 'Provider reported spatial generation failure.')
+      return failSpatialJob(
+        claim,
+        polled.error || 'Provider reported spatial generation failure.',
+        polled.providerStatus,
+      )
     }
     if (claim.job.status === 'materializing') {
       await dependencies.publisher.discardJobStages({ job: claim.job, publicationToken }).catch(() => 0)

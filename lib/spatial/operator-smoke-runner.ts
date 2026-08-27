@@ -45,6 +45,7 @@ import {
 } from './runtime'
 import { getSpatialJobResult, inspectSpatialArtifactResult, waitSpatialJobResult } from './service'
 import { processClaimedSpatialBuildJob } from './processor'
+import { resolveSpatialArtifactHostnameWithGoogleDoh } from './artifact-mirror'
 import { normalizeSpatialWorkspacePrefix } from './identity'
 import { SpatialBuildJobModel, SpatialOperatorSmokeIntentModel } from './models'
 import {
@@ -416,9 +417,15 @@ function mapSpatialState(
   intent: SpatialOperatorSmokeIntentRecord,
   job: SpatialBuildJobRecord,
 ): SpatialOperatorSmokeState {
+  // Backing terminal state is authoritative. provider_status is diagnostic
+  // and may retain the last pre-terminal value (for example a configuration
+  // block followed by a permanent validation failure).
+  if (job.status === 'failed' || job.status === 'unknown' || job.status === 'published') {
+    return job.status
+  }
+  if (job.status === 'cancelled') return 'failed'
   if (job.provider_status === 'configuration_blocked') return 'configuration_blocked'
   if (job.status === 'prepared' && intent.authorized_at) return 'authorized'
-  if (job.status === 'cancelled') return 'failed'
   return job.status
 }
 
@@ -576,7 +583,11 @@ async function submitOrResumeSpatial(
   const config = allowSubmit
     ? operatorSpatialConfig(intent.provider as 'aholo' | 'lux3d', process.env)
     : readSpatialRuntimeConfig(process.env)
-  await processWithHeartbeat(claim, createProductionSpatialDependencies(config))
+  await processWithHeartbeat(claim, createProductionSpatialDependencies(config, {
+    resolveArtifactHostname: process.env.SPATIAL_ARTIFACT_DNS_RESOLVER === 'google-doh'
+      ? resolveSpatialArtifactHostnameWithGoogleDoh
+      : undefined,
+  }))
   current = await requireSpatialOperatorSmokeIntent(intent.smoke_id)
   return syncSpatial(current)
 }

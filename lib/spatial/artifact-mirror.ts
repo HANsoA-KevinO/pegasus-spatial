@@ -3,6 +3,7 @@ import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { posix } from 'node:path'
 import { canonicalSpatialJson, normalizeSpatialWorkspacePrefix } from './identity'
+import { inspectGlbMetadata } from './glb-metadata'
 import type {
   MaterializedSpatialArtifact,
   ProviderArtifactDescriptor,
@@ -245,6 +246,45 @@ export type SpatialHostnameResolver = (hostname: string) => Promise<readonly str
 const resolveSpatialArtifactHostname: SpatialHostnameResolver = async hostname => {
   const records = await lookup(hostname, { all: true, verbatim: true })
   return [...new Set(records.map(record => record.address))]
+}
+
+/**
+ * Explicit proxy/Fake-IP compatibility path. Clash-style TUN DNS commonly
+ * returns RFC 2544 addresses from 198.18.0.0/15, which must never be treated
+ * as proof that a provider hostname is public. Resolve the hostname through a
+ * fixed HTTPS DNS endpoint instead; the caller still applies the exact-host
+ * allowlist and public-address checks to every returned A/AAAA record.
+ */
+export const resolveSpatialArtifactHostnameWithGoogleDoh: SpatialHostnameResolver = async hostname => {
+  const addresses = new Set<string>()
+  for (const type of ['A', 'AAAA'] as const) {
+    const endpoint = new URL('https://dns.google/resolve')
+    endpoint.searchParams.set('name', hostname)
+    endpoint.searchParams.set('type', type)
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      redirect: 'error',
+      headers: { Accept: 'application/dns-json' },
+    })
+    if (!response.ok) throw new SpatialArtifactDnsResolutionError(hostname)
+    const raw = await boundedResponseBuffer(response, 64 * 1024)
+    let payload: unknown
+    try {
+      payload = JSON.parse(raw.toString('utf8'))
+    } catch {
+      throw new SpatialArtifactDnsResolutionError(hostname)
+    }
+    const answers = payload && typeof payload === 'object' && Array.isArray((payload as { Answer?: unknown }).Answer)
+      ? (payload as { Answer: Array<{ type?: unknown; data?: unknown }> }).Answer
+      : []
+    for (const answer of answers) {
+      if ((answer.type === 1 || answer.type === 28) && typeof answer.data === 'string' && isIP(answer.data)) {
+        addresses.add(answer.data)
+      }
+    }
+  }
+  if (addresses.size === 0) throw new SpatialArtifactDnsResolutionError(hostname)
+  return [...addresses]
 }
 
 async function assertPublicDnsResolution(
@@ -528,6 +568,17 @@ export async function mirrorRemoteSpatialArtifacts(
       }
       const inspected = inspectSpatialAssetBytes(buffer, filename, claimedMime)
       const sha256 = createHash('sha256').update(buffer).digest('hex')
+      let metadata = JSON.parse(canonicalSpatialJson(descriptor.metadata ?? {})) as Record<string, unknown>
+      if (
+        filename.toLowerCase().endsWith('.glb')
+        && buffer.length >= 20
+        && buffer.readUInt32LE(8) === buffer.length
+        && buffer.subarray(16, 20).toString('ascii') === 'JSON'
+      ) {
+        try { metadata = { ...metadata, ...inspectGlbMetadata(buffer) } } catch (error) {
+          throw new SpatialAssetValidationError(error instanceof Error ? error.message : 'GLB 元数据解析失败。')
+        }
+      }
       const id = artifactId(options.job.job_id, options.publicationToken, key)
       const stored = await options.publisher.stage({
         job: options.job,
@@ -541,7 +592,7 @@ export async function mirrorRemoteSpatialArtifacts(
         mimeType: inspected.mimeType,
         sha256,
         relations: uniqueRelations(options.job, descriptor),
-        metadata: JSON.parse(canonicalSpatialJson(descriptor.metadata ?? {})) as Record<string, unknown>,
+        metadata,
       })
       if (
         stored.artifactId !== id

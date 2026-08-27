@@ -1,10 +1,22 @@
 import { ToolSchema } from '../types'
 
-export const ROOT_ONLY_SPATIAL_TOOL_NAMES: ReadonlySet<string> = new Set([
+/** Wildcard delegation never expands to these capabilities. Root may grant them explicitly. */
+export const EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES: ReadonlySet<string> = new Set([
   'GenerateImage',
   'CreateObject3D',
   'CreateWorld3D',
+  'CreateSpatialScene',
+  'SetSceneWorld',
+  'AddSceneObject',
+  'TransformSceneObject',
+  'RemoveSceneObject',
+  'RestoreSpatialScene',
+  'SetSceneViewpoint',
+  'FocusSceneObject',
+  'CaptureSceneView',
 ])
+/** @deprecated Use EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES. */
+export const ROOT_ONLY_SPATIAL_TOOL_NAMES = EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES
 
 const MATERIAL_RESEARCH_TOOL_NAMES: ReadonlySet<string> = new Set([
   'ArxivSearchPapers',
@@ -100,7 +112,7 @@ Text is returned with 1-based line numbers. Raster files are returned as media. 
     name: 'GenerateImage',
     description: `Generate a new image or edit one existing Workspace image and publish the result to the Workspace.
 
-Use this when a requested spatial outcome benefits from a visual reference, or when the user explicitly asks for an image. Providing input_image_path edits/derives from that image; omitting it generates from text. This is an expensive Root-only tool. One clear requested target permits at most one optional reference-image generation unless the user authorizes another candidate. Never pass a remote URL: input images must be authorized Workspace paths.`,
+Use this when a requested spatial outcome benefits from a visual reference, or when the user explicitly asks for an image. Providing input_image_path edits/derives from that image; omitting it generates from text. Root owns it by default and may explicitly delegate it to a Member; wildcard delegation never grants it. Never pass a remote URL: input images must be authorized Workspace paths.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -134,7 +146,7 @@ Use this when a requested spatial outcome benefits from a visual reference, or w
     name: 'CreateObject3D',
     description: `Submit one durable Lux3D object build and return immediately with its persistent Job identity.
 
-Provide text, one or more authorized Workspace reference images, or both. The first release publishes a GLB plus manifest under output_path_prefix. The external task continues after the chat turn ends. Do not poll manually in a tight loop; use GetSpatialJob for a snapshot or WaitSpatialJob once when the result is needed. This is an expensive Root-only tool.`,
+Provide text, one or more authorized Workspace reference images, or both. The build publishes a standalone editable GLB, optional high-quality PLY and manifest. The external task continues after the chat turn ends. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -165,7 +177,7 @@ Provide text, one or more authorized Workspace reference images, or both. The fi
     name: 'CreateWorld3D',
     description: `Submit one durable Aholo World generation and return immediately with its persistent Job identity.
 
-Provide a world brief, one authorized Workspace scene image, or both. The external build continues after the chat turn ends and publishes a manifest, preview when available, and an Aholo opening link. This is an expensive Root-only tool.`,
+Provide a world brief, one authorized Workspace scene image, or both. The external build continues after the chat turn ends and publishes a manifest, preview when available, and an Aholo opening link. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -188,6 +200,82 @@ Provide a world brief, one authorized Workspace scene image, or both. The extern
         { required: ['source_image_path'] },
       ],
     },
+  },
+  {
+    name: 'CreateSpatialScene',
+    description: 'Create a versioned editable Scene, optionally from one already-published World Job. Revision identities are managed automatically.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      title: { type: 'string', minLength: 1, maxLength: 160 },
+      world_job_id: { type: 'string', minLength: 1, maxLength: 160 },
+    }, required: ['title'] },
+  },
+  {
+    name: 'SetSceneWorld',
+    description: 'Replace the whole immutable 3DGS World background of a Scene with one published World Job. This does not locally edit 3DGS semantics.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, world_job_id: { type: 'string', minLength: 1, maxLength: 160 }, observation_id: { type: 'string', maxLength: 160 },
+    }, required: ['scene_id', 'world_job_id'] },
+  },
+  {
+    name: 'AddSceneObject',
+    description: 'Add the published standalone GLB from an Object Job to a Scene using an absolute three-axis transform.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, object_job_id: { type: 'string', minLength: 1, maxLength: 160 }, label: { type: 'string', maxLength: 160 },
+      position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+      rotation_deg: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+      scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number', exclusiveMinimum: 0 } },
+      observation_id: { type: 'string', maxLength: 160 },
+    }, required: ['scene_id', 'object_job_id'] },
+  },
+  {
+    name: 'TransformSceneObject',
+    description: 'Set an existing object instance to absolute position, Euler XYZ rotation in degrees, and/or positive XYZ scale. Inspect first; do not use vague relative motion.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, instance_id: { type: 'string', minLength: 1, maxLength: 160 },
+      position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, rotation_deg: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number', exclusiveMinimum: 0 } }, observation_id: { type: 'string', maxLength: 160 },
+    }, required: ['scene_id', 'instance_id'], anyOf: [{ required: ['position'] }, { required: ['rotation_deg'] }, { required: ['scale'] }] },
+  },
+  {
+    name: 'RemoveSceneObject',
+    description: 'Remove one GLB object instance from the current Scene and create a new automatic revision.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, instance_id: { type: 'string', minLength: 1, maxLength: 160 }, observation_id: { type: 'string', maxLength: 160 },
+    }, required: ['scene_id', 'instance_id'] },
+  },
+  {
+    name: 'InspectSpatialScene',
+    description: 'Read the current or historical Scene snapshot, including frozen World, object instances, transforms and optional immutable history.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, revision_version: { type: 'integer', minimum: 1 }, include_history: { type: 'boolean' },
+    }, required: ['scene_id'] },
+  },
+  {
+    name: 'RestoreSpatialScene',
+    description: 'Clone a historical Scene version into a new current revision. History is never overwritten or rewound.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, revision_version: { type: 'integer', minimum: 1 },
+    }, required: ['scene_id', 'revision_version'] },
+  },
+  {
+    name: 'SetSceneViewpoint',
+    description: 'Set the persistent Agent camera without changing the user camera.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, target: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, up: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, fov_deg: { type: 'number', minimum: 20, maximum: 100 },
+    }, required: ['scene_id', 'position', 'target'] },
+  },
+  {
+    name: 'FocusSceneObject',
+    description: 'Compute and persist an Agent viewpoint that frames one Scene object. It never hijacks the user camera.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, instance_id: { type: 'string', minLength: 1, maxLength: 160 }, framing: { type: 'string', enum: ['close', 'medium', 'wide'] },
+    }, required: ['scene_id', 'instance_id'] },
+  },
+  {
+    name: 'CaptureSceneView',
+    description: 'Ask an active browser Stage to render the real Scene from the Agent camera and return the captured PNG as model-visible media. Returns viewer_unavailable when no Stage is open.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, note: { type: 'string', maxLength: 1000 },
+    }, required: ['scene_id'] },
   },
   {
     name: 'GetSpatialJob',
@@ -1104,7 +1192,11 @@ export function getToolSchemasForCapabilities(options: {
   const allowed = options.allowedTools ? new Set(options.allowedTools) : null
   return schemas.filter(schema => (
     (options.allowAskUser !== false || schema.name !== 'AskUserQuestion')
-    && (options.isRoot !== false || !ROOT_ONLY_SPATIAL_TOOL_NAMES.has(schema.name))
+    && (
+      options.isRoot !== false
+      || !EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES.has(schema.name)
+      || Boolean(allowed?.has(schema.name))
+    )
     && (
       options.projectTemplateId !== 'spatial-creation'
       || !MATERIAL_RESEARCH_TOOL_NAMES.has(schema.name)

@@ -47,7 +47,7 @@ const SPATIAL_CREATION_V1: Readonly<ProjectGuideTemplate> = Object.freeze({
 ## 意图与工具选择
 
 - 独立物体、道具、家具或产品资产优先使用 \`CreateObject3D\`；完整环境、房间或可进入场景优先使用 \`CreateWorld3D\`；现实场地的多图/视频捕捉只在对应重建工具真实可用时执行。
-- 当用户目标同时包含物体和世界时，把它们视为相互关联但可独立完成的产物；不得暗示物体已被写入 Aholo World 或已经完成空间编排。
+- World 3DGS 是整体视觉背景，GLB 是可编辑物体真值。使用 \`CreateSpatialScene\`、\`AddSceneObject\` 和变换工具把已发布资产组织成自动 revision 的 Scene；不得暗示可以局部语义修改 3DGS。
 - \`GenerateImage\` 同时承担文生图与单图修订。参考图能显著改善创作意图、构图或风格时可先生成；直接文本造物/生成世界已足够时可直接调用 3D 工具。
 - 只从当前 Workspace 中选择已授权图像作为工具输入，不把任意远程 URL 或其他项目的路径传给生成服务。
 - 物体还是世界会实质改变结果且无法从请求判断时，使用 \`AskUserQuestion\` 做一次精确澄清。
@@ -55,10 +55,17 @@ const SPATIAL_CREATION_V1: Readonly<ProjectGuideTemplate> = Object.freeze({
 ## 成本授权与恢复
 
 - 一次明确创作请求默认授权每种用户明确要求的目标产物各提交一次，并允许为每个目标选择性生成一张参考图。一个项目同时最多运行两个昂贵任务。
-- 已有成功候选后追加生成、主动增加用户没要求的另一种目标、或对可能已被供应商接受的任务重新提交前，必须用 \`AskUserQuestion\` 取得确认。
+- Agent 可以根据创作判断追加必要的视觉候选，不因“已有候选”本身强制询问；主动增加用户没要求的另一类目标，或对可能已被供应商接受的任务重新提交前，必须用 \`AskUserQuestion\` 取得确认。
 - 创建工具返回任务已提交，不等于资产已完成。使用 \`GetSpatialJob\` 或 \`WaitSpatialJob\` 观察已知任务，不因对话结束、刷新、超时或服务恢复而原样重放付费提交。
 - 任务状态是 \`unknown\` 时，明确说明可能已产生外部副作用，由用户确认后才能建立新的重试任务。
-- 成员 Agent 可以分析需求、检查资产和撰写评审；付费空间工具由 Root Agent 执行。
+- Root 默认拥有全部空间工具。Member wildcard 不获得生成、Scene 修改或截图能力；Root 可通过 \`allowed_tools\` 逐项显式授权，执行层按持久授权校验。
+
+## Scene 与观察闭环
+
+- Scene revision 由系统自动保存，Agent 不创建或选择 revision ID。并发 CAS 冲突后先重新 \`InspectSpatialScene\`，再计算绝对坐标。
+- 局部调整优先移动、新增或删除 GLB。只有整体结构、光照或氛围必须改变时才重新生成或替换 World。
+- 用户相机与 Agent 相机独立。使用 \`SetSceneViewpoint\` 或 \`FocusSceneObject\` 后，通过 \`CaptureSceneView\` 读取活动舞台的真实渲染像素；没有舞台时诚实报告 \`viewer_unavailable\`。
+- 带 \`observation_id\` 的修改必须匹配截图对应的 current revision。PLY 只作为一次一个的高质量视觉替身，GLB 始终是 Scene 结构与选择真值。
 
 ## Workspace 与资产关系
 

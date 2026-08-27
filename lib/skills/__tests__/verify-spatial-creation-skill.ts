@@ -38,13 +38,17 @@ function run(): void {
     'GetSpatialJob',
     'WaitSpatialJob',
     'InspectSpatialArtifact',
+    'CreateSpatialScene',
+    'AddSceneObject',
+    'TransformSceneObject',
+    'CaptureSceneView',
     'AskUserQuestion',
   ]) {
     assert.match(raw, new RegExp(`\\b${tool}\\b`), `missing tool guidance for ${tool}`)
   }
 
   assert.match(raw, /最多同时运行两个昂贵任务/)
-  assert.match(raw, /付费工具由 Root Agent 执行/)
+  assert.match(raw, /Member wildcard[^]*Root[^]*allowed_tools[^]*显式授权/)
   assert.match(raw, /unknown[^]*外部副作可能已发生/)
   assert.match(raw, /对话结束[^]*不是付费重试理由/)
 
@@ -55,7 +59,7 @@ function run(): void {
   assert.match(raw, /房间[^]*CreateWorld3D/)
   assert.match(raw, /GenerateImage[^]*生成或编辑单张参考图/)
   assert.match(raw, /物体与世界仍有关键歧义[^]*AskUserQuestion/)
-  assert.match(raw, /以下情况需要 `AskUserQuestion`[^]*已有成功候选后要追加新候选/)
+  assert.match(raw, /不因为“候选数量”本身强制询问用户/)
   assert.match(raw, /文字已足以表达几何和风格时[^]*直接调用 3D 生成工具/)
 
   for (const outputPath of [
@@ -75,6 +79,7 @@ function run(): void {
     assert.match(raw, new RegExp(`\\b${reviewStatus}\\b`), `missing review status ${reviewStatus}`)
   }
   assert.match(raw, /不宣称 CAD 精度[^]*真实尺度[^]*碰撞[^]*物理正确性/)
+  assert.match(raw, /不宣称能局部语义修改 3DGS World/)
   assert.match(raw, /默认使用简体中文/)
 
   console.log('spatial creation skill verification passed')

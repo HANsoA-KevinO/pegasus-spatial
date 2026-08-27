@@ -62,13 +62,15 @@
     "spatial:smoke:lux": "node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/spatial-operator-smoke.ts --provider lux3d",
     "spatial:smoke:image": "node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/spatial-operator-smoke.ts --provider image",
     "spatial:behavior-contracts": "jiti evals/spatial-creation/verify-definitions.ts",
-    "spatial:verify": "jiti lib/spatial/__tests__/verify-spatial-core.ts && jiti lib/spatial/__tests__/verify-spatial-runtime.ts && jiti lib/spatial/__tests__/verify-spatial-worker.ts && jiti lib/spatial/__tests__/verify-spatial-operator-smoke.ts && jiti lib/tools/__tests__/verify-spatial-tool-adapter.ts && npm run media-prefix:verify && jiti lib/image-generation/__tests__/verify-generate-image-transport.ts && jiti lib/image-generation/__tests__/verify-generate-image-durability.ts && jiti scripts/__tests__/verify-spatial-readiness-security.ts && jiti components/workspace/__tests__/verify-spatial-product-ui.ts && npm run spatial:behavior-contracts",
-    "spatial:verify:mongo": "jiti lib/spatial/__tests__/verify-spatial-recovery-mongo.ts && jiti lib/spatial/__tests__/verify-spatial-operator-smoke-mongo.ts",
+    "spatial:verify": "jiti lib/spatial/__tests__/verify-spatial-core.ts && jiti lib/spatial/__tests__/verify-spatial-scene.ts && jiti lib/spatial/__tests__/verify-spatial-runtime.ts && jiti lib/spatial/__tests__/verify-spatial-worker.ts && jiti lib/spatial/__tests__/verify-spatial-operator-smoke.ts && jiti lib/tools/__tests__/verify-spatial-tool-adapter.ts && npm run media-prefix:verify && jiti lib/image-generation/__tests__/verify-generate-image-transport.ts && jiti lib/image-generation/__tests__/verify-generate-image-durability.ts && jiti scripts/__tests__/verify-spatial-readiness-security.ts && jiti components/workspace/__tests__/verify-spatial-product-ui.ts && jiti components/spatial-stage/__tests__/verify-spatial-stage.ts && npm run spatial:behavior-contracts",
+    "spatial:verify:mongo": "jiti lib/spatial/__tests__/verify-spatial-recovery-mongo.ts && jiti lib/spatial/__tests__/verify-spatial-operator-smoke-mongo.ts && jiti lib/spatial/__tests__/verify-spatial-scene-mongo.ts",
     "spatial:verify:ui": "python3 scripts/verify-spatial-ui-smoke.py --base-url http://localhost:3200",
-    "spatial:verify:demo-e2e": "jiti scripts/verify-spatial-demo-e2e.ts"
+    "spatial:verify:demo-e2e": "jiti scripts/verify-spatial-demo-e2e.ts",
+    "spatial:verify:stage-ui": "python3 scripts/verify-spatial-stage-ui.py"
   },
   "dependencies": {
     "@google/model-viewer": "^4.3.1",
+    "@manycore/aholo-viewer": "^1.8.1",
     "@tailwindcss/typography": "^0.5.19",
     "ali-oss": "^6.23.0",
     "katex": "^0.18.3",

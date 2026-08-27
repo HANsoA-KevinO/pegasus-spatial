@@ -727,6 +727,7 @@ export async function markSpatialJobUnknown(
 export async function failSpatialJob(
   claim: ClaimedSpatialBuildJob,
   error: string,
+  providerStatus?: string,
 ): Promise<ClaimedSpatialBuildJob> {
   const from = [claim.job.status]
   if (!['submitting', 'submitted', 'running', 'materializing'].includes(claim.job.status)) {
@@ -738,6 +739,7 @@ export async function failSpatialJob(
     to: 'failed',
     set: {
       last_error: safeError(error),
+      ...(providerStatus?.trim() ? { provider_status: providerStatus.trim() } : {}),
       finished_at: new Date(),
       available_at: null,
     },

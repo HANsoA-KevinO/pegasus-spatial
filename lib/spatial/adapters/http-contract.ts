@@ -22,7 +22,7 @@ export interface SpatialHttpWireContract {
   pollPath(job: SpatialBuildJobRecord): string
   encodeSubmission(job: SpatialBuildJobRecord): unknown
   decodeSubmission(payload: unknown): SpatialProviderSubmission
-  decodePoll(payload: unknown): SpatialProviderPollResult
+  decodePoll(payload: unknown, job: SpatialBuildJobRecord): SpatialProviderPollResult
   classifySubmissionFailure?(input: {
     response: Response
     payload: unknown
@@ -228,7 +228,7 @@ export abstract class ContractDrivenSpatialHttpAdapter {
       throw new ProviderTransientError(`${this.provider} poll returned HTTP ${response.status}.`)
     }
     try {
-      return contract.decodePoll(payload)
+      return contract.decodePoll(payload, job)
     } catch (error) {
       throw new ProviderTransientError(`${this.provider} poll response could not be decoded.`, { cause: error })
     }

@@ -13,6 +13,13 @@ import {
   type SpatialOperatorSmokeIntentRecord,
   type SpatialStagedBatchRecord,
 } from './types'
+import type {
+  SpatialObservationRecord,
+  SpatialRenderCommandRecord,
+  SpatialRenderSessionRecord,
+  SpatialSceneRecord,
+  SpatialSceneRevisionRecord,
+} from './scene-types'
 
 const SpatialBuildJobSchema = new Schema<SpatialBuildJobRecord>({
   job_id: { type: String, required: true, unique: true, index: true },
@@ -246,6 +253,116 @@ export const SpatialOperatorProviderSubmissionGuardModel =
     SpatialOperatorProviderSubmissionGuardSchema,
   )
 
+const SpatialSceneSchema = new Schema<SpatialSceneRecord>({
+  scene_id: { type: String, required: true, unique: true, index: true },
+  project_id: { type: String, required: true, index: true },
+  user_id: { type: String, required: true, index: true },
+  conversation_id: { type: String, required: true, index: true },
+  title: { type: String, required: true },
+  current_revision_id: { type: String, required: true, index: true },
+  current_version: { type: Number, required: true, min: 1 },
+  agent_viewpoint: { type: Schema.Types.Mixed, default: null },
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+  collection: 'spatial_scenes',
+})
+SpatialSceneSchema.index({ project_id: 1, updated_at: -1 })
+
+const SpatialSceneRevisionSchema = new Schema<SpatialSceneRevisionRecord>({
+  revision_id: { type: String, required: true, unique: true, index: true },
+  scene_id: { type: String, required: true, index: true },
+  project_id: { type: String, required: true, index: true },
+  user_id: { type: String, required: true, index: true },
+  version: { type: Number, required: true, min: 1 },
+  parent_revision_id: { type: String, default: null, index: true },
+  mutation_key: { type: String, required: true },
+  mutation_hash: { type: String, required: true },
+  world: { type: Schema.Types.Mixed, default: null },
+  instances: { type: [Schema.Types.Mixed], default: [] } as never,
+  change_summary: { type: String, required: true },
+  observation_id: { type: String, default: null, index: true },
+  created_by: { type: String, required: true },
+  committed: { type: Boolean, required: true, default: false, index: true },
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+  collection: 'spatial_scene_revisions',
+})
+SpatialSceneRevisionSchema.index({ project_id: 1, mutation_key: 1 }, { unique: true })
+SpatialSceneRevisionSchema.index({ scene_id: 1, version: -1, committed: 1 })
+
+const SpatialObservationSchema = new Schema<SpatialObservationRecord>({
+  observation_id: { type: String, required: true, unique: true, index: true },
+  scene_id: { type: String, required: true, index: true },
+  project_id: { type: String, required: true, index: true },
+  user_id: { type: String, required: true, index: true },
+  revision_id: { type: String, required: true, index: true },
+  source: { type: String, enum: ['user', 'agent'], required: true },
+  viewpoint: { type: Schema.Types.Mixed, required: true },
+  screenshot_asset_id: { type: String, required: true },
+  screenshot_workspace_path: { type: String, required: true },
+  selected_instance_id: { type: String, default: null },
+  visible_instance_ids: { type: [String], default: [] },
+  comment: { type: String, required: true },
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+  collection: 'spatial_observations',
+})
+
+const SpatialRenderSessionSchema = new Schema<SpatialRenderSessionRecord>({
+  session_id: { type: String, required: true, unique: true, index: true },
+  scene_id: { type: String, required: true, index: true },
+  project_id: { type: String, required: true, index: true },
+  user_id: { type: String, required: true, index: true },
+  client_id: { type: String, required: true },
+  lease_token: { type: String, required: true },
+  heartbeat_at: { type: Date, required: true },
+  expires_at: { type: Date, required: true, index: true },
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+  collection: 'spatial_render_sessions',
+})
+SpatialRenderSessionSchema.index({ project_id: 1, scene_id: 1, expires_at: -1 })
+
+const SpatialRenderCommandSchema = new Schema<SpatialRenderCommandRecord>({
+  command_id: { type: String, required: true, unique: true, index: true },
+  scene_id: { type: String, required: true, index: true },
+  project_id: { type: String, required: true, index: true },
+  user_id: { type: String, required: true, index: true },
+  run_id: { type: String, required: true },
+  tool_use_id: { type: String, required: true },
+  revision_id: { type: String, required: true },
+  viewpoint: { type: Schema.Types.Mixed, required: true },
+  note: { type: String, default: null },
+  status: { type: String, enum: ['queued', 'claimed', 'completed', 'failed'], required: true, index: true },
+  lease: { type: Schema.Types.Mixed, default: null },
+  observation_id: { type: String, required: true, unique: true },
+  screenshot_asset_id: { type: String, default: null },
+  screenshot_workspace_path: { type: String, default: null },
+  last_error: { type: String, default: null },
+  completed_at: { type: Date, default: null },
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+  collection: 'spatial_render_commands',
+})
+SpatialRenderCommandSchema.index({ project_id: 1, run_id: 1, tool_use_id: 1 }, { unique: true })
+SpatialRenderCommandSchema.index({ project_id: 1, scene_id: 1, status: 1, created_at: 1 })
+
+export const SpatialSceneModel =
+  (mongoose.models.SpatialScene as Model<SpatialSceneRecord> | undefined)
+  ?? mongoose.model<SpatialSceneRecord>('SpatialScene', SpatialSceneSchema)
+export const SpatialSceneRevisionModel =
+  (mongoose.models.SpatialSceneRevision as Model<SpatialSceneRevisionRecord> | undefined)
+  ?? mongoose.model<SpatialSceneRevisionRecord>('SpatialSceneRevision', SpatialSceneRevisionSchema)
+export const SpatialObservationModel =
+  (mongoose.models.SpatialObservation as Model<SpatialObservationRecord> | undefined)
+  ?? mongoose.model<SpatialObservationRecord>('SpatialObservation', SpatialObservationSchema)
+export const SpatialRenderSessionModel =
+  (mongoose.models.SpatialRenderSession as Model<SpatialRenderSessionRecord> | undefined)
+  ?? mongoose.model<SpatialRenderSessionRecord>('SpatialRenderSession', SpatialRenderSessionSchema)
+export const SpatialRenderCommandModel =
+  (mongoose.models.SpatialRenderCommand as Model<SpatialRenderCommandRecord> | undefined)
+  ?? mongoose.model<SpatialRenderCommandRecord>('SpatialRenderCommand', SpatialRenderCommandSchema)
+
 export const SPATIAL_MODELS = [
   SpatialBuildJobModel,
   SpatialArtifactNodeModel,
@@ -253,4 +370,9 @@ export const SPATIAL_MODELS = [
   SpatialStagedBatchModel,
   SpatialOperatorSmokeIntentModel,
   SpatialOperatorProviderSubmissionGuardModel,
+  SpatialSceneModel,
+  SpatialSceneRevisionModel,
+  SpatialObservationModel,
+  SpatialRenderSessionModel,
+  SpatialRenderCommandModel,
 ] as const

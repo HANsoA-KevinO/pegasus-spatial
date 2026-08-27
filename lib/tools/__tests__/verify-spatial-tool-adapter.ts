@@ -200,7 +200,7 @@ await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureR
   assert.deepEqual(state.prepared[0].request.input_image_paths, ['output/spatial/images/chair.png'])
   assert.deepEqual(state.prepared[0].request.provider_options, {
     version: 'G1',
-    output_formats: ['glb'],
+    output_formats: ['glb', 'ply'],
     source_image_urls: ['https://media.example.test/raster-assets/asset_chair/original'],
     source_asset_ids: ['asset_chair'],
   })
@@ -244,7 +244,7 @@ await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureR
   )
 }
 
-// Root-only is enforced again at execution, independent of schema visibility.
+// Wildcard filtering happens at delegation; an explicit durable grant is executable.
 {
   const state = setupDependencies()
   const member = await executeCreateWorld3D({
@@ -255,9 +255,8 @@ await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureR
     invocation,
     dependencies: state.dependencies,
   })
-  assert.equal(member.is_error, true)
-  assert.match(parsed(member.content).error ?? '', /Root Agent/)
-  assert.equal(state.prepared.length, 0)
+  assert.equal(member.is_error, undefined)
+  assert.equal(state.prepared.length, 1)
 
   const provider = createAgentProvider(workspace, new Map(), {
     model: 'test-model',
@@ -269,8 +268,7 @@ await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureR
     prompt: 'attempted direct invocation',
     output_path_prefix: 'output/spatial/worlds/direct-member-attempt',
   }, invocation)
-  assert.equal(direct.is_error, true)
-  assert.match(parsed(direct.content).error ?? '', /Root Agent/)
+  assert.doesNotMatch(direct.content, /Root Agent/)
 }
 
 // The project-level two-job gate does not block an idempotent replay.

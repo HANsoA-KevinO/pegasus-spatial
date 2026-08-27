@@ -121,7 +121,7 @@ import {
 import { loadSkills } from '../skills/loader'
 import {
   getToolSchemasForCapabilities,
-  ROOT_ONLY_SPATIAL_TOOL_NAMES,
+  EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES,
   toolSchemas,
 } from '../tools/schemas'
 import {
@@ -223,7 +223,8 @@ function memberAllowedTools(
   grant: DelegationGrantRecord,
   exposedTeamTools: readonly string[],
 ): string[] {
-  const generic = grant.allowed_tool_names.includes('*')
+  const wildcard = grant.allowed_tool_names.includes('*')
+  const generic = wildcard
     ? [
         ...toolSchemas.map(schema => schema.name),
         ...(memoryV2Flags.recallTool() ? ['RecallHistory'] : []),
@@ -236,7 +237,7 @@ function memberAllowedTools(
     ...generic.filter(name => (
       name !== 'AskUserQuestion'
       && !TEAM_TOOL_NAMES.has(name)
-      && !ROOT_ONLY_SPATIAL_TOOL_NAMES.has(name)
+      && (!wildcard || !EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES.has(name))
     )),
     ...exposedTeamTools,
     ...legacyRecoveryAliases,
@@ -1231,6 +1232,7 @@ export async function executeMemberAgentRun(
         abortSignal: abortController.signal,
         supportsVision: aliasSupportsVision(alias),
         executionContext: memberExecutionContext,
+        publicationWorkspace: sharedWorkspace,
       },
       {
         onTextChunk(chunk) {

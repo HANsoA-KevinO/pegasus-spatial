@@ -28,11 +28,6 @@ export const SPATIAL_TOOL_NAMES = [
 
 export type SpatialToolName = typeof SPATIAL_TOOL_NAMES[number]
 
-const PAID_SPATIAL_TOOL_NAMES = new Set<SpatialToolName>([
-  'CreateObject3D',
-  'CreateWorld3D',
-])
-
 const ACTIVE_BUILD_LIMIT = 2
 const OBJECT_OUTPUT_ROOT = 'output/spatial/objects/'
 const WORLD_OUTPUT_ROOT = 'output/spatial/worlds/'
@@ -304,9 +299,6 @@ export async function executeCreateObject3D(
   const dependencies = runtime.dependencies ?? defaultDependencies
   const durable = requireDurableContext(runtime, 'object', 'lux3d', dependencies)
   if (isContextResult(durable)) return durable
-  if (!durable.context.isRoot) {
-    return failed('object', 'lux3d', 'CreateObject3D 仅允许 Root Agent 调用。', dependencies)
-  }
   try {
     if (!isRecord(rawInput) || !onlyKeys(rawInput, ['prompt', 'reference_image_paths', 'output_path_prefix'])) {
       throw new TypeError('CreateObject3D 输入包含未知字段或不是对象。')
@@ -346,7 +338,11 @@ export async function executeCreateObject3D(
         ...(references.length ? { input_image_paths: references.map(reference => reference.path) } : {}),
         provider_options: {
           version: 'G1',
-          output_formats: ['glb'],
+          // Freeze both representations in one supplier task. The GLB mesh is
+          // useful for transforms/collision proxies, while the Gaussian PLY
+          // lets the product compare Lux3D's native 3DGS appearance without a
+          // second paid submission.
+          output_formats: ['glb', 'ply'],
           ...(references.length
             ? {
                 source_image_urls: references.map(reference => reference.url),
@@ -370,9 +366,6 @@ export async function executeCreateWorld3D(
   const dependencies = runtime.dependencies ?? defaultDependencies
   const durable = requireDurableContext(runtime, 'world', 'aholo', dependencies)
   if (isContextResult(durable)) return durable
-  if (!durable.context.isRoot) {
-    return failed('world', 'aholo', 'CreateWorld3D 仅允许 Root Agent 调用。', dependencies)
-  }
   try {
     if (!isRecord(rawInput) || !onlyKeys(rawInput, ['prompt', 'source_image_path', 'output_path_prefix'])) {
       throw new TypeError('CreateWorld3D 输入包含未知字段或不是对象。')
@@ -490,16 +483,6 @@ export async function executeSpatialTool(
   workspace: WorkspaceInstance,
   runtime: SpatialToolRuntime,
 ): Promise<ToolResult> {
-  if (PAID_SPATIAL_TOOL_NAMES.has(name) && runtime.executionContext?.isRoot !== true) {
-    const dependencies = runtime.dependencies ?? defaultDependencies
-    const object = name === 'CreateObject3D'
-    return failed(
-      object ? 'object' : 'world',
-      object ? 'lux3d' : 'aholo',
-      `${name} 仅允许 Root Agent 调用。`,
-      dependencies,
-    )
-  }
   switch (name) {
     case 'CreateObject3D': return executeCreateObject3D(input, workspace, runtime)
     case 'CreateWorld3D': return executeCreateWorld3D(input, workspace, runtime)

@@ -22,6 +22,7 @@ import {
   type SpatialBuildWorkerOptions,
 } from './worker'
 import { createWorkspaceSpatialPublisher } from './workspace-publisher'
+import { resolveSpatialArtifactHostnameWithGoogleDoh } from './artifact-mirror'
 
 const OFFICIAL_API_BASE_URL = 'https://api.aholo3d.cn'
 const DENY_ALL_ARTIFACT_HOST = 'spatial-artifacts-not-configured.invalid'
@@ -317,7 +318,10 @@ export function createProductionSpatialDependencies(
       resolveWorkspace: resolveSpatialJobWorkspace,
     }),
     fetchImpl: options.fetchImpl,
-    resolveArtifactHostname: options.resolveArtifactHostname,
+    resolveArtifactHostname: options.resolveArtifactHostname
+      ?? (process.env.SPATIAL_ARTIFACT_DNS_RESOLVER === 'google-doh'
+        ? resolveSpatialArtifactHostnameWithGoogleDoh
+        : undefined),
     // A non-empty deny sentinel is intentional. artifact-mirror treats an
     // absent/empty list as unrestricted, which is never safe in production.
     allowedArtifactHosts(provider) {

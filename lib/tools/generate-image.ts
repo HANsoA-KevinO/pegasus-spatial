@@ -46,6 +46,8 @@ export interface GenerateImageToolRuntime {
   executionContext: AgentExecutionContext
   invocation: ToolExecutionInvocation
   signal?: AbortSignal
+  /** Public publication target for an explicitly authorized Member. Source reads still use the scoped Workspace. */
+  publicationWorkspace?: WorkspaceInstance
   /** Dependency injection for adapter and crash-window tests. */
   dependencies?: GenerateImageDependencies
   /** Trusted Operator seam; product calls default to `allow-submit`. */
@@ -551,15 +553,12 @@ export async function executeGenerateImage(
   if (!runtime?.executionContext || !runtime.invocation) {
     return invalid('GenerateImage 需要持久化的 Agent 执行上下文。')
   }
-  if (!runtime.executionContext.isRoot) {
-    return invalid('GenerateImage 仅允许 Root Agent 调用。')
-  }
-
   const parsed = parseInput(rawInput, workspace)
   if (isToolResult(parsed)) return parsed
   const dependencies = runtime.dependencies ?? createDefaultGenerateImageDependencies()
   const submissionPolicy = runtime.submissionPolicy ?? 'allow-submit'
   const context = runtime.executionContext
+  const publicationWorkspace = runtime.publicationWorkspace ?? workspace
   const projectId = context.workspaceId || context.conversationId
   const key: ImageGenerationReceiptKey = {
     projectId,
@@ -597,7 +596,7 @@ export async function executeGenerateImage(
       }
       const recovered = await recoverExistingReceipt(
         existing,
-        workspace,
+        publicationWorkspace,
         dependencies,
         context.conversationId,
       )
@@ -619,8 +618,8 @@ export async function executeGenerateImage(
     if (runtime.signal?.aborted) return invalid('图片生成已在提交供应商前取消。')
 
     const source = await resolveSource(workspace, parsed.input_image_path)
-    const outputStat = await workspace.stat(parsed.output_path)
-    const outputHead = outputStat ? await workspace.readRaster(parsed.output_path) : null
+    const outputStat = await publicationWorkspace.stat(parsed.output_path)
+    const outputHead = outputStat ? await publicationWorkspace.readRaster(parsed.output_path) : null
     if (outputStat && !outputHead) {
       return invalid(`GenerateImage 输出路径已被非图片文件占用：${parsed.output_path}`)
     }
@@ -838,7 +837,7 @@ export async function executeGenerateImage(
     await dependencies.hooks?.afterAssetStored?.()
     return await publishStoredAsset(
       assetStored,
-      workspace,
+      publicationWorkspace,
       dependencies,
       context.conversationId,
     )

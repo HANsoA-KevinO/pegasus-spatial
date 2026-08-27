@@ -14,16 +14,16 @@
 ## 授权与成本停止线
 
 - 比赛正式开始时间：`[待填写，含时区]`
-- 赛前真实生成授权范围：`[未确认；默认不提交]`
+- 赛前真实生成授权范围：`2026-08-27 用户明确授权 Lux3D/Aholo 赛事额度用于真实技术对照；本轮实际提交 2 个 Lux3D G1 task，Aholo World 与 NewAPI 尚未提交`
 - 规则/授权证据位置：`[当前为用户提供的通知、海报及上述腾讯文档；如有新的主办方说明，只记链接/本机安全路径]`
-- 币种或额度单位：`[待填写]`
-- 余额检查时点：`[待填写]`
+- 币种或额度单位：`Lux3D G1 供应商任务次数；控制台金额/积分单位尚未提供`
+- 余额检查时点：`2026-08-27 提交前；公开 API 未提供余额查询，若供应商返回额度/权限拒绝立即停止`
 - Aholo 单次最大预算 / 余额下限：`[待填写]`
-- Lux3D 单次最大预算 / 余额下限：`[待填写]`
+- Lux3D 单次最大预算 / 余额下限：`每个 Operator intent 最多 1 个 G1 task；本轮共 2 个 intent，余额下限无法由 API 验证`
 - NewAPI 单次最大预算 / 余额下限：`[待填写]`
-- H0 总预算：`[待填写]`
-- 人工停止条件：`[待填写]`
-- H0 最大提交数：Aholo `1`；Lux3D `1`；NewAPI 文生图 `1`；NewAPI 单图修订 `1`
+- H0 总预算：`本轮实际 2 个 Lux3D G1 task：首个用于发现 Fake-IP 下载问题，第二个用于完成真实 GLB/PLY 对照`
+- 人工停止条件：`unknown、无 external id、鉴权/额度拒绝、输出少于 GLB+PLY、下载或校验失败时停止；只恢复已知 external id，绝不重新提交`
+- H0 最大提交数：Aholo `1`；Lux3D `2（本轮已用完）`；NewAPI 文生图 `1`；NewAPI 单图修订 `1`
 
 未填写上述字段时，所有 operator smoke 只能运行 `--dry-run`。
 
@@ -68,6 +68,71 @@
 - 提交前预计最大扣费 / 提交后余额：`[待填写]`
 - 结论：`[pass / still_running / configuration_blocked / unknown / failed]`
 - 后续动作：`[待填写]`
+
+### `lux3d / spsmoke_498c0ba7b72893afeec8d68d6582aab8`
+
+- 固定 purpose / phase budget key：`H0 / lux-g1-dual-format-compare-v1`
+- 是否由赛前技术测试提前执行：`是；计入 Lux H0 上限，正式开始后不得重复`
+- 人工确认文本：`用户在当前任务中要求“快速做一个真实对照测试”；CLI 使用 AUTHORIZE_ONE_PAID_SUBMISSION`
+- 开始时间：`2026-08-27 12:33 JST`
+- 结束/最后观察时间：`2026-08-27 12:49 JST`
+- 本方 job/receipt ID：`spjob_e0621963296e4e3d42674b2a814457c4cced0a2f`
+- 外部任务 ID：`SHA-256 0bf827e5c30527c903590cb878118c26c3cc375178f485e415523715b0070bae`
+- 输入 hash：`eeaacc86cda7e9292c4fa930f0ca76d8ffcedbc7db285a8df4524cf64f46243c`
+- 状态轨迹：`prepared → running → configuration_blocked → failed`
+- 是否出现 ambiguous/unknown：`否`
+- 提交次数：`1`
+- 供应商状态：`3（生成成功）；本方因本机代理 Fake-IP 198.18/15 被 SSRF 检查拒绝而终止`
+- 产物 hostname：`qhsmodel.kujiale.com；tx-qhfpm-1258830046.cos.ap-shanghai.myqcloud.com`
+- MIME / magic / 字节数 / SHA-256：`未下载；终态前被 DNS 安全检查阻断`
+- Workspace 路径：`output/spatial/objects/operator-6582aab8/`
+- 重启恢复结果：`待验证`
+- UI 刷新后结果：`待验证`
+- 费用/额度变化：`供应商 API 未提供余额查询；只记录单任务次数`
+- 提交前预计最大扣费 / 提交后余额：`最多 1 个 G1 task / 余额不可由 API 验证`
+- 结论：`failed（供应商成功，本方代理 DNS 兼容失败）`
+- 后续动作：`已增加显式 google-doh 解析模式；终态不重开，使用新 intent 验证`
+
+### `lux3d / spsmoke_c0560c1dad3917d3b3f794f309b743ea`
+
+- 固定 purpose / phase budget key：`H1 / lux-g1-dual-format-compare-v2`
+- 是否由赛前技术测试提前执行：`是；计入本轮 Lux 技术测试第 2 个 task`
+- 人工确认文本：`用户确认赛事 API 额度充足并要求继续真实对照；CLI 使用 AUTHORIZE_ONE_PAID_SUBMISSION`
+- 开始时间：`2026-08-27 12:48 JST`
+- 结束/最后观察时间：`2026-08-27 13:05 JST`
+- 本方 job/receipt ID：`spjob_e743bc9c8f33170054b5b05d6b16352fe8c72d9a`
+- 外部任务 ID：`SHA-256 03ebb7b8631445a64261f1a6bb76f7734d54d4be589d5819dc38c2a7971d9120`
+- 输入 hash：`2d9d3a8a07c23acc59ccdb90bfb7c4752ebaaf04140b56c482a6aa268b2b4165`
+- 状态轨迹：`prepared → running → provider status 3 → failed（旧适配器按请求顺序误映射固定输出槽）`
+- 是否出现 ambiguous/unknown：`否`
+- 提交次数：`1`
+- 供应商状态：`3（成功）`
+- 产物 hostname：`qhsmodel.kujiale.com；tx-qhfpm-1258830046.cos.ap-shanghai.myqcloud.com`
+- MIME / magic / 字节数 / SHA-256：`GLB / glTF / 5,807,560 / 1e76fb2a9f4dfe22ecd705177b851a1c20d99e4f6d333f934438b8c24deb02c0；PLY / ply binary_little_endian / 113,699,681 / 41136a23d75dc29a3043133b446be3de1e0fc1018463bdf22ebacdb2f4c8468d`
+- Workspace 路径：`未发布；真实产物安全下载到临时诊断目录，适配器已改为 G1 固定槽位 ZIP/GLB/PLY`
+- 重启恢复结果：`同 external id 多次 resume，提交次数始终为 1`
+- UI 刷新后结果：`临时本地对照页成功渲染 GLB 与 PLY，浏览器 console 0 error`
+- 费用/额度变化：`供应商 API 未提供余额查询；计 1 个 G1 task`
+- 提交前预计最大扣费 / 提交后余额：`1 个 G1 task / 余额不可由 API 验证`
+- 结论：`provider pass / product publication failed before slot-mapping fix`
+- 后续动作：`物体主运行格式冻结为 standalone GLB；PLY 仅作为可选高保真视觉层，下一轮补固定槽位回归与可恢复发布测试`
+
+### `aholo / spsmoke_551f72e84a6fa32f7b842622577f4c50`
+
+- 固定 purpose / phase budget key：`H2 / mixed-scene-world-baseline-v1`
+- 是否由赛前技术测试提前执行：`是；用户明确授权赛事 Aholo 额度用于真实对照`
+- 开始时间：`2026-08-27 14:59 JST`
+- 结束/最后观察时间：`2026-08-27 15:01 JST`
+- 本方 job/receipt ID：`spjob_3ea14bf04478b406d651e3804aba4c71f0f2df6b`
+- 外部任务 ID：`SHA-256 7f493b9692b26b9e77a5e731120541d45358098c84c8b4b3e545301fbf30a4be`
+- 输入 hash：`e06828d49ed2f595715d22728443290868c5d3d1278c4a077f185a507082bca7`
+- 状态轨迹：`prepared → pending → running → failed`
+- 是否出现 ambiguous/unknown：`否`
+- 提交次数：`1`
+- 供应商状态：`终态失败；旧代码保留了前一状态 running，未保存终态枚举`
+- 产物 hostname / Workspace 路径：`无；未进入产物物化`
+- 结论：`供应商未生成可用 World；没有重复提交`
+- 后续动作：`已修复终态 provider_status 持久化并加入 Mongo 回归；此 intent 保持 terminal，不重开或伪称真实混合验收通过`
 
 ## T+2 结论
 
