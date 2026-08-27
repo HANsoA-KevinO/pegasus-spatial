@@ -123,7 +123,7 @@ export function TaskWorkbench({ onSubmit }: {
   const questionRef = useAutoResizeTextarea(question, QUESTION_MIN_HEIGHT, QUESTION_MAX_HEIGHT)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modelControlRef = useRef<HTMLDivElement>(null)
-  const { model, setModel } = useChatContext()
+  const { model, setModel, memoryEnabled, setMemoryEnabled } = useChatContext()
   const { models, isLoading: modelsLoading } = useModels()
   const selectedModel = models.find(item => item.id === model)
   const selectedModelName = selectedModel?.name ?? (modelsLoading ? '正在读取模型…' : model)
@@ -256,7 +256,7 @@ export function TaskWorkbench({ onSubmit }: {
   const canSubmit = Boolean(question.trim()) && uploadingCount === 0 && !hasUnsupportedImages
 
   return (
-    <div className="relative h-full w-full overflow-y-auto bg-surface px-6 py-7 lg:px-12 lg:py-9">
+    <div className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-surface px-6 py-7 lg:px-12 lg:py-9">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 opacity-55 dark:opacity-35 [background-size:36px_36px]"
@@ -267,24 +267,22 @@ export function TaskWorkbench({ onSubmit }: {
           ].join(','),
         }}
       />
-      <div className="relative mx-auto max-w-4xl">
+      <div className="relative mx-auto w-full max-w-4xl">
         <section className="rounded-[12px] border border-[var(--paper-edge)] bg-[var(--paper)] p-5 shadow-[var(--shadow-paper)] lg:p-7">
           <header className="mb-5 flex items-center gap-3">
             <BrandMark className="h-10 w-10 shrink-0" />
             <h1 className="text-[28px] font-bold tracking-[-0.035em] text-ink lg:text-[31px]">描述一个想进入的世界</h1>
           </header>
 
-          <div className="overflow-visible rounded-[14px] border border-ghost-border/75 bg-surface-lowest p-3.5 shadow-[0_12px_36px_color-mix(in_srgb,var(--ink)_8%,transparent)] sm:p-4">
-            <span className="mb-2 block text-sm font-semibold text-ink">你想创造什么？</span>
-            <div
-              id="workbench-composer"
-              onDrop={handleDrop}
-              onDragOver={event => event.preventDefault()}
-              className="overflow-visible rounded-[11px] border border-ghost-border/70 bg-surface transition-[border-color,box-shadow] focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/15"
-            >
+          <div
+            id="workbench-composer"
+            onDrop={handleDrop}
+            onDragOver={event => event.preventDefault()}
+            className="overflow-visible rounded-[11px] border border-ghost-border/70 bg-surface transition-[border-color,box-shadow] focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/15"
+          >
               <textarea
                 ref={questionRef}
-                aria-label="你想创造什么？"
+                aria-label="空间创作描述"
                 value={question}
                 onChange={event => setQuestion(event.target.value)}
                 onKeyDown={event => {
@@ -355,6 +353,16 @@ export function TaskWorkbench({ onSubmit }: {
                   className="hidden"
                 />
 
+                <button
+                  type="button"
+                  onClick={() => setMemoryEnabled(!memoryEnabled)}
+                  title={memoryEnabled ? '跨对话记忆已开启' : '跨对话记忆已关闭'}
+                  className={`flex h-9 shrink-0 items-center gap-1.5 rounded-[9px] border px-3 text-xs font-medium transition ${memoryEnabled ? 'border-primary/30 bg-primary/10 text-primary' : 'border-ghost-border/70 bg-surface-low text-ink-secondary hover:border-primary/30 hover:text-ink'}`}
+                >
+                  <span className="font-mono text-[13px]" aria-hidden="true">⌬</span>
+                  记忆 {memoryEnabled ? 'ON' : 'OFF'}
+                </button>
+
                 <div ref={modelControlRef} className="relative min-w-0">
                   <button
                     type="button"
@@ -411,7 +419,6 @@ export function TaskWorkbench({ onSubmit }: {
                 </button>
               </div>
             </div>
-          </div>
         </section>
 
       </div>
