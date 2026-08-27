@@ -31,6 +31,7 @@ function SidebarModeTab({ selected, disabled = false, label, count, onClick }: {
       type="button"
       role="tab"
       aria-selected={selected}
+      title={disabled ? '请先创建或打开一个项目' : label}
       disabled={disabled}
       onClick={onClick}
       className={`flex h-8 items-center justify-center gap-1.5 rounded-ctrl text-[12.5px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-35 ${selected ? 'bg-surface-lowest text-primary shadow-sm' : 'text-ink-muted hover:bg-white/35 hover:text-ink dark:hover:bg-white/[0.04]'}`}
@@ -190,18 +191,20 @@ export function AppSidebar({ className = '' }: { className?: string }) {
             </svg>
           </button>
           {!collapsed && <span className="min-w-0 flex-1 text-[12.5px] font-semibold uppercase tracking-[0.12em] text-ink-muted">空间创作导航</span>}
-          <button
-            type="button"
-            onClick={handleCreate}
-            className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-card text-primary transition hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${collapsed ? 'mt-1' : ''}`}
-            title="新项目"
-            aria-label="新项目"
-          >
-            <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9} aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            <span aria-hidden="true" className={`pmo-shimmer ${shimmering ? 'pmo-shimmer-fire' : ''}`} />
-          </button>
+          {collapsed && (
+            <button
+              type="button"
+              onClick={handleCreate}
+              className="relative mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-card text-primary transition hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              title="新建项目"
+              aria-label="新建项目"
+            >
+              <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              <span aria-hidden="true" className={`pmo-shimmer ${shimmering ? 'pmo-shimmer-fire' : ''}`} />
+            </button>
+          )}
         </div>
 
         {collapsed ? (
@@ -263,6 +266,9 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                   onClick={() => setSidebarView('files')}
                 />
               </div>
+              {!canBrowseFiles && (
+                <p className="px-1 pt-2 text-[11px] leading-4 text-ink-muted">创建或打开项目后，可在“场景”查看空间版本，在“文件”查看生成产物。</p>
+              )}
             </div>
 
             {effectiveView === 'projects' ? (
