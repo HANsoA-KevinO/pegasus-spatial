@@ -51,6 +51,7 @@ export interface ChatMessage {
 
 interface UseChatOptions {
   model: ModelProvider
+  memoryEnabled?: boolean
   researchDomain?: string
   /** Fired once after loadConversation hydrates state from /api/conversations/:id.
    *  Lets ChatContext sync the model/domain inputs to the loaded conversation
@@ -654,7 +655,7 @@ export function useChat(options: UseChatOptions) {
       cached.settings = {
         orchestrator_model: options.model,
         research_domain: effectiveResearchDomain,
-        memory_enabled: false,
+        memory_enabled: options.memoryEnabled !== false,
       }
       syncToReact(myKey)
 
@@ -687,7 +688,7 @@ export function useChat(options: UseChatOptions) {
             settings: {
               orchestrator_model: options.model,
               research_domain: effectiveResearchDomain,
-              memory_enabled: false,
+              memory_enabled: options.memoryEnabled !== false,
             },
           }),
           signal: abortController.signal,
@@ -872,7 +873,7 @@ export function useChat(options: UseChatOptions) {
     // React setters only. Depending on their per-render function identities
     // would recreate sendMessage and can start duplicate reconnect attempts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [conversationId, isLoading, options.model, options.researchDomain]
+    [conversationId, isLoading, options.memoryEnabled, options.model, options.researchDomain]
   )
 
   // ==================== stopGeneration ====================

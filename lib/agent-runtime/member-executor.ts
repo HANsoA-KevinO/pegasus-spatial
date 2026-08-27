@@ -222,12 +222,13 @@ function messageText(message: ConversationMessage | undefined): string {
 function memberAllowedTools(
   grant: DelegationGrantRecord,
   exposedTeamTools: readonly string[],
+  memoryEnabled: boolean,
 ): string[] {
   const wildcard = grant.allowed_tool_names.includes('*')
   const generic = wildcard
     ? [
         ...toolSchemas.map(schema => schema.name),
-        ...(memoryV2Flags.recallTool() ? ['RecallHistory'] : []),
+        ...(memoryEnabled && memoryV2Flags.recallTool() ? ['RecallHistory'] : []),
       ]
     : grant.allowed_tool_names
   const legacyRecoveryAliases = LEGACY_AGENT_TEAM_TOOL_NAMES.filter(alias => (
@@ -248,13 +249,14 @@ async function buildMemberExecutionContext(input: {
   run: AgentRunDocument
   context: MemberRuntimeContext
   ownerId: string
+  memoryEnabled: boolean
 }): Promise<AgentExecutionContext> {
   const exposedTeamTools = await agentTeamService.exposedTools({
     teamId: input.context.team.team_id,
     userId: input.run.user_id,
     agentId: input.context.agent.agent_id,
   })
-  const allowedTools = memberAllowedTools(input.context.grant, exposedTeamTools)
+  const allowedTools = memberAllowedTools(input.context.grant, exposedTeamTools, input.memoryEnabled)
   return {
     userId: input.run.user_id,
     conversationId: input.run.conversation_id,
@@ -719,6 +721,11 @@ export async function executeMemberAgentRun(
     }, HEARTBEAT_MS)
     heartbeat.unref?.()
 
+    const conversationDoc = await getConversation(run.conversation_id, run.user_id)
+    if (!conversationDoc) throw new Error('Member Agent Conversation no longer exists.')
+    const conversation = asConversationDoc(conversationDoc)
+    const memoryEnabled = conversation.settings?.memory_enabled !== false
+
     // A TaskUpdate(waiting) may durably commit before its tool_result and Run
     // checkpoint are appended. The Task is no longer `running`, but the exact
     // persisted assistant tool_use is still safe to replay because Team
@@ -767,6 +774,7 @@ export async function executeMemberAgentRun(
         run,
         context,
         ownerId,
+        memoryEnabled,
       })
       const recoverySequence = persistedRecoveryMessages.reduce((maximum, message) => (
         message.run_id === run.run_id && typeof message.sequence === 'number'
@@ -784,7 +792,7 @@ export async function executeMemberAgentRun(
         sequence: recoverySequence,
         visibleToolSchemas: getToolSchemasForCapabilities({
           supportsVision: false,
-          includeRecallHistory: memoryV2Flags.recallTool(),
+          includeRecallHistory: memoryEnabled && memoryV2Flags.recallTool(),
           allowedTools: recoveryExecutionContext.allowedTools,
           allowAskUser: false,
         }),
@@ -880,9 +888,6 @@ export async function executeMemberAgentRun(
     })
     queueClaim = await claimTargetedQueue(run)
 
-    const conversationDoc = await getConversation(run.conversation_id, run.user_id)
-    if (!conversationDoc) throw new Error('Member Agent Conversation no longer exists.')
-    const conversation = asConversationDoc(conversationDoc)
     const projectGuide = validateProjectGuideRef(conversation.project_guide)
     if (!conversation.project_guide) {
       await initializeConversationProjectGuide(run.conversation_id, run.user_id, projectGuide)
@@ -1089,6 +1094,7 @@ export async function executeMemberAgentRun(
       run,
       context,
       ownerId,
+      memoryEnabled,
     })
     const allowedTools = [...(memberExecutionContext.allowedTools ?? [])]
 
@@ -1103,7 +1109,7 @@ export async function executeMemberAgentRun(
       sequence: nextSequence,
       visibleToolSchemas: getToolSchemasForCapabilities({
         supportsVision: false,
-        includeRecallHistory: memoryV2Flags.recallTool(),
+        includeRecallHistory: memoryEnabled && memoryV2Flags.recallTool(),
         allowedTools,
         allowAskUser: false,
       }),
@@ -1200,8 +1206,8 @@ export async function executeMemberAgentRun(
 
     const skills = loadSkills({ projectGuideTemplateId: projectGuide.template_id })
     const frozenProfile = hippocampus.profile_snapshot
-    let profileSnapshot = frozenProfile ?? null
-    if (!profileSnapshot && memoryV2Flags.profileInjection()) {
+    let profileSnapshot = memoryEnabled ? (frozenProfile ?? null) : null
+    if (!profileSnapshot && memoryEnabled && memoryV2Flags.profileInjection()) {
       const profile = await getOrCreateProfile(run.user_id)
       profileSnapshot = {
         version: profile.version,
@@ -1262,7 +1268,7 @@ export async function executeMemberAgentRun(
     }))
     const visibleSchemas = getToolSchemasForCapabilities({
       supportsVision: aliasSupportsVision(alias),
-      includeRecallHistory: memoryV2Flags.recallTool(),
+      includeRecallHistory: memoryEnabled && memoryV2Flags.recallTool(),
       allowedTools,
       allowAskUser: false,
     })

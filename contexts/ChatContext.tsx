@@ -32,6 +32,8 @@ export interface SpatialObservationDraft {
 interface ChatContextValue {
   model: ModelProvider
   setModel: (model: ModelProvider) => void
+  memoryEnabled: boolean
+  setMemoryEnabled: (enabled: boolean) => void
   researchDomain: string
   setResearchDomain: (domain: string) => void
   messages: ChatMessage[]
@@ -75,6 +77,7 @@ const ChatContext = createContext<ChatContextValue | null>(null)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [model, setModel] = useState<ModelProvider>('main_standard')
+  const [memoryEnabled, setMemoryEnabled] = useState(true)
   const [researchDomain, setResearchDomain] = useState('开放空间创作')
   const [quotedSelection, setQuotedSelection] = useState<QuotedSelection | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -90,11 +93,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }) => {
     if (settings.orchestrator_model) setModel(settings.orchestrator_model as ModelProvider)
     if (settings.research_domain !== undefined) setResearchDomain(settings.research_domain)
+    setMemoryEnabled(settings.memory_enabled !== false)
   }, [])
 
-  const chat = useChat({ model, researchDomain, onConversationLoaded: handleConversationLoaded })
+  const chat = useChat({ model, memoryEnabled, researchDomain, onConversationLoaded: handleConversationLoaded })
   const activeConversationId = chat.conversationId
   const reconnectConversation = chat.loadConversation
+  const updateCachedSettings = chat.updateCachedSettings
+
+  const handleMemoryToggle = useCallback((enabled: boolean) => {
+    setMemoryEnabled(enabled)
+    if (!activeConversationId) return
+    void fetch(`/api/conversations/${activeConversationId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memory_enabled: enabled }),
+    })
+    updateCachedSettings(activeConversationId, { memory_enabled: enabled })
+  }, [activeConversationId, updateCachedSettings])
 
   useEffect(() => {
     const handleRootAgentRun = (rawEvent: Event) => {
@@ -242,6 +258,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ChatContextValue>(() => ({
     model,
     setModel,
+    memoryEnabled,
+    setMemoryEnabled: handleMemoryToggle,
     researchDomain,
     setResearchDomain,
     messages: chat.messages,
@@ -275,7 +293,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     handleNewChat,
     handleDeleteConversation,
   }), [
-    model, researchDomain, chat.messages, chat.isLoading, chat.isLoadingConversation,
+    model, memoryEnabled, handleMemoryToggle, researchDomain, chat.messages, chat.isLoading, chat.isLoadingConversation,
     chat.conversationId, chat.contextUsage, chat.runningConversationIds,
     chat.waitingForUserIds, chat.sendMessage, chat.stopGeneration,
     chat.loadConversation, chat.answerQuestion, chat.resetChat,

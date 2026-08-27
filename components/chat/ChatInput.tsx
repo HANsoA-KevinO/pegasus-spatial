@@ -73,6 +73,8 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
   const {
     model,
     setModel,
+    memoryEnabled,
+    setMemoryEnabled,
     spatialObservationDraft,
     clearSpatialObservationDraft,
   } = useChatContext()
@@ -430,14 +432,14 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isLoading || uploadingImages > 0 || pendingImages.length >= MAX_IMAGES}
                 className="pmo-tool-btn"
-                title="上传图片"
+                title="添加参考文件"
               >
                 <span className="pmo-tool-btn-icon" aria-hidden>
                   <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
                   </svg>
                 </span>
-                图片
+                参考文件
               </button>
             )}
             <input
@@ -448,6 +450,16 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
               onChange={handleFileChange}
               className="hidden"
             />
+
+            <button
+              type="button"
+              onClick={() => setMemoryEnabled(!memoryEnabled)}
+              className={`pmo-tool-btn ${memoryEnabled ? 'active' : ''}`}
+              title={memoryEnabled ? '跨对话记忆已开启' : '跨对话记忆已关闭'}
+            >
+              <span className="pmo-tool-btn-icon">⌬</span>
+              记忆 {memoryEnabled ? 'ON' : 'OFF'}
+            </button>
 
             {/* Model picker — inline popover (same UX as TaskWorkbench) */}
             <div ref={modelRef} style={{ position: 'relative' }}>

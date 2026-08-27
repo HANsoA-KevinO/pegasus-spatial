@@ -319,10 +319,13 @@ export async function POST(req: NextRequest) {
       code: 'conversation_not_found',
     }, { status: 404 })
   }
-  // Cross-conversation Memory V1 is frozen pending a full redesign. Keep the
-  // legacy setting in the wire/schema for compatibility, but never allow an
-  // old client or conversation document to reactivate it at runtime.
-  const frozenSettings = { ...settings, memory_enabled: false }
+  // Memory is a per-project choice. New projects default to enabled, while an
+  // existing project keeps its persisted choice when a runner or older client
+  // omits the field.
+  const memoryEnabled = settings?.memory_enabled
+    ?? requestedConversation?.settings?.memory_enabled
+    ?? true
+  const effectiveSettings = { ...settings, memory_enabled: memoryEnabled }
 
   // Project Guide selection is an immutable Conversation-creation decision.
   // Runner dispatches never need to replay it because the Conversation is
@@ -519,7 +522,7 @@ export async function POST(req: NextRequest) {
       const conversation = conversation_id
         ? requestedConversation
         : await createConversation(userId, {
-            settings: frozenSettings,
+            settings: effectiveSettings,
             projectGuide: newConversationProjectGuide,
           })
       if (!conversation) throw new Error('Conversation disappeared after request preflight')
@@ -602,7 +605,7 @@ export async function POST(req: NextRequest) {
               settings: {
                 orchestrator_model: convDoc.settings?.orchestrator_model,
                 research_domain: convDoc.settings?.research_domain,
-                memory_enabled: false,
+                memory_enabled: memoryEnabled,
               },
             },
             startedMessageId:
@@ -660,7 +663,7 @@ export async function POST(req: NextRequest) {
             runId: agentRunId,
             conversationId: convId,
             userId,
-            request: { message, images, settings: frozenSettings },
+            request: { message, images, settings: effectiveSettings },
             startedMessageId: userMessageId,
             teamId: rootTeamContext.team.team_id,
             agentId: rootTeamContext.agent.agent_id,
@@ -791,7 +794,7 @@ export async function POST(req: NextRequest) {
       // continues across AskUserQuestion pauses; all other top-level requests
       // start a fresh evidence journal.
       let memoryEvidenceChain: Promise<void> = Promise.resolve()
-      if (memoryV2Flags.extraction() && !isInternalAgentInput) {
+      if (memoryEnabled && memoryV2Flags.extraction() && !isInternalAgentInput) {
         const existingRunId = persistedActiveRun?.memory_run_id ?? convDoc.memory_context?.active_run_id
         const existingRun = (
           continuingPersistedRun
@@ -854,7 +857,7 @@ export async function POST(req: NextRequest) {
         ...(settings?.research_domain
           ? { 'settings.research_domain': settings.research_domain }
           : {}),
-        'settings.memory_enabled': false,
+        'settings.memory_enabled': memoryEnabled,
       })
 
       // 3. Create workspace instance backed by GridFS.
@@ -972,14 +975,14 @@ export async function POST(req: NextRequest) {
       // this top-level loop. Compaction forks reuse this exact context.
       const resumingExistingRun = continuingPersistedRun
       const frozenProfile = runtime.profile_snapshot
-      const latestProfile = memoryV2Flags.profileInjection() && !(
+      const latestProfile = memoryEnabled && memoryV2Flags.profileInjection() && !(
         resumingExistingRun
         && frozenProfile
         && typeof frozenProfile.compiled_text === 'string'
       )
         ? await getOrCreateProfile(userId)
         : null
-      const profileSnapshot = memoryV2Flags.profileInjection()
+      const profileSnapshot = memoryEnabled && memoryV2Flags.profileInjection()
         ? (
             resumingExistingRun
             && frozenProfile
@@ -1006,7 +1009,7 @@ export async function POST(req: NextRequest) {
         )
       }
       let historyReminder = ''
-      if (memoryV2Flags.historyInjection() && (convDoc.compaction_count ?? 0) === 0) {
+      if (memoryEnabled && memoryV2Flags.historyInjection() && (convDoc.compaction_count ?? 0) === 0) {
         const existingSnapshot = convDoc.memory_context?.first_turn_history
         if (existingSnapshot?.status === 'injected') {
           historyReminder = existingSnapshot.reminder
@@ -1408,7 +1411,7 @@ export async function POST(req: NextRequest) {
         sequence: nextRunMessageSequence,
         visibleToolSchemas: getToolSchemasForCapabilities({
           supportsVision: aliasSupportsVision(alias),
-          includeRecallHistory: memoryV2Flags.recallTool(),
+          includeRecallHistory: memoryEnabled && memoryV2Flags.recallTool(),
           allowAskUser: true,
         }),
         replayAgentTeamTool: async replay => {
@@ -1620,7 +1623,7 @@ export async function POST(req: NextRequest) {
       const overheadTokens = estimateOverheadTokens(
         getToolSchemasForCapabilities({
           supportsVision: aliasSupportsVision(alias),
-          includeRecallHistory: memoryV2Flags.recallTool(),
+          includeRecallHistory: memoryEnabled && memoryV2Flags.recallTool(),
         }),
         skillMetadata,
         memoryContext,
