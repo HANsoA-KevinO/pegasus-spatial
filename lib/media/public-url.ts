@@ -19,13 +19,12 @@ const LOOPBACK_OR_PRIVATE_HOST = /^(localhost|0\.0\.0\.0|127(?:\.\d{1,3}){3}|10(
 /**
  * Return the stable public origin that model providers can reach.
  *
- * Production normally falls back to NEXTAUTH_URL. Local development must set
+ * Production normally falls back to APP_PUBLIC_URL. Local development must set
  * MEDIA_PUBLIC_BASE_URL to a public tunnel (for example a named Cloudflare
  * Tunnel); localhost/private LAN addresses cannot be fetched by cloud models.
  */
 export function getMediaPublicBaseUrl(): string {
   const raw = process.env.MEDIA_PUBLIC_BASE_URL?.trim()
-    || process.env.NEXTAUTH_URL?.trim()
 
   if (!raw) {
     throw new Error(

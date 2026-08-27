@@ -145,7 +145,6 @@ export interface RepairDurableCompactionDependencies {
   now(): Date
   loadConversation(conversationId: string): Promise<RepairConversationSnapshot | null>
   loadRuntime(conversationId: string, userId: string): Promise<RepairRuntimeSnapshot | null>
-  loadUser(userId: string): Promise<RepairUserSnapshot | null>
   loadTeam(conversationId: string, userId: string): Promise<RepairTeamSnapshot | null>
   loadRootAgent(team: RepairTeamSnapshot): Promise<RepairRootAgentSnapshot | null>
   loadRootSession(
@@ -498,13 +497,14 @@ async function loadAuthorizedProject(
 }> {
   const conversation = await dependencies.loadConversation(conversationId)
   if (!conversation) throw new Error('Conversation was not found.')
-  const [runtime, user, team] = await Promise.all([
+  const [runtime, team] = await Promise.all([
     dependencies.loadRuntime(conversationId, conversation.userId),
-    dependencies.loadUser(conversation.userId),
     dependencies.loadTeam(conversationId, conversation.userId),
   ])
-  if (!user || user.userId !== conversation.userId || user.status !== 'active') {
-    throw new Error('Conversation owner is missing or not active.')
+  const user: RepairUserSnapshot = {
+    userId: conversation.userId,
+    plan: 'team',
+    status: 'active',
   }
   if (
     !team
@@ -889,7 +889,6 @@ export async function createDefaultRepairDurableCompactionDependencies(): Promis
   const [
     { Conversation },
     { ConversationRuntime },
-    { User },
     { AgentSessionRuntimeModel, AgentTeamModel, TeamAgentModel },
     agentRuntimeRepository,
     compactionRepository,
@@ -900,7 +899,6 @@ export async function createDefaultRepairDurableCompactionDependencies(): Promis
   ] = await Promise.all([
     import('../lib/db/models'),
     import('../lib/agent-runtime/models'),
-    import('../lib/db/user-models'),
     import('../lib/agent-team/models'),
     import('../lib/agent-runtime/repository'),
     import('../lib/agent-compaction/repository'),
@@ -984,24 +982,6 @@ export async function createDefaultRepairDurableCompactionDependencies(): Promis
             activeRunId: value.active_run_id ?? null,
             activeLeaseOwnerId: value.active_lease_owner_id ?? null,
             projectContextSnapshot: value.project_context_snapshot ?? null,
-          }
-        : null
-    },
-    async loadUser(userId) {
-      const value = await User.findOne({ user_id: userId })
-        .select('user_id plan forced_main_alias status')
-        .lean<{
-          user_id: string
-          plan?: 'free' | 'pro' | 'team'
-          forced_main_alias?: string
-          status?: 'active' | 'disabled' | 'banned'
-        }>()
-      return value
-        ? {
-            userId: value.user_id,
-            plan: value.plan ?? 'free',
-            forcedMainAlias: value.forced_main_alias,
-            status: value.status ?? 'active',
           }
         : null
     },

@@ -17,15 +17,6 @@ competition machine has these one-time prerequisites:
   can be pulled.
 - `npm install` and `.env.local` setup are complete, with
   `SPATIAL_PAID_CALLS_ENABLED=0`.
-- A login is explicitly bootstrapped from an interactive terminal:
-
-```bash
-npm run demo:bootstrap -- --email judge@example.com
-```
-
-Password entry is hidden and never logged. The on-site operator must hand it to
-the judge securely. Repeating the command with the same email and password only
-verifies the existing account; it does not overwrite it.
 
 After those prerequisites, the demo starts with one command:
 
@@ -33,18 +24,18 @@ After those prerequisites, the demo starts with one command:
 npm run demo:up
 ```
 
-The command checks Docker/Compose, the prebuilt login, and safe configuration;
-starts and waits for isolated local persistence; then launches the web app in
-the background. Judges only open `http://localhost:3200`; they do not install a
-database client or manage database credentials.
+The command checks Docker/Compose and safe configuration; starts and waits for
+isolated local persistence; then launches the web app on loopback. Judges open
+`http://localhost:3200` directly. There is no login, registration, invite code,
+password, database client, or database credential to manage.
 
 ```bash
-npm run demo:status   # configuration, account, persistence, and web health; no secrets
+npm run demo:status   # configuration, persistence, and web health; no secrets
 npm run demo:down     # stops services without deleting the Mongo volume
 ```
 
-Demo startup refuses missing configuration, remote Mongo targets, a missing
-prebuilt account, any existing listener on port 3200, or any setting other than
+Demo startup refuses missing configuration, remote Mongo targets, any existing
+listener on port 3200, or any setting other than
 `SPATIAL_PAID_CALLS_ENABLED=0`. That flag blocks **new paid spatial
 submissions**. A persisted job with a known external ID may still resume
 polling/materialization, and ordinary chat may still use configured NewAPI; do
@@ -74,7 +65,7 @@ Paid spatial tools are Root-only and fail closed unless `SPATIAL_PAID_CALLS_ENAB
 - Mongo: `127.0.0.1:27019/pegasus_spatial`
 - GridFS bucket: `pegasus_spatial_media`
 - OSS prefix: `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=raster-assets/pegasus-spatial`
-- Auth cookies and Docker resources use the `pegasus-spatial` namespace.
+- Browser access has no account/session cookie and uses one fixed local Demo owner.
 
 The internal virtual Workspace path remains `.sci-pegasus/` for compatibility with the tested CAS/version/ACL implementation. Database, media, cookies, networks, and volumes are isolated from Sci-Pegasus.
 
@@ -120,10 +111,14 @@ npm run build
 ```
 
 `spatial:verify:demo-e2e` uses a randomly named loopback-only temporary
-database and terminal fixtures. It verifies login, invite registration,
-authenticated Spatial Job UI/API, refresh, and web-process restart recovery
+database and terminal fixtures. It verifies direct local access, internal owner
+isolation, Spatial Job UI/API, refresh, and web-process restart recovery
 without sending chat, model, Aholo, or Lux3D requests. Only that guarded test
 database is removed afterward.
+
+The account-free build is for a single-machine competition Demo only. The app
+binds to `127.0.0.1`; exposing it to a LAN or the public Internet requires an
+authenticated access-control gateway.
 
 The five spatial Agent behavior cases under `evals/spatial-creation/` are
 definition-only CI contracts. They deliberately allow different useful tool

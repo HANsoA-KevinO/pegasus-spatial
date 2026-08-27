@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { getConversation } from '@/lib/db/repository'
 import { buildMediaPublicUrl } from '@/lib/media/public-url'
 import { toRasterAssetRef } from '@/lib/media/reference'
@@ -16,7 +16,7 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024
  * in chat JSON, written to Conversation.messages, or forwarded to the gateway.
  */
 export async function POST(req: NextRequest) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   try {

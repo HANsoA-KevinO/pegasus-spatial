@@ -9,7 +9,7 @@
 
 import { connectDB } from '@/lib/db/mongodb'
 import { PlanLimit } from '@/lib/db/plan-limit-models'
-import { getUserPlan } from '@/lib/db/user-repository'
+import { getUserPlan } from '@/lib/demo-access-policy'
 import type { UserPlan } from '@/lib/llm-registry'
 
 export interface UserLimits {

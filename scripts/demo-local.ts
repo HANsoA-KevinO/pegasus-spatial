@@ -137,29 +137,9 @@ export async function ensureDemoMongo(): Promise<void> {
   throw new Error('等待本地 Mongo 健康检查超时。')
 }
 
-export function countDemoUsers(): number {
-  const mongoUri = process.env.MONGODB_URI?.trim()
-  if (!mongoUri) throw new Error('缺少 MONGODB_URI。')
-  const database = mongoDatabaseName(mongoUri)
-  const containerId = docker(['compose', 'ps', '-q', 'mongo'], { quiet: true })
-  if (!containerId) throw new Error('本地 Mongo 容器未运行。')
-  const output = docker([
-    'exec',
-    '-i',
-    containerId,
-    'mongosh',
-    '--quiet',
-    database,
-    '--eval',
-    'db.users.countDocuments({})',
-  ], { quiet: true })
-  if (!/^\d+$/.test(output)) throw new Error('无法确认演示账号状态。')
-  return Number(output)
-}
-
 async function probeApp(): Promise<AppProbe> {
   try {
-    const response = await fetch(`${APP_URL}/login`, {
+    const response = await fetch(`${APP_URL}/`, {
       redirect: 'manual',
       signal: AbortSignal.timeout(1_500),
     })
@@ -242,14 +222,13 @@ export async function startManagedDemoApp(
   removePidFile()
 
   const logFd = openSync(LOG_FILE, 'a', 0o600)
-  const child = spawn(process.execPath, [NEXT_BIN, 'dev', '-p', String(APP_PORT)], {
+  const child = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(APP_PORT)], {
     cwd: PROJECT_ROOT,
     detached: true,
     env: {
       ...childEnvironment,
       PORT: String(APP_PORT),
       APP_PUBLIC_URL: `http://localhost:${APP_PORT}`,
-      NEXTAUTH_URL: `http://localhost:${APP_PORT}`,
       AGENT_RUNTIME_INTERNAL_BASE_URL: `http://127.0.0.1:${APP_PORT}`,
       SPATIAL_PAID_CALLS_ENABLED: '0',
     },
@@ -325,7 +304,6 @@ async function demoStatus(): Promise<number> {
     : 'blocked · 运行 npm run demo:up 查看缺失或无效配置'
 
   let mongo = 'unavailable'
-  let account = 'unknown · Mongo 未就绪'
   try {
     assertDockerAvailable()
     const containerId = docker(['compose', 'ps', '-q', 'mongo'], { quiet: true })
@@ -337,27 +315,15 @@ async function demoStatus(): Promise<number> {
       : 'stopped'
   } catch {
     mongo = 'docker unavailable'
-    account = 'unknown · Docker/Mongo 不可用'
-  }
-  if (mongo === 'healthy') {
-    try {
-      const users = countDemoUsers()
-      account = users > 0
-        ? `ready · ${users} prebuilt account${users === 1 ? '' : 's'}`
-        : 'blocked · 没有预建账号；运行 npm run demo:bootstrap -- --email <邮箱>'
-    } catch {
-      account = 'unknown · 无法确认预建账号'
-    }
   }
   const app = await probeApp()
   console.log(`configuration: ${configuration}`)
   console.log(`mongo: ${mongo}`)
-  console.log(`account: ${account}`)
+  console.log('access: direct · fixed local Demo identity · loopback only')
   console.log(`web: ${app === 'pegasus-spatial' ? `ready · ${APP_URL}` : app}`)
   console.log('data: local Docker volume preserved')
   return configuration.startsWith('ready')
     && mongo === 'healthy'
-    && account.startsWith('ready')
     && app === 'pegasus-spatial'
     ? 0
     : 1
@@ -372,11 +338,6 @@ async function main(): Promise<void> {
   if (action === 'up') {
     assertSafeDemoEnvironment()
     await ensureDemoMongo()
-    if (countDemoUsers() < 1) {
-      throw new Error(
-        '本地数据库没有可登录账号；请先运行 npm run demo:bootstrap -- --email <邮箱>。',
-      )
-    }
     await startManagedDemoApp()
     console.log(`Pegasus Spatial 评委安全审阅模式已启动：http://localhost:${APP_PORT}`)
     console.log(`状态检查：npm run demo:status`)

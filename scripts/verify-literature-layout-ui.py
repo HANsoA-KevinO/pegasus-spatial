@@ -1,45 +1,13 @@
 #!/usr/bin/env python3
-"""Authenticated Playwright regression for the compact scientific paper layout."""
+"""Local Playwright regression for the compact scientific paper layout."""
 
 from __future__ import annotations
 
 import argparse
-import subprocess
 import tempfile
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
-
-
-def session_token(user_id: str, email: str, name: str) -> str:
-    script = """
-import { encode } from '@auth/core/jwt'
-const [userId, email, name] = process.argv.slice(1)
-const token = await encode({
-  token: { id: userId, sub: userId, email, name },
-  secret: process.env.AUTH_SECRET,
-  salt: '__Secure-pegasus-spatial.session-token',
-  maxAge: 3600,
-})
-process.stdout.write(token)
-"""
-    result = subprocess.run(
-        [
-            "node",
-            "--env-file=.env.local",
-            "--input-type=module",
-            "-e",
-            script,
-            user_id,
-            email,
-            name,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
-
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -57,27 +25,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    token = session_token(args.user_id, args.email, args.name)
     console_errors: list[str] = []
     failed_responses: list[str] = []
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1680, "height": 1050})
-        context.add_cookies([{
-            "name": "__Secure-pegasus-spatial.session-token",
-            "value": token,
-            "domain": "localhost",
-            "path": "/",
-            "httpOnly": True,
-            "secure": True,
-            "sameSite": "Lax",
-        }])
         page = context.new_page()
         page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
         page.on("response", lambda response: failed_responses.append(f"{response.status} {response.url}") if response.status >= 400 else None)
         page.goto(args.base_url, wait_until="networkidle")
-        assert "/login" not in page.url, "generated local session was not accepted"
 
         project = page.locator(".pmo-project", has_text=args.project_text).first
         project.wait_for(state="visible", timeout=15_000)

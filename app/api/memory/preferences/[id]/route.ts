@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { deletePreference, MemoryQuotaExceededError, updatePreference } from '@/lib/memory-v2/repository'
 
 export const dynamic = 'force-dynamic'
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
   const { id } = await params
   const body = await req.json()
@@ -19,14 +19,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       : NextResponse.json({ error: 'Preference not found' }, { status: 404 })
   } catch (error) {
     if (error instanceof MemoryQuotaExceededError) {
-      return NextResponse.json({ error: '账号记忆空间已满，只能保存缩短后的内容' }, { status: 409 })
+      return NextResponse.json({ error: '本地项目记忆空间已满，只能保存缩短后的内容' }, { status: 409 })
     }
     throw error
   }
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
   const { id } = await params
   const profile = await deletePreference(userId, id)

@@ -9,7 +9,7 @@
 |---|---|---|
 | 本机配置 | `.env.local` 已配置，文件权限为 `0600` | 通过；密钥不得进入 Git、文档、终端截图或聊天 |
 | Mongo | `127.0.0.1:27019/pegasus_spatial` 最近一次健康检查通过；服务可按需停止 | 通过；每次启动前仍须以 `npm run demo:status` 重检，不要求评委配置云数据库 |
-| Web 应用 | `3200` 的登录、鉴权、Job API 校准、刷新和 Web 进程重启 E2E 已通过；服务不保证一直常驻 | 零费用恢复路径通过；每次演示前仍须以 `npm run demo:status` 重检 |
+| Web 应用 | `3200` 的无登录直达、内部归属隔离、Job API 校准、刷新和 Web 进程重启 E2E 已通过；服务不保证一直常驻 | 零费用恢复路径通过；每次演示前仍须以 `npm run demo:status` 重检 |
 | NewAPI | 唯一 `GPT-image-2` 适配器已迁移 | 实现已就位；当前地址是公网 HTTP，只能通过显式开发例外本机联调，不能视为正式安全配置 |
 | 公网媒体 | OSS/CDN 前缀为 `raster-assets/pegasus-spatial` | 1×1 测试文件的写入、源站读取、CDN 读取、CORS 和删除探针均通过 |
 | Aholo | 只读 World list 返回 HTTP 200，World 数为 0 | 只读鉴权通过；尚未提交或完成任何付费 World |
@@ -110,10 +110,10 @@ npm run spatial:smoke:aholo -- --resume --smoke-id <spsmoke_id>
 
 ### P0-3：完成零费用用户路径演练
 
-- [x] `npm run spatial:verify:demo-e2e` 已验证邀请码注册、登录、跨账号 401、Job API 校准、页面刷新和 Web 进程重启恢复；供应商调用数为 0。
+- [x] `npm run spatial:verify:demo-e2e` 已验证无登录直达、固定内部归属隔离、Job API 校准、页面刷新和 Web 进程重启恢复；供应商调用数为 0。
 - [x] E2E 的历史 ToolResult 从 `prepared` 经真实 Job API 校准到 `published`，且不伪造 Workspace 资产入口。
-- [x] 用 stub/Mongo 验证 Root-only、Member wildcard 禁权、共享双槽、跨账号鉴权和重启恢复。
-- [ ] 基础聊天会访问自有 NewAPI，不属于“零外部调用”E2E；仅在传输与演示授权就绪后单独验证，不把 `/login` 200 冒充聊天通过。
+- [x] 用 stub/Mongo 验证 Root-only、Member wildcard 禁权、共享双槽、内部 owner 归属隔离和重启恢复。
+- [ ] 基础聊天会访问自有 NewAPI，不属于“零外部调用”E2E；仅在传输与演示授权就绪后单独验证，不把工作台首页 200 冒充聊天通过。
 - [x] OSS/CDN 小文件探针已验证写入、源站读取、CDN 读取、CORS 和删除；测试对象已删除，隔离前缀保持为 `raster-assets/pegasus-spatial`。
 
 ### P0-4：解决正式传输与成本授权问题
@@ -142,7 +142,7 @@ npm run spatial:smoke:aholo -- --resume --smoke-id <spsmoke_id>
 
 - [ ] `.env.local` 仍为 `0600`，`SPATIAL_PAID_CALLS_ENABLED=0`。
 - [ ] 运行 `npm run demo:status`；Mongo 为 `healthy`、数据库为 `pegasus_spatial`，端口只绑定 `127.0.0.1:27019`。
-- [ ] 应用在 `3200` 启动；登录、Job 卡片、刷新和 Web 重启的零费用路径通过；聊天另按 NewAPI 门禁验证。
+- [ ] 应用在回环 `3200` 启动；无登录直达、Job 卡片、刷新和 Web 重启的零费用路径通过；聊天另按 NewAPI 门禁验证。
 - [ ] OSS/CDN 外网读取与 CORS 仍通过；测试对象删除成功。
 - [x] Operator smoke 已实现；Aholo/Lux `--dry-run` 为绿，Image 因公网 HTTP 正确 fail closed，三者提交数均为 0。
 - [ ] NewAPI 正式传输已安全化；否则明确采用不依赖图像参考的降级方案。
@@ -164,12 +164,12 @@ npm run spatial:smoke:aholo -- --resume --smoke-id <spsmoke_id>
 ### 开赛前 Local Go
 
 - [x] `.env.local` 已配置且权限为 `0600`；
-- [x] 本地 Mongo 与 `3200/login` 最近一次验证通过；演示前须用 `npm run demo:status` 重检；
+- [x] 本地 Mongo 与 `3200/` 工作台最近一次验证通过；演示前须用 `npm run demo:status` 重检；
 - [x] OSS/CDN 的写、读、CDN、CORS、删除探针通过；
 - [x] Aholo World list 只读鉴权通过，当前 0 worlds；
 - [x] 全局付费开关为 `0`，真实供应商提交数为 0；
 - [x] 现有比赛要求与软件福利清单已区分记录，项目不依赖 Zion 或赞助模型；
-- [x] 登录、鉴权、Job API、刷新与 Web 重启的零费用 E2E 通过，Mongo crash/recovery 与 Operator 持久恢复测试通过；
+- [x] 无登录直达、内部归属隔离、Job API、刷新与 Web 重启的零费用 E2E 通过，Mongo crash/recovery 与 Operator 持久恢复测试通过；
 - [x] project/spatial/tool/chat/multi-agent 契约测试、production build、TypeScript、ESLint、diff 检查与本地 preflight 均已执行并得到预期结果；
 - [x] Operator smoke 已实现；Aholo/Lux dry-run 通过、Image HTTPS 门禁正确拒绝，提交数均为 0；
 - [ ] 基础聊天 live 已在安全 NewAPI 传输和演示授权就绪后完成验证；

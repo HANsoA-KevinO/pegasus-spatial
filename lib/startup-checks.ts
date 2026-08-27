@@ -12,8 +12,8 @@ interface CheckFailure {
   reason: string
 }
 
-const MIN_AUTH_SECRET_LEN = 32
-const AUTH_SECRET_PLACEHOLDER_VALUES = new Set([
+const MIN_INTERNAL_SECRET_LEN = 32
+const SECRET_PLACEHOLDER_VALUES = new Set([
   'change-me-in-production',
   'your-secret-here',
   'replace-with-a-random-secret',
@@ -91,20 +91,6 @@ export function runStartupChecks(): void {
     process.env.PEGASUS_SPATIAL_MEDIA_PREFIX,
   ).failures)
 
-  // AUTH_SECRET: NextAuth signs session JWTs with this. A weak/placeholder value
-  // in production means anyone can forge sessions.
-  const authSecret = process.env.AUTH_SECRET
-  if (!authSecret) {
-    failures.push({ variable: 'AUTH_SECRET', reason: 'not set (required)' })
-  } else if (authSecret.length < MIN_AUTH_SECRET_LEN) {
-    failures.push({
-      variable: 'AUTH_SECRET',
-      reason: `length ${authSecret.length} < ${MIN_AUTH_SECRET_LEN}`,
-    })
-  } else if (AUTH_SECRET_PLACEHOLDER_VALUES.has(authSecret)) {
-    failures.push({ variable: 'AUTH_SECRET', reason: 'matches a known placeholder value' })
-  }
-
   // LLM gateway credentials. Without these no request can reach the model.
   for (const key of ['LLM_BASE_URL', 'LLM_API_KEY_ORCHESTRATOR', 'LLM_API_KEY_TOOLS']) {
     if (!process.env[key]) failures.push({ variable: key, reason: 'not set (required)' })
@@ -139,18 +125,13 @@ export function runStartupChecks(): void {
         variable: 'AGENT_RUNTIME_INTERNAL_SECRET',
         reason: 'not set (required when the durable background runner is enabled)',
       })
-    } else if (runnerSecret.length < MIN_AUTH_SECRET_LEN) {
+    } else if (runnerSecret.length < MIN_INTERNAL_SECRET_LEN) {
       failures.push({
         variable: 'AGENT_RUNTIME_INTERNAL_SECRET',
-        reason: `length ${runnerSecret.length} < ${MIN_AUTH_SECRET_LEN}`,
+        reason: `length ${runnerSecret.length} < ${MIN_INTERNAL_SECRET_LEN}`,
       })
-    } else if (AUTH_SECRET_PLACEHOLDER_VALUES.has(runnerSecret)) {
+    } else if (SECRET_PLACEHOLDER_VALUES.has(runnerSecret)) {
       failures.push({ variable: 'AGENT_RUNTIME_INTERNAL_SECRET', reason: 'matches a known placeholder value' })
-    } else if (runnerSecret === authSecret) {
-      failures.push({
-        variable: 'AGENT_RUNTIME_INTERNAL_SECRET',
-        reason: 'must be different from AUTH_SECRET',
-      })
     }
   }
 
@@ -245,7 +226,6 @@ export function runStartupChecks(): void {
       '',
       ...failures.map(f => `  - ${f.variable}: ${f.reason}`),
       '',
-      'Generate a strong AUTH_SECRET with: openssl rand -base64 32',
       'See .env.example for the full list of required variables.',
       '='.repeat(72),
       '',

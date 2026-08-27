@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { getOrCreateProfile } from '@/lib/memory-v2/repository'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
   const profile = await getOrCreateProfile(userId)
   return NextResponse.json({

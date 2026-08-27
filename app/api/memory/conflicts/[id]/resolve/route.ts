@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { resolveConflict } from '@/lib/memory-v2/repository'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
   const { id } = await params
   const body = await req.json()

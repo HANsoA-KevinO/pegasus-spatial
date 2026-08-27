@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const proxy = readFileSync(join(process.cwd(), 'proxy.ts'), 'utf8')
+const localOwner = readFileSync(join(process.cwd(), 'lib', 'local-owner.ts'), 'utf8')
 const memberRoute = readFileSync(
   join(process.cwd(), 'app', 'api', 'agent-team', 'execute', 'route.ts'),
   'utf8',
@@ -12,17 +12,13 @@ const memberExecutor = readFileSync(
   'utf8',
 )
 
-assert.match(
-  proxy,
-  /api\/agent-team\/execute\(\?:\/\|\$\)/,
-  'Auth.js proxy must exempt the exact private member executor path',
-)
+assert.match(localOwner, /return DEMO_USER_ID/)
 assert.match(memberRoute, /isInternalAgentRunnerRequest\(/)
 assert.match(memberRoute, /validateMemberExecutionFences\(/)
 assert.doesNotMatch(
   memberRoute,
-  /requireAuth\(/,
-  'member execution must accept only the Runner HMAC, not browser sessions',
+  /resolveLocalOwner\(/,
+  'member execution must accept only the Runner HMAC, not the local Demo owner',
 )
 assert.match(memberExecutor, /modelAlias: alias/)
 assert.match(memberExecutor, /onBackgroundCompactionPrepare\(descriptor\)/)

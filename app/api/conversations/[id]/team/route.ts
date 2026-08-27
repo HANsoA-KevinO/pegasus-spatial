@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { getConversation } from '@/lib/db/repository'
 import { agentTeamService } from '@/lib/agent-team'
 import { toPublicTeamSnapshot } from '@/lib/agent-team/public-contract'
@@ -12,7 +12,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   try {

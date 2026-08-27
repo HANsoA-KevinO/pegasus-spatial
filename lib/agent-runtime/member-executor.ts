@@ -140,7 +140,7 @@ import {
   resolveMainAliasForUser,
   type ModelAlias,
 } from '../llm-registry'
-import { getUserModelOverrides, getUserPlan } from '../db/user-repository'
+import { getUserModelOverrides, getUserPlan } from '../demo-access-policy'
 import {
   getConversation,
   initializeConversationProjectGuide,

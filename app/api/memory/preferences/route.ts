@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import {
   addPreference,
   getOrCreateProfile,
@@ -10,14 +10,14 @@ import {
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
   const profile = await getOrCreateProfile(userId)
   return NextResponse.json(profile.preferences)
 }
 
 export async function POST(req: NextRequest) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
   const body = await req.json()
   if (!body.category?.trim() || !body.subject?.trim() || !body.statement?.trim()) {
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '长期画像最多保留 30 条有效偏好' }, { status: 409 })
     }
     if (error instanceof MemoryQuotaExceededError) {
-      return NextResponse.json({ error: '账号记忆空间已满，请先精简或删除已有记忆' }, { status: 409 })
+      return NextResponse.json({ error: '本地项目记忆空间已满，请先精简或删除已有记忆' }, { status: 409 })
     }
     throw error
   }

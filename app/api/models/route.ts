@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
-import { getUserPlan, getUserModelOverrides } from '@/lib/db/user-repository'
+import { resolveLocalOwner } from '@/lib/local-owner'
+import { getUserPlan, getUserModelOverrides } from '@/lib/demo-access-policy'
 import { listVisibleMainAliases } from '@/lib/llm-registry'
 
 export const dynamic = 'force-dynamic'
@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic'
  * forced-alias decision so frontend / backend agree.
  */
 export async function GET() {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   const [plan, overrides] = await Promise.all([

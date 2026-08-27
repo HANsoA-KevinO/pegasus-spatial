@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { getBroadcast, attachSubscriber } from '@/lib/agent/stream-registry'
 import { getConversation } from '@/lib/db/repository'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { getActiveAgentRun } from '@/lib/agent-runtime/repository'
 
 export const dynamic = 'force-dynamic'
@@ -21,7 +21,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   const { id } = await params

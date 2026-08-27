@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * MemoryHero —— 账号容量 + 记忆突触场(demo-e 融合版)
+ * MemoryHero —— 本地容量 + 记忆突触场(demo-e 融合版)
  *
  * 左侧容量数据(记忆空间/画像/历史/可用),右侧活性突触网络——替代旧 atlas
  * 的静态 SVG 关系图。纸面容器(--paper)承载,突触场绝对铺满并经左侧 mask 渐隐。
@@ -38,7 +38,7 @@ export function MemoryHero({
     <section className={styles.hero}>
       <MemorySynapseField />
       <div className={styles.capacity}>
-        <p className={styles.kicker}>账号容量</p>
+        <p className={styles.kicker}>本地容量</p>
         <div className={styles.heading}>
           <h2>记忆空间</h2>
           <span className={styles.percent}>已使用 {percent}%</span>
@@ -56,7 +56,7 @@ export function MemoryHero({
           <div className={styles.stat}><b>{formatTokens(remainingTokens)}</b><span>可用空间</span></div>
         </div>
         <div className={styles.foot}>
-          <p>长期画像与历史索引共用账号记忆空间。</p>
+          <p>长期画像与历史索引共用本地项目记忆空间。</p>
           <button type="button" onClick={onViewHistory}>查看历史</button>
         </div>
       </div>

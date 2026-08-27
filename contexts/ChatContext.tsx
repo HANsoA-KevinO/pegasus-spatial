@@ -1,7 +1,6 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useSession } from 'next-auth/react'
 import type { ImageAttachment, ModelProvider } from '@/lib/types'
 import { useChat, type ChatMessage } from '@/hooks/useChat'
 import { buildArtifactsFromDB, useWorkspaceArtifacts, type WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
@@ -63,20 +62,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [sidebarView, setSidebarView] = useState<SidebarView>('projects')
   const [activeArtifactPath, setActiveArtifactPathState] = useState<string | null>(null)
   const previousConversationIdRef = useRef<string | null>(null)
-  const { status: sessionStatus } = useSession()
-
-  useEffect(() => {
-    if (sessionStatus !== 'authenticated') return
-    fetch('/api/user/profile')
-      .then(response => response.ok ? response.json() : null)
-      .then((profile: { preferred_model?: string } | null) => {
-        if (profile?.preferred_model) {
-          setModel(current => current === 'main_standard' ? profile.preferred_model as ModelProvider : current)
-        }
-      })
-      .catch(() => undefined)
-  }, [sessionStatus])
-
   const handleConversationLoaded = useCallback((settings: {
     orchestrator_model?: string
     research_domain?: string

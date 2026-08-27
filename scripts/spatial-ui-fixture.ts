@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { Conversation } from '../lib/db/models'
-import { InviteCode } from '../lib/db/invite-code-models'
-import { createUser } from '../lib/db/user-repository'
+import { DEMO_USER_ID } from '../lib/demo-identity'
 import { SpatialBuildJobModel } from '../lib/spatial/models'
 import { serializeSpatialToolResult } from '../lib/spatial/tool-result'
 
@@ -9,13 +8,10 @@ export interface SpatialUiFixture {
   conversationId: string
   conversationTitle: string
   jobId: string
-  inviteCode: string
 }
 
 export interface SpatialUiFixtureInput {
   suffix: string
-  loginEmail: string
-  loginPassword: string
 }
 
 /**
@@ -32,18 +28,6 @@ export async function seedSpatialUiFixture(
   if (process.env.SPATIAL_PAID_CALLS_ENABLED !== '0') {
     throw new Error('Spatial UI fixture refuses to run unless paid calls are disabled.')
   }
-  if (!input.loginEmail.endsWith('@e2e.pegasus-spatial.local')) {
-    throw new Error('Spatial UI fixture requires an isolated e2e email domain.')
-  }
-  if (input.loginPassword.length < 12) {
-    throw new Error('Spatial UI fixture password is unexpectedly weak.')
-  }
-
-  const user = await createUser({
-    email: input.loginEmail,
-    name: '空间演示测试员',
-    password: input.loginPassword,
-  })
   const conversationId = `e2e-conversation-${input.suffix}`
   const conversationTitle = `E2E · 零费用空间恢复 ${input.suffix}`
   const jobId = `spjob_e2e_${input.suffix}`
@@ -58,7 +42,7 @@ export async function seedSpatialUiFixture(
     project_id: conversationId,
     run_id: runId,
     tool_use_id: toolUseId,
-    user_id: user.user_id,
+    user_id: DEMO_USER_ID,
     conversation_id: conversationId,
     kind: 'world',
     provider: 'fixture-no-network',
@@ -105,7 +89,7 @@ export async function seedSpatialUiFixture(
 
   await Conversation.create({
     conversation_id: conversationId,
-    user_id: user.user_id,
+    user_id: DEMO_USER_ID,
     title: conversationTitle,
     settings: {
       orchestrator_model: 'main_standard',
@@ -163,16 +147,5 @@ export async function seedSpatialUiFixture(
     ],
   })
 
-  const inviteCode = `E2E-${input.suffix.toUpperCase()}`
-  await InviteCode.create({
-    code: inviteCode,
-    label: 'Pegasus Spatial zero-cost browser E2E',
-    max_uses: 1,
-    used_count: 0,
-    used_by: [],
-    enabled: true,
-    expires_at: new Date(Date.now() + 30 * 60_000),
-  })
-
-  return { conversationId, conversationTitle, jobId, inviteCode }
+  return { conversationId, conversationTitle, jobId }
 }

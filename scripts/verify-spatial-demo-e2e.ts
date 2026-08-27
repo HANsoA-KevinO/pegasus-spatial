@@ -12,6 +12,7 @@ import {
 } from './demo-local'
 import { loadProjectEnv } from './load-project-env'
 import { seedSpatialUiFixture } from './spatial-ui-fixture'
+import { connectDB } from '../lib/db/mongodb'
 
 const PROJECT_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const BASE_URL = 'http://localhost:3200'
@@ -29,11 +30,6 @@ function runBrowserPhase(input: {
   conversationId: string
   conversationTitle: string
   jobId: string
-  inviteCode?: string
-  loginEmail: string
-  loginPassword: string
-  registerEmail: string
-  registerPassword: string
   suffix: string
 }): void {
   const args = [
@@ -45,16 +41,9 @@ function runBrowserPhase(input: {
     '--fixture-job-id', input.jobId,
     '--screenshot', resolve(tmpdir(), `pegasus-spatial-e2e-${input.phase}-${input.suffix}.png`),
   ]
-  if (input.inviteCode) args.push('--fixture-invite-code', input.inviteCode)
   const result = spawnSync('python3', args, {
     cwd: PROJECT_ROOT,
-    env: {
-      ...process.env,
-      SPATIAL_E2E_LOGIN_EMAIL: input.loginEmail,
-      SPATIAL_E2E_LOGIN_PASSWORD: input.loginPassword,
-      SPATIAL_E2E_REGISTER_EMAIL: input.registerEmail,
-      SPATIAL_E2E_REGISTER_PASSWORD: input.registerPassword,
-    },
+    env: process.env,
     stdio: 'inherit',
   })
   if (result.status !== 0) {
@@ -69,11 +58,6 @@ async function main(): Promise<void> {
   const suffix = randomBytes(6).toString('hex')
   const database = `pegasus_spatial_e2e_${suffix}`
   const mongoUri = e2eMongoUri(sourceMongoUri, database)
-  const loginEmail = `login-${suffix}@e2e.pegasus-spatial.local`
-  const registerEmail = `register-${suffix}@e2e.pegasus-spatial.local`
-  const loginPassword = `E2E-login-${randomBytes(18).toString('base64url')}`
-  const registerPassword = `E2E-register-${randomBytes(18).toString('base64url')}`
-
   process.env.MONGODB_URI = mongoUri
   process.env.SPATIAL_PAID_CALLS_ENABLED = '0'
   assertSafeDemoEnvironment({ allowE2eDatabase: true })
@@ -82,12 +66,9 @@ async function main(): Promise<void> {
   let ownsApp = false
   let databaseCreated = false
   try {
+    await connectDB()
     databaseCreated = true
-    const fixture = await seedSpatialUiFixture({
-      suffix,
-      loginEmail,
-      loginPassword,
-    })
+    const fixture = await seedSpatialUiFixture({ suffix })
 
     const firstStart = await startManagedDemoApp(process.env)
     if (!firstStart.started) {
@@ -110,10 +91,6 @@ async function main(): Promise<void> {
     runBrowserPhase({
       phase: 'before-restart',
       ...fixture,
-      loginEmail,
-      loginPassword,
-      registerEmail,
-      registerPassword,
       suffix,
     })
 
@@ -126,14 +103,10 @@ async function main(): Promise<void> {
     runBrowserPhase({
       phase: 'after-restart',
       ...fixture,
-      loginEmail,
-      loginPassword,
-      registerEmail,
-      registerPassword,
       suffix,
     })
 
-    console.log('spatial-demo-e2e passed: login, registration, refresh, auth fence, Job card/API, process restart recovery')
+    console.log('spatial-demo-e2e passed: direct local access, owner fence, refresh, Job card/API, process restart recovery')
     console.log('provider calls: 0 (terminal fixture records only)')
   } finally {
     if (ownsApp) await stopManagedDemoApp().catch(() => undefined)

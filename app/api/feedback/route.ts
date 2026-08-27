@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import { connectDB } from '@/lib/db/mongodb'
 import { Feedback } from '@/lib/db/feedback-models'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   const { content, page_url } = await req.json()

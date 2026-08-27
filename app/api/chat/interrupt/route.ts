@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { enqueueMessage } from '@/lib/agent/message-queue'
 import type { ImageAttachment } from '@/lib/types'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { claimImageAsset } from '@/lib/media/storage'
 import { MEDIA_ASSET_ID_PATTERN } from '@/lib/media/public-url'
 import { getConversation } from '@/lib/db/repository'
@@ -14,7 +14,7 @@ export const dynamic = 'force-dynamic'
  * Messages are queued and consumed by the agent loop between tool execution rounds.
  */
 export async function POST(req: NextRequest) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   const { conversation_id, message, images } = await req.json() as {

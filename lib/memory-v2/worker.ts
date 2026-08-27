@@ -86,7 +86,7 @@ async function processConsolidation(userId: string): Promise<void> {
           if (error instanceof MemoryProfileLimitError) {
             await finalizeCandidate(userId, candidate.candidate_id, 'ignored', '长期画像已达到 30 条上限')
           } else if (error instanceof MemoryQuotaExceededError) {
-            await finalizeCandidate(userId, candidate.candidate_id, 'quota_blocked', '账号记忆空间已满，未写入长期画像')
+            await finalizeCandidate(userId, candidate.candidate_id, 'quota_blocked', '本地项目记忆空间已满，未写入长期画像')
           } else throw error
         }
       } else if (decision.action === 'update' && decision.existing_preference_id && decision.preference) {
@@ -95,7 +95,7 @@ async function processConsolidation(userId: string): Promise<void> {
           await finalizeCandidate(userId, candidate.candidate_id, updated ? 'promoted' : 'conflict', decision.reason)
         } catch (error) {
           if (!(error instanceof MemoryQuotaExceededError)) throw error
-          await finalizeCandidate(userId, candidate.candidate_id, 'quota_blocked', '账号记忆空间已满，未更新长期画像')
+          await finalizeCandidate(userId, candidate.candidate_id, 'quota_blocked', '本地项目记忆空间已满，未更新长期画像')
         }
       } else {
         await finalizeCandidate(
@@ -147,7 +147,7 @@ async function processRun(run: MemoryRunDocument): Promise<void> {
       await createHistoryEvent(run.user_id, run.conversation_id, extraction.history_event, 'memory_v2', run.run_id)
     } catch (error) {
       if (!(error instanceof MemoryQuotaExceededError)) throw error
-      notes.push('账号记忆空间已满，本轮历史摘要未写入')
+      notes.push('本地项目记忆空间已满，本轮历史摘要未写入')
     }
   }
   await createPreferenceCandidates(run.user_id, run.run_id, extraction.preference_candidates, run.evidence)

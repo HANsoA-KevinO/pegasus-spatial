@@ -164,13 +164,6 @@ function createInMemoryDependencies(options: {
         projectContextSnapshot: null,
       }
     },
-    async loadUser(userId) {
-      return {
-        userId,
-        plan: 'pro',
-        status: 'active',
-      }
-    },
     async loadTeam(conversationId, userId) {
       return {
         teamId: 'team_operator_test',

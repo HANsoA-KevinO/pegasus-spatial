@@ -9,7 +9,7 @@
 | Mongo host | `127.0.0.1:27019` |
 | Mongo database | `pegasus_spatial` |
 | Internal workspace | `.sci-pegasus/` |
-| Auth cookies | `pegasus-spatial.*` / `__Secure-pegasus-spatial.*` |
+| 浏览器访问 | 回环地址直达，无账号/会话 Cookie |
 | Browser active conversation | `pegasus_spatial_active_conversation_id` |
 | Internal HMAC headers | `x-pegasus-spatial-agent-runner-*` |
 | Docker network/volumes | `pegasus-spatial-*` |
@@ -19,7 +19,7 @@
 ## 强制规则
 
 - `MONGODB_URI` 没有默认回退；运行脚本也必须显式提供 URI。
-- durable runner 使用独立的 `AGENT_RUNTIME_INTERNAL_SECRET`，不回退复用 `AUTH_SECRET`。
+- durable runner 启用时使用独立的 `AGENT_RUNTIME_INTERNAL_SECRET`；浏览器端没有账号或会话密钥。
 - 不复制 Pegasus 的 `.env`、数据库、volume、Cookie、对象存储 bucket/prefix 或内部密钥。
 - OSS 前缀不是密钥，必须由 server/browser 共用的 `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX` 定义；旧私有变量与其不一致时启动失败。
 - Docker Compose 把 Mongo 只映射到 host loopback 的 `27019`，并使用独立 volume。

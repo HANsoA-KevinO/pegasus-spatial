@@ -11,13 +11,6 @@
 - 已安装并启动 Docker Desktop 或 Docker Engine，当前用户可访问 daemon。
 - 已安装 Docker Compose v2，并能拉取或已缓存官方 `mongo:7` 镜像。
 - 已运行 `npm install`，并完成 `.env.local`（其中 `SPATIAL_PAID_CALLS_ENABLED=0`）。
-- 在交互式终端显式创建一个演示账号：
-
-```bash
-npm run demo:bootstrap -- --email judge@example.com
-```
-
-密码输入不会回显或写入日志，应由现场负责人安全交给评委。同一邮箱与密码可幂等重复校验，不会重复建号或覆盖密码。
 
 前置完成后，现场启动只有一个命令：
 
@@ -25,16 +18,18 @@ npm run demo:bootstrap -- --email judge@example.com
 npm run demo:up
 ```
 
-脚本会检查 Docker/Compose、预建账号和安全配置，自动启动并等待隔离的本地持久存储，然后在后台启动 Web 应用。评委直接打开
-`http://localhost:3200`，不需要安装数据库客户端、不需要数据库账号，也不需要理解 MongoDB。
+脚本会检查 Docker/Compose 和安全配置，自动启动并等待隔离的本地持久存储，然后在回环地址启动 Web 应用。评委直接打开
+`http://localhost:3200` 即可进入工作台；没有登录、注册、邀请码或密码，也不需要安装数据库客户端。
 演示数据保存在本机专用 Docker volume 中，刷新、Web 进程重启和安全停止都不会丢失。
 
 ```bash
-npm run demo:status   # 只报告配置、预建账号、Web 和本地存储是否就绪，不打印密钥
+npm run demo:status   # 只报告配置、Web 和本地存储是否就绪，不打印密钥
 npm run demo:down     # 安全停止，不删除容器或数据卷
 ```
 
-`demo:up` 强制要求 `SPATIAL_PAID_CALLS_ENABLED=0`，因此禁止**新的空间付费提交**；配置缺失、连接远程数据库、没有预建账号或 3200 端口已有任何服务时都会拒绝启动或接管。已经持久化了外部任务 ID 的旧任务仍可恢复查询与发布；普通聊天仍可能使用已配置的 NewAPI，所以零外部调用审阅时不应发送新聊天请求。
+`demo:up` 强制要求 `SPATIAL_PAID_CALLS_ENABLED=0`，因此禁止**新的空间付费提交**；配置缺失、连接远程数据库或 3200 端口已有任何服务时都会拒绝启动或接管。已经持久化了外部任务 ID 的旧任务仍可恢复查询与发布；普通聊天仍可能使用已配置的 NewAPI，所以零外部调用审阅时不应发送新聊天请求。
+
+无账号模式只适用于现场单机 Demo：服务默认只监听 `127.0.0.1`，浏览器请求统一映射到一个固定的本地内部身份。如需对局域网或公网开放，必须在前置网关重新加入访问控制。
 
 `demo:up` 不代表现场自然语言真实生成已经放行。真实生成必须在 H0 完成域名白名单、供应商 operator smoke 和预算确认后，由团队按现场手册受控启动；它不是评委一键安全审阅命令的能力。
 
@@ -85,7 +80,7 @@ output/spatial/reviews/
 | Mongo database | `pegasus_spatial` |
 | GridFS bucket | `pegasus_spatial_media` |
 | OSS prefix | `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=raster-assets/pegasus-spatial` |
-| Auth cookies | `pegasus-spatial.*` / `__Secure-pegasus-spatial.*` |
+| 浏览器访问 | 无账号、无 Cookie，固定本地 Demo 身份 |
 | Docker network / volumes | `pegasus-spatial-*` |
 
 底层 Workspace 内部路径暂保留 `.sci-pegasus/` 以兼容已验证的 CAS、版本库与多 Agent ACL；它是数据库内的虚拟路径，不会使新应用连接 Sci-Pegasus 的 Mongo、媒体或 Docker volume。
@@ -94,7 +89,7 @@ output/spatial/reviews/
 
 ```bash
 cp .env.example .env.local
-# 生成独立密钥、填写 LLM 与供应商凭证
+# 填写 LLM 与供应商凭证；不需要账号或会话密钥
 
 npm install
 docker compose up -d mongo
@@ -149,7 +144,7 @@ npm run build
 ```
 
 真实 Aholo、Lux3D 和 NewAPI GPT Image 提交必须单独运行 smoke test，不应由单元测试或普通 build 触发。
-`spatial:verify:demo-e2e` 使用随机命名、仅限回环地址的临时 Mongo 数据库和终态 fixture，覆盖登录、邀请码注册、空间 Job 卡片/API、页面刷新与 Web 进程重启恢复；它不会提交聊天、模型或任何供应商任务，并在验证后只清理本轮临时测试数据库。
+`spatial:verify:demo-e2e` 使用随机命名、仅限回环地址的临时 Mongo 数据库和终态 fixture，覆盖无登录直达、内部归属隔离、空间 Job 卡片/API、页面刷新与 Web 进程重启恢复；它不会提交聊天、模型或任何供应商任务，并在验证后只清理本轮临时测试数据库。
 完整的 H0 凭证门禁、崩溃演练、真实预生成资产要求和现场降级方案见
 [48 小时验收与现场手册](docs/PEGASUS_SPATIAL_48H_RUNBOOK.md)。
 

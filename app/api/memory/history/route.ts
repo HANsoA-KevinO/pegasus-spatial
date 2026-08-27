@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { listHistoryEvents, recallHistory } from '@/lib/memory-v2/repository'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
   const query = req.nextUrl.searchParams.get('query')?.trim()
   const limit = Number(req.nextUrl.searchParams.get('limit') || 50)

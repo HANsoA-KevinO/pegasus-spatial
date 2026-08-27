@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
-import { AuthProvider } from '@/components/providers/AuthProvider'
+import { AppProviders } from '@/components/providers/AppProviders'
 import { ChatProvider } from '@/contexts/ChatContext'
 
 export const metadata: Metadata = {
@@ -22,9 +22,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         </head>
       )}
       <body className="antialiased">
-        <AuthProvider>
+        <AppProviders>
           <ChatProvider>{children}</ChatProvider>
-        </AuthProvider>
+        </AppProviders>
       </body>
     </html>
   )

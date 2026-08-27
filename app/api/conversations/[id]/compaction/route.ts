@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { connectDB } from '@/lib/db/mongodb'
 import { Conversation } from '@/lib/db/models'
 import { DurableCompactionJobModel } from '@/lib/agent-compaction/models'
@@ -46,7 +46,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   const { id } = await params

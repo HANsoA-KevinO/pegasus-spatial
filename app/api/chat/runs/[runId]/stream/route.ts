@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import {
   attachSubscriber,
   getBroadcast,
@@ -162,7 +162,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ runId: string }> },
 ) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   const { runId } = await params

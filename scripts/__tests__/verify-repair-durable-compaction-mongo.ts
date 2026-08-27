@@ -27,7 +27,6 @@ async function main(): Promise<void> {
   const mongoose = (await import('mongoose')).default
   const { connectDB } = await import('../../lib/db/mongodb')
   const { Conversation } = await import('../../lib/db/models')
-  const { User } = await import('../../lib/db/user-models')
   const { ConversationRuntime, AgentRun } = await import('../../lib/agent-runtime/models')
   const {
     AgentSessionRuntimeModel,
@@ -51,7 +50,6 @@ async function main(): Promise<void> {
     await database.dropDatabase()
     await Promise.all([
       Conversation.syncIndexes(),
-      User.syncIndexes(),
       ConversationRuntime.syncIndexes(),
       AgentRun.syncIndexes(),
       AgentTeamModel.syncIndexes(),
@@ -72,15 +70,6 @@ async function main(): Promise<void> {
     ]
 
     await Promise.all([
-      User.create({
-        user_id: userId,
-        email: 'operator-repair@example.test',
-        name: 'Operator Repair',
-        password_hash: 'not-used-by-test',
-        plan: 'pro',
-        forced_main_alias: 'main_standard',
-        status: 'active',
-      }),
       Conversation.create({
         conversation_id: conversationId,
         user_id: userId,

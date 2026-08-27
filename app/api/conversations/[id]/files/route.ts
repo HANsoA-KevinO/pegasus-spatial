@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getConversation } from '@/lib/db/repository'
 import { readFileFromGridFS } from '@/lib/db/gridfs'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { getOwnedImageAsset } from '@/lib/media/storage'
 import { toRasterAssetRef } from '@/lib/media/reference'
 import { isInternalWorkspacePath } from '@/lib/workspace/path-policy'
@@ -31,7 +31,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   try {

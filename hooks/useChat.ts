@@ -706,7 +706,7 @@ export function useChat(options: UseChatOptions) {
             }
           }
           if (res.status === 401) {
-            throw new Error('登录状态已失效，请重新登录')
+            throw new Error('本地工作台请求失败，请刷新后重试')
           }
           const errorText = await res.text()
           throw new Error(`HTTP ${res.status}: ${errorText}`)

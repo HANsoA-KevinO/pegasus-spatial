@@ -51,7 +51,7 @@ npm run build
 其中 `spatial:behavior-contracts` 只校验五类 tool-trace 验收定义没有漂移，绝不冒充真实模型行为结果。H0 仍需逐例重放
 `evals/spatial-creation/behavior-cases.json`，保存实际工具调用、询问与付费次数。
 
-本地服务启动后，再运行不会登录、不会提交付费任务的浏览器 smoke：
+本地服务启动后，再运行无账号直达、不会提交付费任务的浏览器 smoke：
 
 ```bash
 python3 scripts/verify-spatial-ui-smoke.py --base-url http://localhost:3200

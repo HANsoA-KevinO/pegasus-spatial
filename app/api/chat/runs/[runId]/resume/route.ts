@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import {
   getAgentRun,
   queueRecoverableAgentRun,
@@ -16,7 +16,7 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ runId: string }> },
 ) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   const { runId } = await params

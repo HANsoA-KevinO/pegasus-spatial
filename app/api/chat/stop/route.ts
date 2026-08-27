@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { interruptConversation } from '@/lib/agent/abort-registry'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import {
   cancelInactiveAgentRun,
   requestRunCancellation,
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
  * The agent loop is detached from client fetch lifecycle; this is the only way to stop it.
  */
 export async function POST(req: NextRequest) {
-  const userId = await requireAuth()
+  const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   const { conversation_id, run_id } = await req.json() as {

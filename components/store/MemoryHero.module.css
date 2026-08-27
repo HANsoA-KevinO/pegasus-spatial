@@ -1,4 +1,4 @@
-/* MemoryHero —— 账号容量 + 记忆突触场;纸面容器,全部走 design tokens */
+/* MemoryHero —— 本地容量 + 记忆突触场;纸面容器,全部走 design tokens */
 .hero {
   position: relative;
   overflow: hidden;

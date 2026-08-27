@@ -1,9 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { signOut, useSession } from 'next-auth/react'
+import { usePathname } from 'next/navigation'
 import { BrandMark } from './BrandMark'
 
 const NAV_LINKS = [
@@ -14,20 +12,6 @@ const NAV_LINKS = [
 
 export function TopNavBar() {
   const pathname = usePathname()
-  const router = useRouter()
-  const { data: session } = useSession()
-  const [showMenu, setShowMenu] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const userName = session?.user?.name || 'Creator'
-
-  useEffect(() => {
-    if (!showMenu) return
-    const close = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setShowMenu(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [showMenu])
 
   return (
     <nav className="fixed top-0 z-50 flex h-16 w-full items-center justify-between border-b border-[var(--glass-panel-border)] bg-[color-mix(in_srgb,var(--glass-panel-bg)_70%,transparent)] px-8 backdrop-blur-xl">
@@ -51,30 +35,9 @@ export function TopNavBar() {
           })}
         </div>
       </div>
-      <div ref={menuRef} className="relative">
-        <button
-          type="button"
-          aria-label="打开用户菜单"
-          onClick={() => setShowMenu(value => !value)}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-mid text-xs font-semibold text-ink-secondary transition-colors hover:bg-surface-low"
-        >
-          {userName.charAt(0).toUpperCase()}
-        </button>
-        {showMenu && (
-          <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-card border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] py-2 shadow-[var(--shadow-glass)] backdrop-blur-xl">
-            <div className="border-b border-outline-variant/15 px-4 py-3">
-              <p className="truncate text-sm font-semibold text-ink">{userName}</p>
-              <p className="truncate text-xs text-ink-muted">{session?.user?.email || ''}</p>
-            </div>
-            <button type="button" onClick={() => { setShowMenu(false); router.push('/settings') }} className="w-full px-4 py-2.5 text-left text-sm text-ink-secondary hover:bg-surface-low hover:text-ink">
-              个人设置
-            </button>
-            <button type="button" onClick={() => signOut({ callbackUrl: '/login' })} className="w-full px-4 py-2.5 text-left text-sm text-ink-secondary hover:bg-surface-low hover:text-ink">
-              退出登录
-            </button>
-          </div>
-        )}
-      </div>
+      <span className="rounded-full border border-outline-variant/20 bg-surface-mid px-3 py-1.5 text-xs font-medium text-ink-muted">
+        本地演示
+      </span>
     </nav>
   )
 }

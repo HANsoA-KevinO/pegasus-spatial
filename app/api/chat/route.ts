@@ -45,9 +45,9 @@ import {
   getBroadcastRunId,
   hasActiveBroadcast,
 } from '@/lib/agent/stream-registry'
-import { requireAuth } from '@/lib/auth-guard'
+import { resolveLocalOwner } from '@/lib/local-owner'
 import { checkMessageRate, checkConcurrency, rateLimitResponse } from '@/lib/rate-limit/check'
-import { getUserPlan, getUserModelOverrides } from '@/lib/db/user-repository'
+import { getUserPlan, getUserModelOverrides } from '@/lib/demo-access-policy'
 import { ModelAlias, canUseAlias, defaultMainAliasFor, resolveAlias, aliasSupportsVision, resolveMainAliasForUser, getAliasCapabilities } from '@/lib/llm-registry'
 import { extractTargetPath } from '@/lib/agent/extract-target-path'
 import { claimImageAsset, writeImageAsset } from '@/lib/media/storage'
@@ -267,7 +267,7 @@ export async function POST(req: NextRequest) {
       settings: internalRunnerRun.request.settings,
     }
   } else {
-    const authenticatedUserId = await requireAuth()
+    const authenticatedUserId = await resolveLocalOwner()
     if (authenticatedUserId instanceof Response) return authenticatedUserId
     userId = authenticatedUserId
   }

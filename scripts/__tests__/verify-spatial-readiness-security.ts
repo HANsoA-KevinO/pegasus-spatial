@@ -10,7 +10,6 @@ function testEnvironment(overrides: Record<string, string> = {}): NodeJS.Process
   return {
     PATH: process.env.PATH,
     NODE_ENV: 'development',
-    AUTH_SECRET: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     MONGODB_URI: 'mongodb://127.0.0.1:27019/pegasus_spatial',
     LLM_BASE_URL: 'https://newapi.invalid/v1',
     LLM_API_KEY_ORCHESTRATOR: 'dummy-orchestrator-key',
