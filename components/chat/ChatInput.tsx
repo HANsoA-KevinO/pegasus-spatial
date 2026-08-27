@@ -401,7 +401,7 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
 
         {/* Input shell — same `.pmo-input-shell` as TaskWorkbench so empty
             state and active state share one composer visual language. */}
-        <div className="pmo-input-shell">
+        <div data-fluid-interaction="ignore" className="pmo-input-shell">
           <textarea
             id="pegasus-chat-input"
             ref={textareaRef}

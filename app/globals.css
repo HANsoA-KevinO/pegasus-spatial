@@ -4,6 +4,53 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================
+   呼吸气团 · Breathing Air Mass
+   A slow atmospheric light volume with a decaying, ink-like pointer wake.
+   ============================================================ */
+
+.pmo-breathing-air-mass {
+  position: absolute;
+  inset: -12%;
+  overflow: hidden;
+  contain: strict;
+  opacity: 0.56;
+  transition: opacity 1600ms ease-in-out;
+}
+
+.pmo-breathing-air-mass[data-state='landing'] {
+  opacity: 0.44;
+}
+
+.pmo-breathing-air-mass[data-state='idle'] {
+  opacity: 0.64;
+}
+
+.pmo-breathing-air-mass[data-state='running'] {
+  opacity: 0.72;
+}
+
+.pmo-breathing-air-mass__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  filter: blur(10px) saturate(1.08);
+  mix-blend-mode: screen;
+  transition: opacity 900ms ease-out;
+}
+
+.pmo-breathing-air-mass[data-renderer='webgl'] .pmo-breathing-air-mass__canvas {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pmo-breathing-air-mass__canvas {
+    transition: none;
+  }
+}
+
+/* ============================================================
    Design System: "Pegasus Spatial · Soft Neutral"
    ============================================================
    Philosophy:
@@ -143,8 +190,6 @@
   --background: var(--surface);
   --foreground: var(--on-surface);
 
-  /* 全站根静态网点（body 最低背景层）。 */
-  --backdrop-dot: rgba(18, 20, 26, 0.15);
 }
 
 /* ============================================================
@@ -224,8 +269,6 @@
   --background: var(--surface);
   --foreground: var(--on-surface);
 
-  /* 全站根静态网点 · 暗色 */
-  --backdrop-dot: rgba(228, 233, 242, 0.09);
 }
 
 @theme inline {
@@ -296,10 +339,8 @@
    Global Body
    ============================================================ */
 body {
-  /* 全站最低背景 = --surface 底色 + 静态墨点阵。 */
+  /* 全站最低背景保持纯色，避免与动态气团叠出固定纹理。 */
   background-color: var(--surface);
-  background-image: radial-gradient(circle, var(--backdrop-dot) 1.1px, transparent 1.1px);
-  background-size: 20px 20px;
   color: var(--on-surface);
   font-family: var(--font-manrope), var(--font-noto-sc), system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -2485,16 +2526,15 @@ button.pmo-memory-node:hover {
    conceptually the same surface — the dialog between user and Pegasus Spatial —
    so they share class, bg, and material.
    The frosted-glass material is composed of three layers:
-     1. Translucent white base (rgba) → the "glass" body itself
-     2. backdrop-filter blur + saturate → frosts whatever is behind
-        (body bg + neighbour panels) for the soft Apple-vibrancy feel
+     1. AppBackground's conversation plane → below 呼吸气团
+     2. backdrop-filter blur + saturate → frosts the atmosphere beneath
      3. ::before radial blue overlay → the Pegasus Spatial blue-gray accent
      4. ::after top-edge highlight → simulates a glass edge lift
    `> *` z-index:1 keeps actual content above all decorative layers. ── */
 /* 对话区域玻璃(idle/running 才见,毛玻璃感 = 区域玻璃 + 状态层渐入) */
 .pmo-conversation-bg {
   position: relative;
-  background: color-mix(in srgb, var(--glass-panel-bg) 55%, transparent);
+  background: transparent;
   backdrop-filter: blur(26px) saturate(150%);
   /* 对话 pane ↔ 工作区「桌面」的分界缝:冷色发丝左边 + 朝工作区(左)的柔性
      浮起投影,与侧栏右缘/顶栏下缘同一套层次语言,避免两块玻璃/透明糊在一起。 */
@@ -2504,27 +2544,6 @@ button.pmo-memory-node:hover {
 .dark .pmo-conversation-bg {
   border-left-color: rgba(240, 243, 249, 0.09);
   box-shadow: -12px 0 34px -22px rgba(0, 0, 0, 0.5);
-}
-.pmo-conversation-bg::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse 900px 600px at 35% 22%, rgba(93, 119, 173, 0.10), transparent 65%),
-    radial-gradient(ellipse 700px 500px at 75% 50%, rgba(152, 178, 236, 0.06), transparent 65%);
-  pointer-events: none;
-  z-index: 0;
-}
-.pmo-conversation-bg::after {
-  /* Top-edge inner highlight — simulates the "glass edge" specular lift
-   * you see on real frosted glass panels; gives the surface a sense of
-   * physical material rather than a flat painted bg. */
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(255,255,255,0.55) 0%, transparent 14%);
-  pointer-events: none;
-  z-index: 0;
 }
 .pmo-conversation-bg > * {
   position: relative;
@@ -2538,15 +2557,6 @@ button.pmo-memory-node:hover {
  *      against the much darker base
  *   2. A whisper of white top-edge sheen — strong enough to feel like
  *      "glass" but not so strong it bleaches the top of the page. ── */
-.dark .pmo-conversation-bg::before {
-  background:
-    radial-gradient(ellipse 900px 600px at 35% 22%, rgba(160, 180, 224, 0.14), transparent 65%),
-    radial-gradient(ellipse 700px 500px at 75% 50%, rgba(120, 145, 200, 0.08), transparent 65%);
-}
-.dark .pmo-conversation-bg::after {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 14%);
-}
-
 /* ── Centered hero stack (replaces .pmo-hero left-aligned layout) ── */
 .pmo-hero-stack {
   display: flex;

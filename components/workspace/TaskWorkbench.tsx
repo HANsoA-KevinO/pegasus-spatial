@@ -256,17 +256,7 @@ export function TaskWorkbench({ onSubmit }: {
   const canSubmit = Boolean(question.trim()) && uploadingCount === 0 && !hasUnsupportedImages
 
   return (
-    <div className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-surface px-6 py-7 lg:px-12 lg:py-9">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-55 dark:opacity-35 [background-size:36px_36px]"
-        style={{
-          backgroundImage: [
-            'linear-gradient(color-mix(in srgb, var(--primary) 10%, transparent) 1px, transparent 1px)',
-            'linear-gradient(90deg, color-mix(in srgb, var(--primary) 10%, transparent) 1px, transparent 1px)',
-          ].join(','),
-        }}
-      />
+    <div className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-transparent px-6 py-7 lg:px-12 lg:py-9">
       <div className="relative mx-auto w-full max-w-4xl">
         <section className="rounded-[12px] border border-[var(--paper-edge)] bg-[var(--paper)] p-5 shadow-[var(--shadow-paper)] lg:p-7">
           <header className="mb-5 flex items-center gap-3">
@@ -276,6 +266,7 @@ export function TaskWorkbench({ onSubmit }: {
 
           <div
             id="workbench-composer"
+            data-fluid-interaction="ignore"
             onDrop={handleDrop}
             onDragOver={event => event.preventDefault()}
             className="overflow-visible rounded-[11px] border border-ghost-border/70 bg-surface transition-[border-color,box-shadow] focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/15"
