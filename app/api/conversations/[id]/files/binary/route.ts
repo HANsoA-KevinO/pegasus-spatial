@@ -97,6 +97,8 @@ export async function GET(
         width = parsed
       }
     }
+    const wantsDownload = req.nextUrl.searchParams.get('download') === '1'
+    const wantsInline = req.nextUrl.searchParams.get('inline') === '1'
 
     const conversation = await getConversation(id, userId)
     if (!conversation) {
@@ -128,8 +130,18 @@ export async function GET(
     if (isRasterFileEntry(entry)) {
       const asset = await getOwnedImageAsset(entry.asset_id, userId, id)
       if (!asset) return NextResponse.json({ error: `Asset not found: ${path}` }, { status: 404 })
-      const variant = width == null ? 'original' : width <= 256 ? 'thumbnail' : 'model'
-      if (req.nextUrl.searchParams.get('inline') === '1') {
+      const variant = wantsDownload
+        ? 'original'
+        : width == null
+          ? 'original'
+          : width <= 256
+            ? 'thumbnail'
+            : 'model'
+      // A browser ignores the anchor `download` attribute when this same-origin
+      // endpoint redirects to an OSS/public asset URL. Stream download requests
+      // here so Content-Disposition remains authoritative and the click saves
+      // the original bytes instead of opening a new image tab.
+      if (wantsInline || wantsDownload) {
         const found = await readImageAsset(entry.asset_id, variant)
         if (!found) return NextResponse.json({ error: `Asset bytes not found: ${path}` }, { status: 404 })
         const selected = found.asset.variants[variant]
@@ -137,7 +149,7 @@ export async function GET(
           headers: {
             'Content-Type': selected.mimeType,
             'Content-Length': String(found.buffer.length),
-            'Content-Disposition': contentDisposition(path.split('/').at(-1) || 'image', req.nextUrl.searchParams.get('download') === '1'),
+            'Content-Disposition': contentDisposition(path.split('/').at(-1) || 'image', wantsDownload),
             'Cache-Control': 'private, max-age=3600',
             'Cross-Origin-Resource-Policy': 'same-origin',
             'X-Content-Type-Options': 'nosniff',
@@ -190,7 +202,7 @@ export async function GET(
       const headers: Record<string, string> = {
         'Content-Type': entry.mime_type,
         'Content-Length': String(buffer.length),
-        'Content-Disposition': contentDisposition(entry.filename, req.nextUrl.searchParams.get('download') === '1'),
+        'Content-Disposition': contentDisposition(entry.filename, wantsDownload),
         'Accept-Ranges': 'bytes',
         'Cache-Control': requestedVersion ? 'private, max-age=31536000, immutable' : 'private, no-cache',
         'Cross-Origin-Resource-Policy': 'same-origin',
@@ -245,6 +257,7 @@ export async function GET(
       headers: {
         'Content-Type': outContentType,
         'Content-Length': outBuffer.length.toString(),
+        'Content-Disposition': contentDisposition(path.split('/').at(-1) || 'file', wantsDownload),
         'Cache-Control': 'private, no-cache',
         'X-Content-Type-Options': 'nosniff',
       },

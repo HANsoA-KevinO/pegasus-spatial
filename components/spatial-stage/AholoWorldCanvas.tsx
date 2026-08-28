@@ -3,6 +3,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { Object3D, PerspectiveCamera, Splat, Vector3, Viewer } from '@manycore/aholo-viewer'
 import type { SceneObjectInstance, SceneViewpoint } from '@/lib/spatial/scene-types'
+import { cameraDistanceForBoundingSphere } from './camera-framing'
 import type { WorldRenderFormat } from './world-stage-model'
 import { computeGlbObjectAlignment, computeLuxPlyAlignment } from './object-alignment'
 import { readRenderPixelsWithRetry } from './render-readback'
@@ -87,12 +88,14 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   qualityMode?: 'glb' | 'ply'
   qualityReloadToken?: number
   selectedInstanceId?: string | null
+  framingKey?: string | null
   onQualityStateChange?: (state: SpatialQualityRenderState) => void
   onSelectInstance?: (instanceId: string | null) => void
   onCameraChange?: (pose: StageCameraPose) => void
 }>(function AholoWorldCanvas({
   assetUrl, format, upAxis, instances = [], objectUrl, agentViewpoint, agentMarkers = [], cameraMode = 'user', qualityMode = 'glb', selectedInstanceId,
   qualityReloadToken = 0,
+  framingKey = null,
   onQualityStateChange, onSelectInstance, onCameraChange,
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -101,17 +104,19 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   const agentViewpointRef = useRef(agentViewpoint)
   const qualityStateCallbackRef = useRef(onQualityStateChange)
   const instancesRef = useRef(instances)
+  const framingKeyRef = useRef(framingKey)
   cameraModeRef.current = cameraMode
   agentViewpointRef.current = agentViewpoint
   qualityStateCallbackRef.current = onQualityStateChange
   instancesRef.current = instances
+  framingKeyRef.current = framingKey
   const runtimeRef = useRef<{
     viewer: Viewer; camera: PerspectiveCamera; target: Vector3; objects: Map<string, Object3D>
     applyUser(): void; resetUser(): void; applyViewpoint(value: SceneViewpoint): void; viewpoint(): SceneViewpoint
+    frameLoadedObjects(frameKey: string): void
   } | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(assetUrl ? 'loading' : 'idle')
   const [error, setError] = useState<string | null>(null)
-  const [keyboardActive, setKeyboardActive] = useState(false)
   const qualityCandidates = useMemo(
     () => instances.filter(candidate => candidate.optional_ply_artifact),
     [instances],
@@ -214,6 +219,14 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       runtime.camera.near = Math.max(Math.min(sceneExtent / 10_000, 0.05), 0.005)
       runtime.camera.far = Math.max(runtime.camera.far, sceneExtent * 20, 500)
       runtime.camera.updateProjectionMatrix()
+      const frameKey = framingKeyRef.current ?? instances.map(instance => [
+        instance.instance_id,
+        instance.glb_artifact.sha256,
+        instance.transform.position,
+        instance.transform.rotation_quaternion,
+        instance.transform.scale,
+      ]).join('|')
+      runtime.frameLoadedObjects(frameKey)
       runtime.viewer.render()
     })().catch(() => undefined)
     return () => { cancelled = true }
@@ -355,13 +368,26 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
     const agentObjects = agentObjectsRef.current
     let cancelled = false; let viewer: Viewer | null = null; let camera: PerspectiveCamera | null = null
     let target: Vector3 | null = null; let splat: Splat | null = null; let raf: number | null = null; let navigationRaf: number | null = null
+    let viewerSdk: AholoViewerSdk | null = null
+    let userHasAdjustedView = false
+    let framedObjectKey: string | null = null
+    let loadedObjectFrame: null | {
+      key: string
+      yaw: number
+      pitch: number
+      radius: number
+      target: [number, number, number]
+    } = null
+    let worldFrameState: 'none' | 'pending' | 'ready' | 'failed' = assetUrl && format ? 'pending' : 'none'
     const controller = new AbortController(); const removers: Array<() => void> = []
     const pressedKeys = new Set<string>()
     const movementKeys = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE'])
     const axis: 'Y' | 'Z' = upAxis?.toUpperCase() === 'Y' ? 'Y' : 'Z'
+    const defaultYaw = axis === 'Z' ? -0.82 : 0.72
+    const defaultPitch = 0.38
     const orbit = {
-      yaw: axis === 'Z' ? -0.82 : 0.72,
-      pitch: 0.38,
+      yaw: defaultYaw,
+      pitch: defaultPitch,
       distance: 8,
       target: [0, 0, 0] as [number, number, number],
       home: null as null | { yaw: number; pitch: number; distance: number; target: [number, number, number] },
@@ -388,12 +414,14 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
         return Math.max(maximum, extent + offset)
       }, 0.5)
       orbit.target = center
-      orbit.distance = Math.min(Math.max(radius * 2.8, 1.5), 2400)
+      orbit.distance = camera
+        ? cameraDistanceForBoundingSphere({ radius, verticalFovDeg: camera.fov, aspect: camera.aspect })
+        : Math.min(Math.max(radius * 3.1, 0.2), 5_000)
     }
     const objects = new Map<string, Object3D>()
     const render = () => { if (!cancelled && viewer && raf === null) raf = requestAnimationFrame(() => { raf = null; if (viewer && !viewer.isDestroyed) viewer.render() }) }
     const viewpoint = (): SceneViewpoint => ({ position: camera ? [camera.position.x, camera.position.y, camera.position.z] : [0, 0, 0], target: [...orbit.target], up: camera ? [camera.up.x, camera.up.y, camera.up.z] : [0, 0, 1], fov_deg: camera?.fov ?? 56 })
-    const applyViewpoint = (value: SceneViewpoint) => { if (!camera || !target) return; camera.position.set(...value.position); camera.up.set(...value.up); camera.fov = value.fov_deg; target.set(...value.target); camera.lookAt(target); camera.updateMatrixWorld(true); render() }
+    const applyViewpoint = (value: SceneViewpoint) => { if (!camera || !target) return; camera.position.set(...value.position); camera.up.set(...value.up); camera.fov = value.fov_deg; camera.updateProjectionMatrix(); target.set(...value.target); camera.lookAt(target); camera.updateMatrixWorld(true); render() }
     const applyUser = () => {
       if (!camera || !target) return
       const horizontal = Math.cos(orbit.pitch) * orbit.distance
@@ -408,6 +436,54 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       orbit.pitch = orbit.home.pitch
       orbit.distance = orbit.home.distance
       orbit.target = [...orbit.home.target]
+      userHasAdjustedView = false
+      applyUser()
+    }
+    const frameLoadedObjects = (frameKey: string) => {
+      if (!viewerSdk || !camera || objects.size === 0 || framedObjectKey === frameKey) return
+      if (worldFrameState === 'pending' || worldFrameState === 'ready') return
+
+      // A changed Scene/revision is a new framing context. Polls of the same
+      // revision keep the user's camera untouched.
+      userHasAdjustedView = false
+
+      const bounds = new viewerSdk.Box3().makeEmpty()
+      for (const object of objects.values()) {
+        object.updateMatrixWorld(true)
+        bounds.expandByObject(object)
+      }
+      if (bounds.isEmpty() || bounds.hasNan()) return
+
+      const center = bounds.getCenter(new viewerSdk.Vector3())
+      const size = bounds.getSize(new viewerSdk.Vector3())
+      const radius = Math.max(Math.hypot(size.x, size.y, size.z) / 2, 0.001)
+      loadedObjectFrame = {
+        key: frameKey,
+        yaw: defaultYaw,
+        pitch: defaultPitch,
+        radius,
+        target: [center.x, center.y, center.z],
+      }
+      const nextHome = {
+        yaw: loadedObjectFrame.yaw,
+        pitch: loadedObjectFrame.pitch,
+        distance: cameraDistanceForBoundingSphere({
+          radius,
+          verticalFovDeg: camera.fov,
+          aspect: camera.aspect,
+        }),
+        target: [center.x, center.y, center.z] as [number, number, number],
+      }
+      framedObjectKey = frameKey
+      orbit.home = nextHome
+
+      // A late Scene response used to leave the camera at its generic distance
+      // of 8, making small GLBs look like dots. Reframe only while the view is
+      // untouched; once the user moves, update Reset without stealing control.
+      orbit.yaw = nextHome.yaw
+      orbit.pitch = nextHome.pitch
+      orbit.distance = nextHome.distance
+      orbit.target = [...nextHome.target]
       applyUser()
     }
     let lastNavigationTime = 0
@@ -460,6 +536,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
     void (async () => {
       try {
         setStatus('loading'); setError(null); const sdk = await loadAholoViewerSdk(); if (cancelled) return
+        viewerSdk = sdk
         viewer = sdk.createViewer(`spatial-stage-${Date.now()}`, container, { antialiasing: true, alpha: false })
         // Aholo's async pixel readback is intentionally opt-in because it adds
         // an extra framebuffer copy. Agent/User observations depend on real
@@ -472,7 +549,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
         viewer.getScene().add(new sdk.AmbientLight(0xffffff, 0.85))
         for (const [index, position] of [[4, -3, 7], [-5, 2, 4], [1, 6, 3]].entries()) { const light = new sdk.DirectionalLight(0xffffff, index === 0 ? 0.75 : 0.4); light.position.set(...position as [number, number, number]); viewer.getScene().add(light) }
         orbit.home = { yaw: orbit.yaw, pitch: orbit.pitch, distance: orbit.distance, target: [...orbit.target] }
-        runtimeRef.current = { viewer, camera, target, objects, applyUser, resetUser, applyViewpoint, viewpoint }
+        runtimeRef.current = { viewer, camera, target, objects, applyUser, resetUser, applyViewpoint, viewpoint, frameLoadedObjects }
         if (cameraModeRef.current === 'agent' && agentViewpointRef.current) applyViewpoint(agentViewpointRef.current); else applyUser(); setStatus('ready')
         if (assetUrl && format) {
           try {
@@ -503,6 +580,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
               orbit.target = dense.boxMin.map((value, index) => (value + dense.boxMax[index]) / 2) as [number, number, number]
               orbit.distance = Number.isFinite(diagonal) ? Math.min(Math.max(diagonal * 0.82, 1.5), 2400) : orbit.distance
             }
+            worldFrameState = 'ready'
             orbit.home = { yaw: orbit.yaw, pitch: orbit.pitch, distance: orbit.distance, target: [...orbit.target] }
             camera.near = Math.max(orbit.distance / 5000, 0.01); camera.far = Math.max(orbit.distance * 30, 500)
             if (cameraModeRef.current === 'agent' && agentViewpointRef.current) applyViewpoint(agentViewpointRef.current)
@@ -510,6 +588,8 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
             setError(null)
           } catch (cause) {
             if (!cancelled && !(cause instanceof DOMException && cause.name === 'AbortError')) {
+              worldFrameState = 'failed'
+              frameLoadedObjects(framingKeyRef.current ?? `world-fallback:${[...objects.keys()].sort().join('|')}`)
               const message = cause instanceof Error ? cause.message.replace(/https?:\/\/\S+/g, '[asset]') : 'World 背景载入失败。'
               setError(`${message} Lux 可编辑物体仍可继续使用。`)
             }
@@ -517,12 +597,38 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
         }
       } catch (cause) { if (!cancelled && !(cause instanceof DOMException && cause.name === 'AbortError')) { setError(cause instanceof Error ? cause.message.replace(/https?:\/\/\S+/g, '[asset]') : '空间载入失败。'); setStatus('error') } }
     })()
-    const resize = new ResizeObserver(() => { if (viewer && camera && !viewer.isDestroyed) { viewer.resize(); camera.aspect = Math.max(container.clientWidth / Math.max(container.clientHeight, 1), 0.1); camera.updateMatrixWorld(true); render() } }); resize.observe(container)
-    listen('focus', () => setKeyboardActive(true))
-    listen('blur', () => { pressedKeys.clear(); lastNavigationTime = 0; setKeyboardActive(false) })
+    const resize = new ResizeObserver(() => {
+      if (!viewer || !camera || viewer.isDestroyed) return
+      viewer.resize()
+      camera.aspect = Math.max(container.clientWidth / Math.max(container.clientHeight, 1), 0.1)
+      camera.updateProjectionMatrix()
+      if (loadedObjectFrame && worldFrameState !== 'pending' && worldFrameState !== 'ready') {
+        const distance = cameraDistanceForBoundingSphere({
+          radius: loadedObjectFrame.radius,
+          verticalFovDeg: camera.fov,
+          aspect: camera.aspect,
+        })
+        orbit.home = {
+          yaw: loadedObjectFrame.yaw,
+          pitch: loadedObjectFrame.pitch,
+          distance,
+          target: [...loadedObjectFrame.target],
+        }
+        if (!userHasAdjustedView) {
+          orbit.yaw = loadedObjectFrame.yaw
+          orbit.pitch = loadedObjectFrame.pitch
+          orbit.distance = distance
+          orbit.target = [...loadedObjectFrame.target]
+          if (cameraModeRef.current === 'user') { applyUser(); return }
+        }
+      }
+      render()
+    }); resize.observe(container)
+    listen('blur', () => { pressedKeys.clear(); lastNavigationTime = 0 })
     listen('keydown', event => {
       if (cameraModeRef.current !== 'user' || (!movementKeys.has(event.code) && !event.code.startsWith('Shift'))) return
       event.preventDefault()
+      if (movementKeys.has(event.code)) userHasAdjustedView = true
       pressedKeys.add(event.code)
       startNavigation()
     })
@@ -549,6 +655,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       const deltaX = event.clientX - orbit.x
       const deltaY = event.clientY - orbit.y
       if (Math.hypot(deltaX, deltaY) > 2) orbit.moved = true
+      if (Math.hypot(deltaX, deltaY) > 2) userHasAdjustedView = true
       if (orbit.mode === 'orbit') {
         orbit.yaw -= deltaX * 0.006
         orbit.pitch = Math.min(1.42, Math.max(-1.42, orbit.pitch + deltaY * 0.0045))
@@ -567,7 +674,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       applyUser()
     })
     const stop = (event: PointerEvent) => { if (event.pointerId === orbit.pointerId) { orbit.dragging = false; orbit.pointerId = -1 } }; listen('pointerup', stop); listen('pointercancel', stop)
-    listen('wheel', event => { event.preventDefault(); if (cameraModeRef.current === 'user') { orbit.distance = Math.min(5000, Math.max(0.35, orbit.distance * Math.exp(event.deltaY * 0.0012))); applyUser() } }, { passive: false })
+    listen('wheel', event => { event.preventDefault(); if (cameraModeRef.current === 'user') { userHasAdjustedView = true; orbit.distance = Math.min(5000, Math.max(0.35, orbit.distance * Math.exp(event.deltaY * 0.0012))); applyUser() } }, { passive: false })
     listen('click', async event => {
       if (!viewer || !camera) return
       if (orbit.moved) { orbit.moved = false; return }
@@ -581,16 +688,14 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   }, [assetUrl, disposeQualityCaches, format, upAxis, onCameraChange, onSelectInstance])
 
   return <div className={styles.viewerRoot}>
-    <div ref={containerRef} className={styles.viewerContainer} aria-label="Aholo 混合空间查看器" tabIndex={0} title="点击画面激活；WASD 水平移动；Q/E 下上移动；Shift 加速；左键环视" />
+    <div
+      ref={containerRef}
+      className={styles.viewerContainer}
+      aria-label="Aholo 混合空间查看器"
+      tabIndex={0}
+    />
     {status !== 'ready' && <div className={styles.viewerState} role={status === 'error' ? 'alert' : 'status'}><strong>{status === 'error' ? '空间载入失败' : status === 'idle' ? '选择一个 Scene' : '正在构建混合空间'}</strong><p>{status === 'error' ? error : '正在读取 World 3DGS 与 Scene GLB。'}</p></div>}
     {status === 'ready' && error && <div className={styles.viewerWarning} role="alert"><strong>World 背景未载入</strong><span>{error}</span></div>}
-    {status === 'ready' && cameraMode === 'user' && <div className={styles.viewerHint} data-active={keyboardActive}>
-      <span className={styles.controlState}>{keyboardActive ? '自由相机已激活' : '点击画面激活自由相机'}</span>
-      <span className={styles.keyGroup}><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><b>水平移动</b></span>
-      <span className={styles.keyGroup}><kbd>Q</kbd><kbd>E</kbd><b>下降 / 上升</b></span>
-      <span className={styles.mouseControl}>左键环视 · Shift 加速</span>
-    </div>}
-    {status === 'ready' && cameraMode === 'agent' && <div className={styles.viewerHint}><span className={styles.controlState}>Agent 视角只读 · 切回用户视角后可移动</span></div>}
     <div className={styles.scanline} aria-hidden="true" />
   </div>
 })

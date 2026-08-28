@@ -270,6 +270,7 @@ export async function createAgentRun(input: {
   policyVersion?: number
   rootVisible?: boolean
   executionMode?: AgentRunExecutionMode
+  availableAt?: Date | null
 }): Promise<AgentRunDocument> {
   await connectDB()
   const sessionExecution = input.executionMode === 'agent_session'
@@ -319,7 +320,7 @@ export async function createAgentRun(input: {
       cancellation_requested: false,
       recovery_count: 0,
       dispatch_attempts: 0,
-      available_at: null,
+      available_at: input.availableAt ?? null,
     })
     if (input.executionMode !== 'agent_session') {
       await ConversationRuntime.updateOne(
@@ -343,6 +344,24 @@ export async function createAgentRun(input: {
     }
     throw error
   }
+}
+
+/** Open a deliberately gated queued Run only after its stream hand-off is safe. */
+export async function makeQueuedAgentRunAvailable(
+  runIdValue: string,
+  userId: string,
+): Promise<boolean> {
+  await connectDB()
+  const result = await AgentRun.updateOne(
+    {
+      run_id: runIdValue,
+      user_id: userId,
+      status: 'queued',
+      cancellation_requested: { $ne: true },
+    },
+    { $set: { available_at: null } },
+  )
+  return result.matchedCount === 1
 }
 
 export async function getAgentRun(runIdValue: string, userId?: string): Promise<AgentRunDocument | null> {

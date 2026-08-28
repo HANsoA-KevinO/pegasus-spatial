@@ -21,8 +21,9 @@ export function registerAbort(conversationId: string, controller: AbortControlle
   conversations.add(conversationId)
 }
 
-export function unregisterAbort(conversationId: string): void {
+export function unregisterAbort(conversationId: string, controller?: AbortController): void {
   const entry = registry.get(conversationId)
+  if (controller && entry?.controller !== controller) return
   registry.delete(conversationId)
   if (entry) {
     const conversations = userIndex.get(entry.userId)

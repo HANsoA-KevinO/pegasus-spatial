@@ -103,7 +103,6 @@ export function ChatContainer({
         onStop={onStop}
         quotedSelection={quotedSelection}
         onClearQuote={onClearQuote}
-        contextUsage={contextUsage}
       />
     </div>
   )

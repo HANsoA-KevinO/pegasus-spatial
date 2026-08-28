@@ -14,8 +14,45 @@ import {
   type PublicCompactionStatus,
 } from './chat-compaction-state'
 import { attachPersistedToolResult } from '@/lib/chat/persisted-tool-results'
+import {
+  applyLiveToolEventToMessages,
+  type LiveToolEvent,
+} from '@/lib/chat/live-tool-parts'
+import {
+  nextChatSubmissionTransport,
+  routeChatSubmission,
+  type ChatSubmissionTransport,
+} from '@/lib/chat/submission-routing'
+import { resolveRunIdentityEvent } from '@/lib/chat/run-identity-fence'
 
 const ACTIVE_CONVERSATION_KEY = 'sci_pegasus_active_conversation_id'
+
+interface ChatSubmissionPayload {
+  error?: string
+  code?: string
+  run_id?: string
+}
+
+interface ChatSubmissionValue {
+  response: Response | null
+  payload: ChatSubmissionPayload | null
+  rawText: string
+}
+
+async function readChatSubmissionPayload(response: Response): Promise<{
+  payload: ChatSubmissionPayload | null
+  rawText: string
+}> {
+  const rawText = await response.text()
+  if (!rawText) return { payload: null, rawText }
+  try {
+    const parsed = JSON.parse(rawText) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return { payload: parsed as ChatSubmissionPayload, rawText }
+    }
+  } catch { /* retain the original response text for non-routing errors */ }
+  return { payload: null, rawText }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function summarizeToolAction(tool: string, input: any, displayPath: string): string {
@@ -101,6 +138,10 @@ export function useChat(options: UseChatOptions) {
   const cacheRef = useRef(new Map<string, CachedState>())
   // Per-conversation abort controllers
   const abortsRef = useRef(new Map<string, AbortController>())
+  // A controller may be briefly displaced while /api/chat is checked at a Run
+  // boundary. Track actual lifetime separately so a failed check can restore a
+  // still-live subscriber without reviving one whose finally already ran.
+  const liveAbortControllersRef = useRef(new Set<AbortController>())
   // Monotonic hydration generation per conversation. A Team event may start a
   // fresher reconnect/load while an older DB request is still in flight; only
   // the newest request may replace the cache reconstructed from persistence.
@@ -108,6 +149,9 @@ export function useChat(options: UseChatOptions) {
   // Durable Run identity for stop/reconnect. Conversation IDs remain the UI
   // navigation key, while this map identifies the exact execution instance.
   const activeRunIdsRef = useRef(new Map<string, string>())
+  // A newer local subscriber invalidates identity updates from an older SSE
+  // stream even if that stream drains one last buffered state event on abort.
+  const runStreamGenerationsRef = useRef(new Map<string, number>())
   // Pending AskUserQuestion form identity per conversation. This survives
   // reconnects via `active_run.pending_interaction` and makes a form submit
   // idempotent without turning the answer into a tool_result.
@@ -137,6 +181,12 @@ export function useChat(options: UseChatOptions) {
     const cached = cacheRef.current.get(key)
     if (cached) cached.contextUsage = usage
     if (activeKeyRef.current === key) setContextUsage(usage)
+  }
+
+  const claimRunStreamGeneration = (key: string): number => {
+    const generation = (runStreamGenerationsRef.current.get(key) ?? 0) + 1
+    runStreamGenerationsRef.current.set(key, generation)
+    return generation
   }
 
   const stopCompactionPolling = (key: string) => {
@@ -223,21 +273,36 @@ export function useChat(options: UseChatOptions) {
       /** Stable target for this Run's streamed assistant message. Mid-turn
        * user input may no longer leave that assistant as the final array item. */
       assistantMessageId?: string
+      expectedRunId?: string
+      streamGeneration?: number
+      allowRunReplacement?: boolean
+      onAcceptedRunDetached?: (runId: string) => void
     },
   ) => {
     const evtType = data.type as string
     if (!evtType) return
 
-    if (
-      (
-        evtType === 'run_started'
-        || evtType === 'run_state'
-        || evtType === 'run_detached'
-        || evtType === 'run_recoverable'
-      )
-      && typeof data.run_id === 'string'
-    ) {
-      activeRunIdsRef.current.set(myKey, data.run_id)
+    if (typeof data.run_id === 'string') {
+      const identity = resolveRunIdentityEvent({
+        activeRunId: activeRunIdsRef.current.get(myKey),
+        expectedRunId: handlers.expectedRunId,
+        eventType: evtType,
+        eventRunId: data.run_id,
+        eventStatus: typeof data.status === 'string' ? data.status : undefined,
+        isCurrentStream: handlers.streamGeneration === undefined
+          || runStreamGenerationsRef.current.get(myKey) === handlers.streamGeneration,
+        allowRunReplacement: handlers.allowRunReplacement,
+      })
+      if (identity.accepted) {
+        if (identity.nextActiveRunId) {
+          activeRunIdsRef.current.set(myKey, identity.nextActiveRunId)
+        } else {
+          activeRunIdsRef.current.delete(myKey)
+        }
+        if (evtType === 'run_detached') {
+          handlers.onAcceptedRunDetached?.(data.run_id)
+        }
+      }
     }
 
     // Conversation ID migration (only needed for the POST path with a brand-new conversation)
@@ -252,14 +317,18 @@ export function useChat(options: UseChatOptions) {
 
     if (evtType === 'done') {
       try { localStorage.removeItem(ACTIVE_CONVERSATION_KEY) } catch { /* ignore */ }
-      const eventRunId = typeof data.run_id === 'string' ? data.run_id : undefined
+      const eventRunId = typeof data.run_id === 'string'
+        ? data.run_id
+        : handlers.expectedRunId
       if (!eventRunId || activeRunIdsRef.current.get(myKey) === eventRunId) {
         activeRunIdsRef.current.delete(myKey)
       }
     }
 
     if (evtType === 'interrupted' || (evtType === 'error' && data.run_id)) {
-      const eventRunId = typeof data.run_id === 'string' ? data.run_id : undefined
+      const eventRunId = typeof data.run_id === 'string'
+        ? data.run_id
+        : handlers.expectedRunId
       if (!eventRunId || activeRunIdsRef.current.get(myKey) === eventRunId) {
         activeRunIdsRef.current.delete(myKey)
       }
@@ -373,6 +442,50 @@ export function useChat(options: UseChatOptions) {
     }
     const target = targetIndex >= 0 ? prev[targetIndex] : undefined
     if (!target || target.role !== 'assistant') return
+
+    if (evtType === 'tool_start' || evtType === 'tool_target' || evtType === 'tool_done') {
+      const tool = typeof data.tool === 'string' ? data.tool : ''
+      if (!tool) return
+      const toolUseId = typeof data.tool_use_id === 'string' ? data.tool_use_id : undefined
+      let event: LiveToolEvent
+      if (evtType === 'tool_start') {
+        event = { type: 'tool_start', tool, tool_use_id: toolUseId }
+        // Flip the workspace gate the moment a mutator tool starts — workspace
+        // appears with its in-flight state before the tool result lands.
+        if (activeKeyRef.current === myKey && MUTATOR_TOOLS.has(tool)) {
+          setHasMutatorStarted(true)
+        }
+      } else if (evtType === 'tool_target') {
+        if (typeof data.target_path !== 'string' || !data.target_path) return
+        event = {
+          type: 'tool_target',
+          tool,
+          tool_use_id: toolUseId,
+          target_path: data.target_path,
+        }
+      } else {
+        event = {
+          type: 'tool_done',
+          tool,
+          tool_use_id: toolUseId,
+          ...(typeof data.file_path === 'string' ? { file_path: data.file_path } : {}),
+          ...(typeof data.action === 'string' ? { action: data.action } : {}),
+          ...(typeof data.is_error === 'boolean' ? { is_error: data.is_error } : {}),
+          ...(typeof data.content === 'string' ? { content: data.content } : {}),
+        }
+      }
+
+      const applied = applyLiveToolEventToMessages(prev, targetIndex, event)
+      if (!applied.matched) {
+        const identity = toolUseId ? ` tool_use_id=${toolUseId}` : ''
+        console.warn(`[useChat] ${evtType} for "${tool}"${identity} found no matching tool_call`)
+        return
+      }
+      cachedEntry.messages = applied.messages
+      syncToReact(myKey)
+      return
+    }
+
     const updated = [...prev]
     let parts = [...(target.parts ?? [])]
     let content = target.content
@@ -406,61 +519,6 @@ export function useChat(options: UseChatOptions) {
           parts[parts.length - 1] = { ...lastPart, text: lastPart.text + text }
         } else {
           parts.push({ type: 'text', text })
-        }
-        break
-      }
-      case 'tool_start': {
-        const toolName = data.tool as string
-        parts.push({ type: 'tool_call', tool: toolName, pending: true })
-        // Flip the workspace gate the moment a mutator tool starts — workspace
-        // appears with its "Agent 正在工作中..." loading state before the
-        // tool_done event lands (so user sees the transition crisply, not a
-        // sudden snap from chat-only → workspace+artifact).
-        if (activeKeyRef.current === myKey && MUTATOR_TOOLS.has(toolName)) {
-          setHasMutatorStarted(true)
-        }
-        break
-      }
-      case 'tool_target': {
-        // Server emits this right before tool execution to tag the target
-        // file path on the latest pending tool_call. The workspace panel
-        // uses this to flag the matching tab as "being edited by AI".
-        const tool = data.tool as string
-        const targetPath = data.target_path as string | undefined
-        if (!targetPath) break
-        let matched = false
-        for (let i = parts.length - 1; i >= 0; i--) {
-          const p = parts[i]
-          if (p.type === 'tool_call' && p.pending && p.tool === tool && !p.target_path) {
-            parts[i] = { ...p, target_path: targetPath }
-            matched = true
-            break
-          }
-        }
-        if (!matched) {
-          // Defensive: tool_target arrived without a matching pending tool_call.
-          // Shouldn't happen because tool_start is always emitted first by the
-          // streaming path, but log if a future change introduces a silent path
-          // (e.g. callLLMSilent dropping onToolUseStart) so we don't silently
-          // miss in-flight loading state.
-          console.warn(`[useChat] tool_target for "${tool}" target=${targetPath} found no matching pending tool_call`)
-        }
-        break
-      }
-      case 'tool_done': {
-        for (let i = parts.length - 1; i >= 0; i--) {
-          const p = parts[i]
-          if (p.type === 'tool_call' && p.pending && p.tool === data.tool) {
-            parts[i] = {
-              ...p,
-              pending: false,
-              file_path: data.file_path as string | undefined,
-              action: data.action as string | undefined,
-              is_error: data.is_error as boolean | undefined,
-              content: data.content as string | undefined,
-            }
-            break
-          }
         }
         break
       }
@@ -589,68 +647,13 @@ export function useChat(options: UseChatOptions) {
       const responseInteractionId = interactionId
         ?? pendingInteractionIdsRef.current.get(getKey(conversationId))
       const effectiveResearchDomain = researchDomainOverride ?? options.researchDomain
-
-      // Mid-turn input: enqueue message instead of starting new request
-      if (isLoading && conversationId) {
-        const key = activeKeyRef.current
-        const optimisticMessageId = `mid-${Date.now()}`
-        try {
-          // Optimistic UI: show user message immediately
-          const cached = cacheRef.current.get(key)
-          if (cached) {
-            cached.messages = [...cached.messages, {
-              id: optimisticMessageId,
-              role: 'user' as const,
-              content: text,
-              parts: [{ type: 'text' as const, text }],
-              timestamp: new Date(),
-            }]
-            syncToReact(key)
-          }
-          const response = await fetch('/api/chat/interrupt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversation_id: conversationId, message: text, images }),
-          })
-          let failurePayload: { error?: string; code?: string } | null = null
-          if (!response.ok) {
-            try {
-              failurePayload = await response.json() as { error?: string; code?: string }
-            } catch { /* keep bounded fallback */ }
-          }
-          if (response.status === 409 && failurePayload?.code === 'no_active_run') {
-            // The durable Run may finish in the small window between React's
-            // loading state and this request reaching the server. Remove the
-            // optimistic queue bubble and fall through to the normal new-turn
-            // path so the user never has to resend the message manually.
-            if (cached) {
-              cached.messages = cached.messages.filter(message => message.id !== optimisticMessageId)
-              syncToReact(key)
-            }
-            activeRunIdsRef.current.delete(key)
-          } else if (!response.ok) {
-            const detail = failurePayload?.error ?? `追加消息失败（HTTP ${response.status}）`
-            throw new Error(detail)
-          } else {
-            return
-          }
-        } catch (err) {
-          console.error('[useChat] Failed to send mid-turn message:', err)
-          const cached = cacheRef.current.get(key)
-          if (cached) {
-            const message = err instanceof Error ? err.message : '追加消息失败，请稍后重试'
-            cached.messages = [...cached.messages, {
-              id: `mid-error-${Date.now()}`,
-              role: 'assistant',
-              content: `**错误**: ${message}`,
-              parts: [{ type: 'text', text: `错误：${message}` }],
-              timestamp: new Date(),
-            }]
-            syncToReact(key)
-          }
-          return
-        }
-      }
+      // React loading state and the durable active Run can cross at a turn
+      // boundary. Capture only the initial preference; the bounded transport
+      // router below owns every subsequent switch without recursively calling
+      // this stale closure.
+      const initialTransport: ChatSubmissionTransport = isLoading && conversationId
+        ? 'interrupt'
+        : 'normal'
 
       // Mutable key — migrates from '_new' to real ID when server responds
       let myKey = getKey(conversationId)
@@ -710,12 +713,30 @@ export function useChat(options: UseChatOptions) {
         })
       }
 
+      const ensureAssistantPlaceholder = () => {
+        updateMsgs(prev => (
+          prev.some(message => message.id === assistantMsg.id)
+            ? prev
+            : [...prev, assistantMsg]
+        ))
+      }
+
+      const removeAssistantPlaceholder = () => {
+        updateMsgs(prev => prev.filter(message => message.id !== assistantMsg.id))
+      }
+
       // Write initial messages directly to cache, then sync
       // IMPORTANT: Preserve dbArtifactFields from the previous turn — don't clear them.
       // They'll be overwritten when the new agent loop completes and refetches from DB.
       // This prevents the workspace panel from resetting to empty during streaming.
       const cached = cacheRef.current.get(myKey)!
-      cached.messages = [...cached.messages, userMsg, assistantMsg]
+      // The optimistic user turn is appended exactly once. Endpoint switches
+      // only add/remove this invocation's assistant placeholder.
+      cached.messages = [
+        ...cached.messages,
+        userMsg,
+        ...(initialTransport === 'normal' ? [assistantMsg] : []),
+      ]
       // Stamp the settings we're about to POST into the cache so the cache-hit
       // path on a later switch-back re-emits the user's actual choices. Without
       // this, brand-new conversations have no cache.settings (initialized as
@@ -725,18 +746,17 @@ export function useChat(options: UseChatOptions) {
       cached.settings = {
         orchestrator_model: options.model,
         research_domain: effectiveResearchDomain,
-        memory_enabled: options.memoryEnabled !== false,
+        memory_enabled: options.memoryEnabled === true,
       }
       syncToReact(myKey)
 
-      if (activeKeyRef.current === myKey) {
-        setIsLoading(true)
-      }
-
-      const abortController = new AbortController()
-      abortsRef.current.set(myKey, abortController)
-      setRunningConversationIds(prev => new Set([...prev, myKey]))
+      let normalController: AbortController | null = null
+      let shouldRenderAbortAsUserStop = false
+      let didAttemptNormalTransport = false
+      let knownActiveRunId: string | null = null
       let detachedRunId: string | null = null
+      let normalStreamRunId: string | undefined
+      let normalStreamGeneration: number | undefined
 
       // Mark active conversation for cross-refresh restore (existing conversations too, not just new)
       if (myKey !== '_new') {
@@ -744,113 +764,257 @@ export function useChat(options: UseChatOptions) {
       }
 
       try {
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            // A new project has no durable Conversation identity yet. Omit the
-            // field entirely so the API can distinguish "create" from an
-            // explicitly supplied (and therefore validated) identifier.
-            ...(conversationId ? { conversation_id: conversationId } : {}),
-            message: text,
-            images: images?.length ? images : undefined,
-            interaction_id: responseInteractionId,
-            settings: {
-              orchestrator_model: options.model,
-              research_domain: effectiveResearchDomain,
-              memory_enabled: options.memoryEnabled !== false,
-            },
-          }),
-          signal: abortController.signal,
-        })
+        const routed = await routeChatSubmission<ChatSubmissionValue>(initialTransport, async transport => {
+          if (transport === 'interrupt') {
+            if (!conversationId) {
+              return {
+                ok: false,
+                status: 400,
+                value: {
+                  response: null,
+                  payload: { error: '对话尚未建立，无法追加消息' },
+                  rawText: '',
+                },
+              }
+            }
 
-        if (!res.ok) {
-          // Rate limit: server returns JSON { error, code, retry_after_ms }; surface the
-          // localized `error` message verbatim so the user sees a friendly prompt.
-          if (res.status === 429) {
-            try {
-              const payload = await res.json()
-              throw new Error(payload?.error || '请求过于频繁，请稍后再试')
-            } catch (parseErr) {
-              if (parseErr instanceof Error && parseErr.message) throw parseErr
-              throw new Error('请求过于频繁，请稍后再试')
+            const response = await fetch('/api/chat/interrupt', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                conversation_id: conversationId,
+                message: text,
+                images: images?.length ? images : undefined,
+              }),
+            })
+            const { payload, rawText } = await readChatSubmissionPayload(response)
+            if (typeof payload?.run_id === 'string') {
+              knownActiveRunId = payload.run_id
+              activeRunIdsRef.current.set(myKey, payload.run_id)
+            }
+            if (response.status === 409 && payload?.code === 'no_active_run') {
+              knownActiveRunId = null
+              activeRunIdsRef.current.delete(myKey)
+            }
+            return {
+              ok: response.ok,
+              status: response.status,
+              code: payload?.code,
+              value: { response, payload, rawText },
             }
           }
-          if (res.status === 401) {
+
+          didAttemptNormalTransport = true
+          ensureAssistantPlaceholder()
+          if (activeKeyRef.current === myKey) setIsLoading(true)
+          setRunningConversationIds(prev => new Set([...prev, myKey]))
+
+          const displacedController = abortsRef.current.get(myKey)
+          const controller = new AbortController()
+          normalController = controller
+          liveAbortControllersRef.current.add(controller)
+          abortsRef.current.set(myKey, controller)
+
+          const restoreDisplacedController = () => {
+            liveAbortControllersRef.current.delete(controller)
+            if (abortsRef.current.get(myKey) !== controller) return
+            if (
+              displacedController
+              && liveAbortControllersRef.current.has(displacedController)
+            ) {
+              abortsRef.current.set(myKey, displacedController)
+            } else {
+              abortsRef.current.delete(myKey)
+            }
+          }
+
+          let response: Response
+          try {
+            response = await fetch('/api/chat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                // A new project has no durable Conversation identity yet. Omit
+                // the field so the API can distinguish create from an explicit
+                // (and therefore validated) durable identity.
+                ...(conversationId ? { conversation_id: conversationId } : {}),
+                message: text,
+                images: images?.length ? images : undefined,
+                interaction_id: responseInteractionId,
+                settings: {
+                  orchestrator_model: options.model,
+                  research_domain: effectiveResearchDomain,
+                  memory_enabled: options.memoryEnabled === true,
+                },
+              }),
+              signal: controller.signal,
+            })
+          } catch (error) {
+            shouldRenderAbortAsUserStop = (
+              (error as Error).name === 'AbortError'
+              && abortsRef.current.get(myKey) === controller
+            )
+            restoreDisplacedController()
+            normalController = null
+            throw error
+          }
+
+          if (!response.ok) {
+            const { payload, rawText } = await readChatSubmissionPayload(response)
+            const nextTransport = nextChatSubmissionTransport(
+              'normal',
+              response.status,
+              payload?.code,
+            )
+            if (typeof payload?.run_id === 'string') {
+              knownActiveRunId = payload.run_id
+              activeRunIdsRef.current.set(myKey, payload.run_id)
+            }
+            restoreDisplacedController()
+            normalController = null
+            if (nextTransport === 'interrupt') removeAssistantPlaceholder()
+            return {
+              ok: false,
+              status: response.status,
+              code: payload?.code,
+              value: { response, payload, rawText },
+            }
+          }
+          if (
+            displacedController
+            && liveAbortControllersRef.current.has(displacedController)
+          ) {
+            // A successful new turn supersedes the old subscriber. Its finally
+            // is identity-guarded, so aborting it cannot clear this controller
+            // or rehydrate stale terminal state over the new stream.
+            displacedController.abort()
+          }
+          normalStreamGeneration = claimRunStreamGeneration(myKey)
+          if (!response.body) throw new Error('No response body')
+
+          const reader = response.body.getReader()
+          await readSSE(reader, (data) => {
+            const establishesNormalRunIdentity = (
+              normalStreamRunId === undefined
+              && (data.type === 'run_started' || data.type === 'run_detached')
+              && typeof data.run_id === 'string'
+            )
+            if (establishesNormalRunIdentity) {
+              normalStreamRunId = data.run_id as string
+            }
+            applySSEEvent(myKey, data, {
+              trackTokenUsage: true,
+              assistantMessageId: assistantMsg.id,
+              expectedRunId: normalStreamRunId,
+              streamGeneration: normalStreamGeneration,
+              allowRunReplacement: establishesNormalRunIdentity,
+              onAcceptedRunDetached(runId) {
+                detachedRunId = runId
+              },
+              onConversationIdMigration(realId) {
+                if (myKey === '_new' && realId) {
+                  const cachedEntry = cacheRef.current.get('_new')
+                  if (cachedEntry) {
+                    cacheRef.current.set(realId, cachedEntry)
+                    cacheRef.current.delete('_new')
+                  }
+                  const ac = abortsRef.current.get('_new')
+                  if (ac) {
+                    abortsRef.current.set(realId, ac)
+                    abortsRef.current.delete('_new')
+                  }
+                  const pendingRunId = activeRunIdsRef.current.get('_new')
+                  if (pendingRunId) {
+                    activeRunIdsRef.current.set(realId, pendingRunId)
+                    activeRunIdsRef.current.delete('_new')
+                  }
+                  const pendingStreamGeneration = runStreamGenerationsRef.current.get('_new')
+                  if (pendingStreamGeneration !== undefined) {
+                    runStreamGenerationsRef.current.set(realId, pendingStreamGeneration)
+                    runStreamGenerationsRef.current.delete('_new')
+                  }
+                  const pendingInteractionId = pendingInteractionIdsRef.current.get('_new')
+                  if (pendingInteractionId) {
+                    pendingInteractionIdsRef.current.set(realId, pendingInteractionId)
+                    pendingInteractionIdsRef.current.delete('_new')
+                  }
+                  setRunningConversationIds(prev => {
+                    const next = new Set(prev)
+                    next.delete('_new')
+                    next.add(realId)
+                    return next
+                  })
+                  if (activeKeyRef.current === '_new') {
+                    activeKeyRef.current = realId
+                  }
+                  myKey = realId
+                  try { localStorage.setItem(ACTIVE_CONVERSATION_KEY, realId) } catch { /* ignore */ }
+                }
+                if (activeKeyRef.current === myKey) setConversationId(realId)
+              },
+            })
+          })
+          return {
+            ok: true,
+            status: response.status,
+            value: { response, payload: null, rawText: '' },
+          }
+        })
+
+        if (!routed.ok) {
+          if (routed.exhausted) {
+            throw new Error('对话运行状态正在切换，这条消息尚未提交，请稍后重试')
+          }
+          if (routed.status === 429) {
+            throw new Error(routed.value.payload?.error || '请求过于频繁，请稍后再试')
+          }
+          if (routed.status === 401) {
             throw new Error('本地工作台请求失败，请刷新后重试')
           }
-          const errorText = await res.text()
-          throw new Error(`HTTP ${res.status}: ${errorText}`)
-        }
-        if (!res.body) throw new Error('No response body')
-
-        const reader = res.body.getReader()
-        await readSSE(reader, (data) => {
-          if (data.type === 'run_detached' && typeof data.run_id === 'string') {
-            detachedRunId = data.run_id
+          if (routed.status === 409) {
+            throw new Error('对话运行状态已变化，这条消息尚未提交，请稍后重试')
           }
-          applySSEEvent(myKey, data, {
-            trackTokenUsage: true,
-            assistantMessageId: assistantMsg.id,
-            onConversationIdMigration(realId) {
-              if (myKey === '_new' && realId) {
-                const cachedEntry = cacheRef.current.get('_new')
-                if (cachedEntry) {
-                  cacheRef.current.set(realId, cachedEntry)
-                  cacheRef.current.delete('_new')
-                }
-                const ac = abortsRef.current.get('_new')
-                if (ac) {
-                  abortsRef.current.set(realId, ac)
-                  abortsRef.current.delete('_new')
-                }
-                const pendingRunId = activeRunIdsRef.current.get('_new')
-                if (pendingRunId) {
-                  activeRunIdsRef.current.set(realId, pendingRunId)
-                  activeRunIdsRef.current.delete('_new')
-                }
-                const pendingInteractionId = pendingInteractionIdsRef.current.get('_new')
-                if (pendingInteractionId) {
-                  pendingInteractionIdsRef.current.set(realId, pendingInteractionId)
-                  pendingInteractionIdsRef.current.delete('_new')
-                }
-                setRunningConversationIds(prev => {
-                  const next = new Set(prev)
-                  next.delete('_new')
-                  next.add(realId)
-                  return next
-                })
-                if (activeKeyRef.current === '_new') {
-                  activeKeyRef.current = realId
-                }
-                myKey = realId
-                // Persist the active conversation so refresh can restore it
-                try { localStorage.setItem(ACTIVE_CONVERSATION_KEY, realId) } catch { /* ignore */ }
-              }
-              if (activeKeyRef.current === myKey) {
-                setConversationId(realId)
-              }
-            },
-          })
-        })
+          const fallback = routed.transport === 'interrupt'
+            ? `追加消息失败（HTTP ${routed.status}）`
+            : `HTTP ${routed.status}${routed.value.rawText ? `: ${routed.value.rawText}` : ''}`
+          throw new Error(routed.value.payload?.error || fallback)
+        }
+
+        if (routed.transport === 'interrupt') {
+          // The active Root owns the reply. Keep this invocation's single user
+          // bubble, but never leave behind a second empty assistant bubble.
+          removeAssistantPlaceholder()
+          if (!abortsRef.current.has(myKey) && myKey !== '_new') {
+            void consumeReconnectStream(myKey, knownActiveRunId ?? undefined)
+          }
+          return
+        }
       } catch (err) {
         if ((err as Error).name === 'AbortError') {
-          // User clicked stop — mark all pending tool calls as interrupted + add truncation marker
-          updateAssistantMsg(target => {
-            const parts = [...(target.parts || [])]
-            for (let i = 0; i < parts.length; i++) {
-              const p = parts[i]
-              if (p.type === 'tool_call' && p.pending) {
-                parts[i] = { ...p, pending: false, action: (p.action || '') + ' (用户终止)', is_error: true }
+          const ownsAbortedTransport = Boolean(
+            normalController
+            && abortsRef.current.get(myKey) === normalController,
+          )
+          if (shouldRenderAbortAsUserStop || ownsAbortedTransport) {
+            ensureAssistantPlaceholder()
+            // User clicked stop — mark all pending tool calls as interrupted + add truncation marker
+            updateAssistantMsg(target => {
+              const parts = [...(target.parts || [])]
+              for (let i = 0; i < parts.length; i++) {
+                const p = parts[i]
+                if (p.type === 'tool_call' && p.pending) {
+                  parts[i] = { ...p, pending: false, action: (p.action || '') + ' (用户终止)', is_error: true }
+                }
+                if (p.type === 'thinking' && p.pending) {
+                  parts[i] = { ...p, pending: false }
+                }
               }
-              if (p.type === 'thinking' && p.pending) {
-                parts[i] = { ...p, pending: false }
-              }
-            }
-            parts.push({ type: 'interrupted' })
-            return { ...target, parts }
-          })
+              parts.push({ type: 'interrupted' })
+              return { ...target, parts }
+            })
+          }
         } else {
+          ensureAssistantPlaceholder()
           updateAssistantMsg(target => {
             return {
               ...target,
@@ -859,9 +1023,16 @@ export function useChat(options: UseChatOptions) {
           })
         }
       } finally {
+        const controllerToClean = normalController
+        if (controllerToClean) {
+          liveAbortControllersRef.current.delete(controllerToClean)
+        }
         // Mark stream as finished
         updateAssistantMsg(target => ({ ...target, isStreaming: false }))
-        if (abortsRef.current.get(myKey) === abortController) {
+        if (
+          controllerToClean
+          && abortsRef.current.get(myKey) === controllerToClean
+        ) {
           abortsRef.current.delete(myKey)
           setRunningConversationIds(prev => {
             const next = new Set(prev)
@@ -871,6 +1042,15 @@ export function useChat(options: UseChatOptions) {
           if (activeKeyRef.current === myKey) {
             setIsLoading(false)
           }
+        } else if (didAttemptNormalTransport && !abortsRef.current.has(myKey)) {
+          // A failed normal probe may already have released its controller.
+          // Only clear UI state when no restored/newer subscriber owns the key.
+          setRunningConversationIds(prev => {
+            const next = new Set(prev)
+            next.delete(myKey)
+            return next
+          })
+          if (activeKeyRef.current === myKey) setIsLoading(false)
         }
 
         // Reattach to the durable Runner immediately. Artifact hydration is a
@@ -892,7 +1072,7 @@ export function useChat(options: UseChatOptions) {
         // would keep showing pre-edit content until the user manually
         // reloads the page. Idempotent in the common case where SSE
         // already invalidated the entries we re-check.
-        if (myKey !== '_new') {
+        if (didAttemptNormalTransport && myKey !== '_new') {
           try {
             const res = await fetch(`/api/conversations/${myKey}`)
             if (res.ok) {
@@ -997,6 +1177,8 @@ export function useChat(options: UseChatOptions) {
     if (abortsRef.current.has(convId)) return
 
     const abortController = new AbortController()
+    const streamGeneration = claimRunStreamGeneration(convId)
+    liveAbortControllersRef.current.add(abortController)
     abortsRef.current.set(convId, abortController)
     setRunningConversationIds(prev => new Set([...prev, convId]))
     if (activeKeyRef.current === convId) setIsLoading(true)
@@ -1017,14 +1199,18 @@ export function useChat(options: UseChatOptions) {
     }
 
     let continuationRunId: string | null = null
+    let expectedRunId = runId
+    let shouldRehydrate = false
     try {
-      if (runId) activeRunIdsRef.current.set(convId, runId)
       const streamUrl = runId
         ? `/api/chat/runs/${encodeURIComponent(runId)}/stream`
         : `/api/chat/stream/${convId}`
       const res = await fetch(streamUrl, { signal: abortController.signal })
       if (res.status === 204) {
-        // Loop already ended between the /api/conversations fetch and the reconnect attempt — drop placeholder
+        // The Run ended between the conversation snapshot and subscription.
+        // Drop the placeholder now, then fetch the durable terminal checkpoint
+        // after this subscriber releases its cache guard in `finally`.
+        shouldRehydrate = true
         const c = cacheRef.current.get(convId)
         if (c) {
           const targetIndex = c.messages.findIndex(message => message.id === reconnectPlaceholderId)
@@ -1041,20 +1227,41 @@ export function useChat(options: UseChatOptions) {
       const reader = res.body.getReader()
       await readSSE(reader, (data) => {
         if (
-          data.type === 'run_detached'
-          && typeof data.run_id === 'string'
-          && data.run_id !== runId
+          data.type === 'done'
+          || data.type === 'waiting_for_user'
+          || data.type === 'waiting_for_agents'
+          || data.type === 'ask_user'
+          || data.type === 'run_recoverable'
+          || data.type === 'interrupted'
+          || data.type === 'error'
         ) {
-          continuationRunId = data.run_id
+          // Rich events can race checkpoint buffer clearing, while the Mongo
+          // fallback intentionally streams only text and Run state. Re-read
+          // persistence at terminal state so tool_result envelopes win.
+          shouldRehydrate = true
+        }
+        if (
+          expectedRunId === undefined
+          && (data.type === 'run_started' || data.type === 'run_state')
+          && typeof data.run_id === 'string'
+        ) {
+          expectedRunId = data.run_id
         }
         applySSEEvent(convId, data, {
           trackTokenUsage: true,
           assistantMessageId: reconnectPlaceholderId,
+          expectedRunId,
+          streamGeneration,
+          onAcceptedRunDetached(detachedId) {
+            if (detachedId !== expectedRunId) continuationRunId = detachedId
+          },
         })
       })
     } catch {
       // Stream ended / aborted — UI already updated by events or finally block
     } finally {
+      liveAbortControllersRef.current.delete(abortController)
+      const ownsTransport = abortsRef.current.get(convId) === abortController
       const c = cacheRef.current.get(convId)
       if (c) {
         const targetIndex = c.messages.findIndex(message => message.id === reconnectPlaceholderId)
@@ -1072,7 +1279,7 @@ export function useChat(options: UseChatOptions) {
           syncToReact(convId)
         }
       }
-      if (abortsRef.current.get(convId) === abortController) {
+      if (ownsTransport) {
         abortsRef.current.delete(convId)
         setRunningConversationIds(prev => {
           const next = new Set(prev)
@@ -1081,8 +1288,12 @@ export function useChat(options: UseChatOptions) {
         })
         if (activeKeyRef.current === convId) setIsLoading(false)
       }
-      if (continuationRunId) {
-        void consumeReconnectStream(convId, continuationRunId)
+      if (ownsTransport) {
+        if (continuationRunId) {
+          void consumeReconnectStream(convId, continuationRunId)
+        } else if (shouldRehydrate) {
+          void loadConversation(convId)
+        }
       }
     }
   }
@@ -1253,7 +1464,10 @@ export function useChat(options: UseChatOptions) {
                   tool_use_id: block.id,
                   file_path: block.input?.file_path as string | undefined,
                   action: summarizeToolAction(block.name, block.input, displayPath),
-                  pending: false,
+                  // A tool_use without its following durable tool_result is
+                  // still in flight. attachPersistedToolResult is the only
+                  // hydration path that may settle this row.
+                  pending: true,
                 })
               }
             }
@@ -1308,6 +1522,31 @@ export function useChat(options: UseChatOptions) {
           parts,
           timestamp: startTimestamp ? new Date(startTimestamp) : new Date(),
         })
+      }
+
+      if (!data.is_running) {
+        // A terminal snapshot cannot truthfully present an unmatched tool_use
+        // as completed. Missing durable results are an interrupted/repairable
+        // state, never a green success claim.
+        for (let messageIndex = 0; messageIndex < chatMessages.length; messageIndex += 1) {
+          const message = chatMessages[messageIndex]
+          if (message.role !== 'assistant' || !message.parts?.some(part => (
+            part.type === 'tool_call' && part.pending
+          ))) continue
+          chatMessages[messageIndex] = {
+            ...message,
+            parts: message.parts.map(part => (
+              part.type === 'tool_call' && part.pending
+                ? {
+                    ...part,
+                    pending: false,
+                    is_error: true,
+                    action: part.action || '工具结果未能从持久记录中恢复',
+                  }
+                : part
+            )),
+          }
+        }
       }
 
       // Conversation-level interrupted fallback — covers checkpoint 1 aborts where

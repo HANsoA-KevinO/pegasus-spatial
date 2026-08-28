@@ -6,8 +6,18 @@ import { WorkspacePanel } from '@/components/workspace/WorkspacePanel'
 import { TaskWorkbench } from '@/components/workspace/TaskWorkbench'
 import { Skeleton } from '@/components/loading/Skeleton'
 import { AgentTeamPanel } from '@/components/team/AgentTeamPanel'
+import { PanelResizeHandle } from '@/components/shell/PanelResizeHandle'
+import {
+  RIGHT_PANEL_LIMITS,
+  useWorkspaceLayout,
+} from '@/contexts/WorkspaceLayoutContext'
 
 export default function WorkspacePage() {
+  const {
+    rightPanelWidth,
+    setRightPanelWidth,
+    resetRightPanelWidth,
+  } = useWorkspaceLayout()
   const {
     setResearchDomain,
     messages,
@@ -51,7 +61,22 @@ export default function WorkspacePage() {
           />
         </div>
       )}
-      <main className={`${showWorkspace ? 'w-[560px] shrink-0' : 'min-w-0 flex-1'} flex min-h-0 flex-col`}>
+      <main
+        data-resizable-panel={showWorkspace ? 'right-conversation' : undefined}
+        className={`${showWorkspace ? 'pmo-resizable-panel relative shrink-0' : 'min-w-0 flex-1'} flex min-h-0 flex-col`}
+        style={showWorkspace ? { width: rightPanelWidth } : undefined}
+      >
+        {showWorkspace && (
+          <PanelResizeHandle
+            edge="left"
+            label="调整右侧对话栏宽度"
+            value={rightPanelWidth}
+            min={RIGHT_PANEL_LIMITS.min}
+            max={RIGHT_PANEL_LIMITS.max}
+            onChange={setRightPanelWidth}
+            onReset={resetRightPanelWidth}
+          />
+        )}
         <AgentTeamPanel conversationId={conversationId} />
         <div className="min-h-0 flex-1">
           <ChatContainer

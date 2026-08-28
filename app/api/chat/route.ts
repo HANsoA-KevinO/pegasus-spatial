@@ -11,9 +11,12 @@ import { agentLoop } from '@/lib/agent/loop'
 import {
   acknowledgeDequeuedMessages,
   dequeueMessages,
-  hasQueuedPublicUserMessages,
+  enqueueMessage,
   partitionQueuedMessages,
+  releasePendingPublicUserMessageTarget,
   releaseQueuedMessagesForRun,
+  reserveNextPublicUserMessageForRun,
+  retargetPendingQueuedMessage,
   repairTerminalRootTeamQueueReceipts,
 } from '@/lib/agent/message-queue'
 import { createWorkspaceInstance } from '@/lib/workspace/instance'
@@ -51,9 +54,11 @@ import { checkMessageRate, checkConcurrency, rateLimitResponse } from '@/lib/rat
 import { getUserPlan, getUserModelOverrides } from '@/lib/demo-access-policy'
 import { ModelAlias, canUseAlias, defaultMainAliasFor, resolveAlias, aliasSupportsVision, resolveMainAliasForUser, getAliasCapabilities } from '@/lib/llm-registry'
 import { extractTargetPath } from '@/lib/agent/extract-target-path'
+import { parseSpatialToolResult } from '@/lib/spatial/tool-result'
 import { claimImageAsset, writeImageAsset } from '@/lib/media/storage'
 import { MEDIA_ASSET_ID_PATTERN } from '@/lib/media/public-url'
 import { toImageBlock } from '@/lib/media/reference'
+import { conversationTitleFromMessage } from '@/lib/chat/conversation-title'
 import { memoryV2Flags } from '@/lib/memory-v2/flags'
 import {
   appendRunEvidence,
@@ -92,6 +97,7 @@ import {
   getOrCreateConversationRuntime,
   heartbeatAgentRun,
   isRunCancellationRequested,
+  makeQueuedAgentRunAvailable,
   newAgentRunId,
   resumeWaitingAgentRun,
   setRunCurrentAction,
@@ -119,9 +125,10 @@ import {
   findDurableToolResultMessage,
 } from '@/lib/agent-runtime/tool-recovery'
 import type { AgentExecutionContext } from '@/lib/agent/execution-context'
-import type {
-  FrozenProjectContextSnapshot,
-  FrozenWorkspaceProjection,
+import {
+  isPublicRootAgentRun,
+  type FrozenProjectContextSnapshot,
+  type FrozenWorkspaceProjection,
 } from '@/lib/agent-runtime/types'
 import { classifyAgentRunFailure } from '@/lib/agent-runtime/failure-policy'
 import {
@@ -138,6 +145,7 @@ import {
   isInternalAgentRunnerRequest,
   wakeAgentRunner,
 } from '@/lib/agent-runtime/runner'
+import { canAcceptQueuedUserInput } from '@/lib/chat/submission-routing'
 import {
   AGENT_RUNNER_LEASE_OWNER_HEADER,
   AGENT_RUNNER_RUN_ID_HEADER,
@@ -219,6 +227,269 @@ function toFrozenProjectContext(
       content: snapshot.compiled_guide,
     },
     workspaceProjection: snapshot.workspace_projection.content,
+  }
+}
+
+type ChatStreamWriter = (event: Record<string, unknown>) => void
+
+/**
+ * A terminal public Root may leave user-authored queue rows untargeted. Create
+ * exactly one successor while the Runner is enabled, or reuse the concurrent
+ * public Run that won the active-key race. Both outcomes emit the same durable
+ * hand-off events so the browser reconnects to the Run that will consume the
+ * queued input instead of treating the old HTTP 200 stream as completion.
+ */
+async function ensureQueuedPublicContinuation(input: {
+  sourceRun: AgentRunDocument | null
+  conversationId: string
+  userId: string
+  memoryEnabled: boolean
+  write: ChatStreamWriter
+  releaseTransport?: () => void
+}): Promise<string | null> {
+  const { sourceRun, conversationId, userId, memoryEnabled, write, releaseTransport } = input
+  if (
+    !sourceRun
+    || !isPublicRootAgentRun(sourceRun)
+    || !isAgentRunnerEnabled()
+  ) {
+    return null
+  }
+
+  const continuationRunId = newAgentRunId()
+  const reservedReceipt = await reserveNextPublicUserMessageForRun(
+    conversationId,
+    continuationRunId,
+  )
+  if (!reservedReceipt) return null
+  let effectiveRunId = continuationRunId
+  let reused = false
+  try {
+    await createAgentRun({
+      runId: continuationRunId,
+      conversationId,
+      userId,
+      request: {
+        message: buildUntrustedDataReminder('agent_update', {
+          content: 'A user follow-up arrived at the previous Run boundary. Consume the queued public input and respond to it now.',
+        }),
+        settings: {
+          ...sourceRun.request.settings,
+          memory_enabled: memoryEnabled,
+        },
+        internal: { kind: 'agent_update' },
+      },
+      startedMessageId: newMessageId(),
+      teamId: sourceRun.team_id,
+      agentId: sourceRun.agent_id,
+      agentSessionId: sourceRun.agent_session_id,
+      trigger: 'message',
+      policyVersion: sourceRun.policy_version,
+      rootVisible: true,
+      executionMode: 'conversation',
+      // Prevent a polling Runner from leasing B until A has emitted the
+      // hand-off and synchronously removed its owned process-local channel.
+      availableAt: new Date(Date.now() + 30_000),
+    })
+  } catch (error) {
+    if (!(error instanceof ActiveAgentRunError)) {
+      // createAgentRun inserts the Run before updating ConversationRuntime.
+      // If that second write throws, the gated Run and its exact queue target
+      // are already durable; finish the hand-off instead of releasing the
+      // receipt and letting an empty paid continuation wake 30s later.
+      const insertedRun = await getAgentRun(continuationRunId, userId)
+      if (!insertedRun || !isPublicRootAgentRun(insertedRun)) {
+        await releasePendingPublicUserMessageTarget(
+          reservedReceipt.queueId,
+          reservedReceipt.messageId,
+          continuationRunId,
+        )
+        throw error
+      }
+      console.warn(`[chat] Continuation ${continuationRunId} survived a partial create failure; completing hand-off`)
+    } else {
+      let concurrentRun = await getActiveAgentRun(conversationId, userId)
+      if (
+        concurrentRun
+        && isPublicRootAgentRun(concurrentRun)
+        && !concurrentRun.cancellation_requested
+        && ['waiting_user', 'waiting_agents', 'recoverable'].includes(concurrentRun.status)
+      ) {
+        concurrentRun = await resumeWaitingAgentRun(concurrentRun.run_id, userId)
+      }
+      if (
+        !canAcceptQueuedUserInput(concurrentRun)
+        || !isPublicRootAgentRun(concurrentRun)
+      ) {
+        await releasePendingPublicUserMessageTarget(
+          reservedReceipt.queueId,
+          reservedReceipt.messageId,
+          continuationRunId,
+        )
+        return null
+      }
+      const rebound = await retargetPendingQueuedMessage(
+        reservedReceipt.queueId,
+        reservedReceipt.messageId,
+        continuationRunId,
+        concurrentRun.run_id,
+      )
+      if (!rebound) {
+        await releasePendingPublicUserMessageTarget(
+          reservedReceipt.queueId,
+          reservedReceipt.messageId,
+          continuationRunId,
+        )
+        return null
+      }
+      effectiveRunId = concurrentRun.run_id
+      reused = true
+    }
+  }
+
+  console.log(
+    reused
+      ? `[chat] Reused public Run ${effectiveRunId} for queued user continuation`
+      : `[chat] Scheduled queued user continuation ${effectiveRunId}`,
+  )
+  write({
+    type: 'message_queued',
+    queued: true,
+    run_id: effectiveRunId,
+    conversation_id: conversationId,
+    continuation: true,
+    reused,
+  })
+  write({
+    type: 'run_detached',
+    run_id: effectiveRunId,
+    conversation_id: conversationId,
+    message: '检测到尚未处理的追加消息，已自动进入下一轮。',
+  })
+  // Registry mutation is synchronous. Remove A's owned channel before B can
+  // be dispatched on this process, so B never collides with stale Run A.
+  releaseTransport?.()
+  if (!reused) {
+    const madeAvailable = await makeQueuedAgentRunAvailable(effectiveRunId, userId)
+    if (!madeAvailable) {
+      console.warn(`[chat] Continuation ${effectiveRunId} remained dispatch-gated after hand-off`)
+      return effectiveRunId
+    }
+  }
+  wakeAgentRunner()
+  return effectiveRunId
+}
+
+/** Persist one exact public submission after another request wins a Run-state
+ * CAS, then hand the client to the accepting Root or its continuation. */
+async function handoffConcurrentPublicInput(input: {
+  preferredRun: AgentRunDocument | null
+  conversationId: string
+  userId: string
+  message: string
+  images?: ImageAttachment[]
+  messageId: string
+  holdingRunId: string
+  memoryEnabled: boolean
+  write: ChatStreamWriter
+  releaseTransport?: () => void
+}): Promise<void> {
+  const {
+    preferredRun,
+    conversationId,
+    userId,
+    message,
+    images,
+    messageId,
+    holdingRunId,
+    memoryEnabled,
+    write,
+    releaseTransport,
+  } = input
+  const preferredPublicRoot = preferredRun && isPublicRootAgentRun(preferredRun)
+    ? preferredRun
+    : null
+  const claimedQueuedImages: ImageAttachment[] = []
+  for (const image of images ?? []) {
+    if (!('assetId' in image)) continue
+    const claimed = await claimImageAsset(image.assetId, userId, conversationId)
+    if (!claimed) {
+      throw new Error('图片资产不存在、已被占用或不属于当前用户，请重新上传')
+    }
+    claimedQueuedImages.push({
+      assetId: claimed.assetId,
+      mimeType: claimed.mimeType,
+      width: claimed.width,
+      height: claimed.height,
+    })
+  }
+  const queueReceipt = await enqueueMessage(
+    conversationId,
+    message,
+    claimedQueuedImages.length ? claimedQueuedImages : undefined,
+    holdingRunId,
+    {
+      visibility: 'public',
+      sourceKind: 'user',
+      idempotencyKey: `public-chat-submit:${messageId}`,
+      messageId,
+    },
+  )
+  const latestActiveRun = await getActiveAgentRun(conversationId, userId)
+  if (
+    canAcceptQueuedUserInput(latestActiveRun)
+    && isPublicRootAgentRun(latestActiveRun)
+  ) {
+    const rebound = latestActiveRun.run_id === holdingRunId
+      || await retargetPendingQueuedMessage(
+        queueReceipt.queueId,
+        queueReceipt.messageId,
+        holdingRunId,
+        latestActiveRun.run_id,
+      )
+    if (rebound) {
+      write({
+        type: 'message_queued',
+        queued: true,
+        run_id: latestActiveRun.run_id,
+        conversation_id: conversationId,
+        continuation: false,
+      })
+      write({
+        type: 'run_detached',
+        run_id: latestActiveRun.run_id,
+        conversation_id: conversationId,
+        message: '消息已可靠追加到并发启动的运行。',
+      })
+      releaseTransport?.()
+      wakeAgentRunner()
+      return
+    }
+  }
+
+  // Release only this submission's holding receipt. Never bulk-release the
+  // queue of a preferred Run that may still be cancelling or executing.
+  await releasePendingPublicUserMessageTarget(
+    queueReceipt.queueId,
+    queueReceipt.messageId,
+    holdingRunId,
+  )
+  const continuationRunId = await ensureQueuedPublicContinuation({
+    sourceRun: preferredPublicRoot,
+    conversationId,
+    userId,
+    memoryEnabled,
+    write,
+    releaseTransport,
+  })
+  if (!continuationRunId) {
+    write({
+      type: 'message_queued',
+      queued: true,
+      conversation_id: conversationId,
+      continuation: false,
+      pending_continuation: true,
+    })
   }
 }
 
@@ -320,12 +591,12 @@ export async function POST(req: NextRequest) {
       code: 'conversation_not_found',
     }, { status: 404 })
   }
-  // Memory is a per-project choice. New projects default to enabled, while an
+  // Memory is a per-project choice. New projects default to disabled, while an
   // existing project keeps its persisted choice when a runner or older client
   // omits the field.
   const memoryEnabled = settings?.memory_enabled
     ?? requestedConversation?.settings?.memory_enabled
-    ?? true
+    ?? false
   const effectiveSettings = { ...settings, memory_enabled: memoryEnabled }
 
   // Project Guide selection is an immutable Conversation-creation decision.
@@ -484,6 +755,7 @@ export async function POST(req: NextRequest) {
   // Placeholder until broadcast channel is created. Events queued here are flushed once we know convId.
   const pending: Record<string, unknown>[] = []
   let broadcastId: string | null = null
+  let detachBroadcastSubscriber: (() => void) | null = null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const write = (event: Record<string, any>) => {
     if (broadcastId) {
@@ -491,6 +763,13 @@ export async function POST(req: NextRequest) {
     } else {
       pending.push(event)
     }
+  }
+  const discardOwnedBroadcast = () => {
+    const ownedBroadcastId = broadcastId
+    if (!ownedBroadcastId) return
+    discardBroadcast(ownedBroadcastId)
+    broadcastId = null
+    detachBroadcastSubscriber = null
   }
 
   // Run the async work in the background — the response streams immediately
@@ -518,6 +797,8 @@ export async function POST(req: NextRequest) {
     let liveModelActionId = ''
     let compactionStartedAt: Date | null = null
     let runLeaseValid = false
+    let abortRegistered = false
+    let registeredAbortController: AbortController | null = null
     try {
       // 1. Get or create conversation
       const conversation = conversation_id
@@ -532,12 +813,29 @@ export async function POST(req: NextRequest) {
       // Setup failures (runtime index conflict, profile load, media migration)
       // must still reach the caller as SSE instead of leaving an unattached
       // TransformStream open forever.
+      // Public submissions do not own the Conversation broadcast until their
+      // durable Run wins active_key. Give every HTTP transport a private
+      // channel first: a same-process loser can then enqueue its exact input
+      // without colliding with—or later closing—the winner's execution stream.
+      const initialBroadcastId = internalRunnerRun
+        ? convId
+        : `submission:${convId}:${randomUUID()}`
+      if (
+        internalRunnerRun
+        && hasActiveBroadcast(initialBroadcastId)
+        && getBroadcastRunId(initialBroadcastId) !== internalRunnerRun.run_id
+      ) {
+        // Mongo already granted this Root the execution lease. Any different
+        // Run left in this process registry is stale and must not wedge the
+        // newly dispatched durable owner.
+        discardBroadcast(initialBroadcastId)
+      }
       if (
         !internalRunnerRun
-        || !hasActiveBroadcast(convId)
-        || getBroadcastRunId(convId) !== internalRunnerRun.run_id
+        || !hasActiveBroadcast(initialBroadcastId)
+        || getBroadcastRunId(initialBroadcastId) !== internalRunnerRun.run_id
       ) {
-        createBroadcast(convId)
+        createBroadcast(initialBroadcastId)
       }
       // Bind the durable Run before profile/project/workspace initialization.
       // A browser reconnect can arrive during that setup window; without this
@@ -546,9 +844,9 @@ export async function POST(req: NextRequest) {
       if (internalRunnerRun) {
         bindBroadcastRun(convId, internalRunnerRun.run_id)
       }
-      attachSubscriber(convId, writer)
-      broadcastId = convId
-      for (const ev of pending) broadcastEvent(convId, ev)
+      detachBroadcastSubscriber = attachSubscriber(initialBroadcastId, writer)
+      broadcastId = initialBroadcastId
+      for (const ev of pending) broadcastEvent(initialBroadcastId, ev)
       pending.length = 0
       if (!conversation_id) {
         write({ type: 'conversation_started', conversation_id: convId })
@@ -654,7 +952,20 @@ export async function POST(req: NextRequest) {
           },
         )
         if (!agentRun) {
-          throw new Error('AgentRun could not be resumed because its state changed')
+          const acceptingRun = await getActiveAgentRun(convId, userId)
+          await handoffConcurrentPublicInput({
+            preferredRun: acceptingRun ?? persistedActiveRun,
+            conversationId: convId,
+            userId,
+            message,
+            images,
+            messageId: userMessageId,
+            holdingRunId: `resume-holding:${userMessageId}`,
+            memoryEnabled,
+            write,
+            releaseTransport: discardOwnedBroadcast,
+          })
+          return
         }
         agentRunId = agentRun.run_id
       } else {
@@ -675,7 +986,22 @@ export async function POST(req: NextRequest) {
           })
         } catch (error) {
           if (error instanceof ActiveAgentRunError) {
-            throw new Error(`Conversation already has active run ${error.runId ?? ''}`.trim())
+            const winningRun = error.runId
+              ? await getAgentRun(error.runId, userId)
+              : await getActiveAgentRun(convId, userId)
+            await handoffConcurrentPublicInput({
+              preferredRun: winningRun,
+              conversationId: convId,
+              userId,
+              message,
+              images,
+              messageId: userMessageId,
+              holdingRunId: agentRunId,
+              memoryEnabled,
+              write,
+              releaseTransport: discardOwnedBroadcast,
+            })
+            return
           }
           throw error
         }
@@ -693,14 +1019,28 @@ export async function POST(req: NextRequest) {
         if (!agentRun) throw new Error('Agent Run disappeared while binding its Root identity')
       }
 
-      if (isAgentRunnerEnabled() && !internalRunnerRun) {
+      if (!isAgentRunnerEnabled() && !internalRunnerRun && broadcastId !== convId) {
+        // Inline execution needs the reconnectable Conversation channel, but
+        // only after Mongo has durably selected this request as the winner.
+        // Detach first so discarding the private submission channel cannot
+        // close the writer that is about to follow the execution channel.
+        const submissionBroadcastId = broadcastId
+        detachBroadcastSubscriber?.()
+        detachBroadcastSubscriber = null
+        if (submissionBroadcastId) discardBroadcast(submissionBroadcastId)
+        if (!hasActiveBroadcast(convId)) createBroadcast(convId)
         bindBroadcastRun(convId, agentRunId)
+        detachBroadcastSubscriber = attachSubscriber(convId, writer)
+        broadcastId = convId
+      }
+
+      if (isAgentRunnerEnabled() && !internalRunnerRun) {
+        if (broadcastId) bindBroadcastRun(broadcastId, agentRunId)
         write({ type: 'run_started', run_id: agentRunId, conversation_id: convId })
         if (!conversation_id) {
-          const title = message.length > 30 ? `${message.slice(0, 30)}...` : message
+          const title = conversationTitleFromMessage(message)
           await updateTitle(convId, userId, title)
         }
-        wakeAgentRunner()
         write({
           type: 'run_detached',
           run_id: agentRunId,
@@ -714,7 +1054,8 @@ export async function POST(req: NextRequest) {
         // This channel contains only submission/run_detached events. Remove it
         // immediately so the reconnect endpoint waits for the Runner's rich
         // Root execution stream instead of replaying this completed hand-off.
-        discardBroadcast(convId)
+        discardOwnedBroadcast()
+        wakeAgentRunner()
         return
       }
 
@@ -777,6 +1118,8 @@ export async function POST(req: NextRequest) {
       // The process-local AbortController is only a latency optimization. The
       // persisted cancellation flag remains authoritative across instances.
       registerAbort(convId, abortController, userId)
+      abortRegistered = true
+      registeredAbortController = abortController
       const requireRunLease = (): void => {
         if (!runLeaseValid) throw new AgentRunLeaseLostError(agentRunId)
       }
@@ -1146,20 +1489,29 @@ export async function POST(req: NextRequest) {
             scheduleLiveTextPersistence()
             write({ type: 'text_delta', text: chunk })
           },
-          onToolUseStart(toolName) {
-            write({ type: 'tool_start', tool: toolName })
+          onToolUseStart(toolName, toolUseId?: string) {
+            write({
+              type: 'tool_start',
+              tool: toolName,
+              ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+            })
           },
           // Fired right before tool execution, with full input args resolved.
           // We use this to compute the target file path and emit tool_target
           // SSE so the frontend can flag the matching artifact tab as
           // "Pegasus Spatial is editing this file..." until the tool completes.
-          onToolStart(tool, input) {
+          onToolStart(tool, input, toolUseId?: string) {
             const targetPath = extractTargetPath(tool, input)
             if (targetPath) {
-              write({ type: 'tool_target', tool, target_path: targetPath })
+              write({
+                type: 'tool_target',
+                tool,
+                tool_use_id: toolUseId,
+                target_path: targetPath,
+              })
             }
           },
-          onToolExecuted(tool, input, result) {
+          onToolExecuted(tool, input, result, toolUseId?: string) {
             const summary = summarizeToolCall(tool, input, !!result.is_error)
             toolCallSummaries.push(summary)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1169,6 +1521,7 @@ export async function POST(req: NextRequest) {
               file_path: summary.file_path,
               action: summary.action,
               is_error: summary.is_error,
+              ...(toolUseId ? { tool_use_id: toolUseId } : {}),
             }
             // For Write tool, include content for frontend artifact extraction
             if (tool === 'Write' && !result.is_error) {
@@ -1177,6 +1530,12 @@ export async function POST(req: NextRequest) {
             // For Edit tool, include updated file content for workspace sync
             if (tool === 'Edit' && !result.is_error && result.updatedContent) {
               evt.content = result.updatedContent
+            }
+            // SpatialJobCard renders the durable receipt envelope itself. Keep
+            // it on the live event as well as the persisted tool_result so the
+            // UI cannot briefly resolve GenerateImage as a generic green done.
+            if (parseSpatialToolResult(result.content)) {
+              evt.content = result.content
             }
             write(evt)
             if (
@@ -2163,7 +2522,6 @@ export async function POST(req: NextRequest) {
       // longer written; the Conversation APIs derive their compatibility
       // fields from the latest Run and only fall back for pre-V2 records.
       let runReachedTerminalState = false
-      let runCompletedNormally = false
       if (result.waitingForUser) {
         const statusStored = await setRunStatus(
           agentRunId,
@@ -2224,59 +2582,24 @@ export async function POST(req: NextRequest) {
         })
         if (!statusStored) throw new AgentRunLeaseLostError(agentRunId)
         runReachedTerminalState = true
-        runCompletedNormally = true
       }
       if (runReachedTerminalState) {
         await releaseQueuedMessagesForRun(agentRunId)
       }
-      if (
-        runCompletedNormally
-        && isAgentRunnerEnabled()
-        && await hasQueuedPublicUserMessages(convId)
-      ) {
-        const continuationRunId = newAgentRunId()
+      if (runReachedTerminalState) {
         try {
-          await createAgentRun({
-            runId: continuationRunId,
+          await ensureQueuedPublicContinuation({
+            sourceRun: activeAgentRun,
             conversationId: convId,
             userId,
-            request: {
-              message: buildUntrustedDataReminder('agent_update', {
-                content: 'A user follow-up arrived at the previous Run boundary. Consume the queued public input and respond to it now.',
-              }),
-              settings: {
-                ...activeAgentRun.request.settings,
-                memory_enabled: memoryEnabled,
-              },
-              internal: { kind: 'agent_update' },
-            },
-            startedMessageId: newMessageId(),
-            teamId: activeAgentRun.team_id,
-            agentId: activeAgentRun.agent_id,
-            agentSessionId: activeAgentRun.agent_session_id,
-            trigger: 'message',
-            policyVersion: activeAgentRun.policy_version,
-            rootVisible: true,
-            executionMode: 'conversation',
+            memoryEnabled,
+            write,
+            releaseTransport: discardOwnedBroadcast,
           })
-          console.log(`[chat] Scheduled queued user continuation ${continuationRunId}`)
-          write({
-            type: 'run_detached',
-            run_id: continuationRunId,
-            conversation_id: convId,
-            message: '检测到尚未处理的追加消息，已自动进入下一轮。',
-          })
-          wakeAgentRunner()
         } catch (error) {
-          if (error instanceof ActiveAgentRunError) {
-            // A concurrent public request already opened the continuation and
-            // will claim the same untargeted queue row.
-            wakeAgentRunner()
-          } else {
-            // The user-authored row stays pending and recoverable. Do not turn
-            // an already completed answer into a false terminal failure.
-            console.error('[chat] Failed to schedule queued user continuation:', (error as Error).message)
-          }
+          // The user-authored row stays pending and recoverable. Do not turn
+          // an already completed answer into a false terminal failure.
+          console.error('[chat] Failed to schedule queued user continuation:', (error as Error).message)
         }
       }
 
@@ -2301,7 +2624,7 @@ export async function POST(req: NextRequest) {
 
       // 9. Auto-generate title
       if (!conversation_id) {
-        const title = message.length > 30 ? message.slice(0, 30) + '...' : message
+        const title = conversationTitleFromMessage(message)
         await updateTitle(convId, userId, title)
       }
 
@@ -2516,8 +2839,19 @@ export async function POST(req: NextRequest) {
           if (!runStatePersisted) {
             runLeaseValid = false
           }
-          if (userCancelled || !processInterrupted) {
+          if (runStatePersisted && (userCancelled || !processInterrupted)) {
             await releaseQueuedMessagesForRun(agentRunId)
+            // Keep the outer fatal path equivalent to the normal terminal
+            // path: once a public Root releases its queue, a detached Runner
+            // successor must be scheduled (or the concurrent winner reused).
+            await ensureQueuedPublicContinuation({
+              sourceRun: agentRun,
+              conversationId: convId,
+              userId,
+              memoryEnabled,
+              write,
+              releaseTransport: discardOwnedBroadcast,
+            })
           }
         } catch (runError) {
           console.error('[agent-run] Failed to persist terminal error:', (runError as Error).message)
@@ -2558,8 +2892,8 @@ export async function POST(req: NextRequest) {
       if (leaseHeartbeat) clearInterval(leaseHeartbeat)
       if (livePersistTimer) clearTimeout(livePersistTimer)
       await livePersistPromise
-      if (convId) {
-        unregisterAbort(convId)
+      if (convId && abortRegistered) {
+        unregisterAbort(convId, registeredAbortController ?? undefined)
       }
       if (broadcastId) {
         // Close the broadcast channel — all subscribers (this request + any reconnected tabs)

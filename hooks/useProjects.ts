@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import type { FileEntry } from '@/lib/workspace/types'
+import { cleanConversationTitle } from '@/lib/chat/conversation-title'
 
 export interface ProjectSummary {
   conversation_id: string
@@ -46,7 +47,11 @@ export function useProjects(): UseProjectsResult {
       const res = await fetch(`/api/projects?${params}`)
       if (res.ok) {
         const data = await res.json()
-        setProjects(prev => append ? [...prev, ...data.projects] : data.projects)
+        const normalizedProjects = (data.projects as ProjectSummary[]).map(project => ({
+          ...project,
+          title: cleanConversationTitle(project.title),
+        }))
+        setProjects(prev => append ? [...prev, ...normalizedProjects] : normalizedProjects)
         setTotal(data.total)
         setPage(data.page)
         setTotalPages(data.totalPages)

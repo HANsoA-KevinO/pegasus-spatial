@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react'
 import type { DisplayPart } from '@/lib/types'
+import { spatialArtifactDisplayName } from '@/lib/spatial/presentation-name'
 import { isInternalWorkspacePath } from '@/lib/workspace/path-policy'
 import type {
   FileEntry,
@@ -64,7 +65,8 @@ const LITERATURE_FILE_LABELS: Readonly<Record<string, string>> = {
   'parsed/parser-provenance.json': '解析记录',
 }
 
-function labelFor(path: string): string {
+function labelFor(path: string, type: WorkspaceArtifact['type'] = inferType(path)): string {
+  if (type === 'image' || type === 'model3d') return spatialArtifactDisplayName(path, type)
   if (path.startsWith('references/papers/')) {
     const directoryRelative = path.split('/').slice(3).join('/')
     const literatureLabel = LITERATURE_FILE_LABELS[directoryRelative]
@@ -122,10 +124,11 @@ export function useWorkspaceArtifacts(parts: DisplayPart[]): WorkspaceArtifact[]
       ) continue
       const path = normalizePath(part.file_path)
       if (isInternalWorkspacePath(path)) continue
+      const type = inferType(path)
       artifacts.set(path, {
         path,
-        label: labelFor(path),
-        type: inferType(path),
+        label: labelFor(path, type),
+        type,
         content: part.content,
       })
     }
@@ -148,7 +151,7 @@ export function buildArtifactsFromDB(doc: ConversationArtifactFields): Workspace
       if (entry.storage === 'asset' && entry.kind === 'raster') {
         return [{
           path,
-          label: labelFor(path),
+          label: labelFor(path, 'image'),
           type: 'image',
           content: '',
           mimeType: entry.mime_type,
@@ -162,7 +165,7 @@ export function buildArtifactsFromDB(doc: ConversationArtifactFields): Workspace
         const type = inferType(path)
         return [{
           path,
-          label: entry.filename || labelFor(path),
+          label: type === 'model3d' ? labelFor(path, type) : (entry.filename || labelFor(path, type)),
           type: type === 'model3d' || type === 'world' ? type : 'document',
           content: '',
           mimeType: entry.mime_type,

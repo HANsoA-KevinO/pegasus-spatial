@@ -6,11 +6,11 @@ import { useModels } from '@/hooks/useModels'
 import type { ImageAttachment, ModelProvider } from '@/lib/types'
 import { buildBrowserMediaUrl } from '@/lib/media/browser-url'
 import { ProgressiveImage } from '@/components/media/ProgressiveImage'
-import { BrandMark } from '@/components/shell/BrandMark'
+import { FlowingLightFrame } from '@/components/effects/FlowingLightFrame'
 
 const DEFAULT_CREATION_CONTEXT = '开放空间创作'
-const QUESTION_MIN_HEIGHT = 104
-const QUESTION_MAX_HEIGHT = 220
+const QUESTION_MIN_HEIGHT = 156
+const QUESTION_MAX_HEIGHT = 320
 const MAX_ATTACHMENTS = 6
 const MAX_IMAGE_FILE_SIZE = 20 * 1024 * 1024
 const MAX_TEXT_FILE_SIZE = 256 * 1024
@@ -149,7 +149,7 @@ export function TaskWorkbench({ onSubmit }: {
 
   useEffect(() => {
     if (hasUnsupportedImages) {
-      setAttachmentError('当前模型不支持图片。附件已保留，请在“推理模型”中切换到多模态模型。')
+      setAttachmentError('当前模型不支持图片。附件已保留，请切换到支持图片的模型。')
     } else if (attachmentError.startsWith('当前模型不支持图片')) {
       setAttachmentError('')
     }
@@ -257,35 +257,31 @@ export function TaskWorkbench({ onSubmit }: {
 
   return (
     <div className="relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-transparent px-6 py-7 lg:px-12 lg:py-9">
-      <div className="relative mx-auto w-full max-w-4xl">
-        <section className="rounded-[12px] border border-[var(--paper-edge)] bg-[var(--paper)] p-5 shadow-[var(--shadow-paper)] lg:p-7">
-          <header className="mb-5 flex items-center gap-3">
-            <BrandMark className="h-10 w-10 shrink-0" />
-            <h1 className="text-[28px] font-bold tracking-[-0.035em] text-ink lg:text-[31px]">描述一个想进入的世界</h1>
-          </header>
-
-          <div
-            id="workbench-composer"
-            data-fluid-interaction="ignore"
-            onDrop={handleDrop}
-            onDragOver={event => event.preventDefault()}
-            className="overflow-visible rounded-[11px] border border-ghost-border/70 bg-surface transition-[border-color,box-shadow] focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/15"
-          >
-              <textarea
-                ref={questionRef}
-                aria-label="空间创作描述"
-                value={question}
-                onChange={event => setQuestion(event.target.value)}
-                onKeyDown={event => {
-                  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                    event.preventDefault()
-                    submit()
-                  }
-                }}
-                placeholder="描述你想进入的空间。可以补充用途、氛围、材质、光线，以及需要保留或避免的元素。"
-                className="block w-full resize-none overflow-y-hidden rounded-t-[10px] bg-transparent px-3.5 pb-2 pt-3 text-[15px] leading-6 text-ink outline-none placeholder:text-ink-muted/60 focus:placeholder:text-transparent"
-                style={{ minHeight: QUESTION_MIN_HEIGHT, maxHeight: QUESTION_MAX_HEIGHT }}
-              />
+      <div className="relative mx-auto w-full max-w-5xl">
+        <FlowingLightFrame
+          id="workbench-composer"
+          data-fluid-interaction="ignore"
+          onDrop={handleDrop}
+          onDragOver={event => event.preventDefault()}
+          className="overflow-visible rounded-[14px] border border-ghost-border/70 bg-surface shadow-[var(--shadow-paper)] transition-[border-color,box-shadow] focus-within:border-primary/70 focus-within:ring-4 focus-within:ring-primary/15"
+        >
+              <div className="relative">
+                <textarea
+                  ref={questionRef}
+                  aria-label="描述你想创造的场景、物体或任何想法"
+                  placeholder="描述你想创造的场景、物体或任何想法…"
+                  value={question}
+                  onChange={event => setQuestion(event.target.value)}
+                  onKeyDown={event => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                      event.preventDefault()
+                      submit()
+                    }
+                  }}
+                  className="relative z-[2] block w-full resize-none overflow-y-hidden rounded-t-[10px] bg-transparent px-5 pb-3 pt-4 text-[16px] leading-7 tracking-[0.012em] text-ink outline-none placeholder:text-ink-faint dark:text-white/95"
+                  style={{ minHeight: QUESTION_MIN_HEIGHT, maxHeight: QUESTION_MAX_HEIGHT }}
+                />
+              </div>
 
               {attachments.length > 0 && (
                 <div className="grid gap-2 border-t border-ghost-border/55 px-3 py-2.5 sm:grid-cols-2">
@@ -328,12 +324,12 @@ export function TaskWorkbench({ onSubmit }: {
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploadingCount > 0 || attachments.length >= MAX_ATTACHMENTS}
                   title="支持图片、TXT、Markdown、CSV、JSON 与常见代码文件"
-                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-[9px] border border-ghost-border/70 bg-surface-low px-3 text-xs font-medium text-ink-secondary transition hover:border-primary/30 hover:text-ink disabled:cursor-wait disabled:opacity-55"
+                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-[9px] border border-ghost-border/70 bg-surface-low px-3 text-xs font-medium text-ink-secondary transition hover:border-primary/30 hover:text-ink disabled:cursor-wait disabled:opacity-55 dark:text-white/80 dark:hover:text-white"
                 >
                   <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.65} aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" d="m7.25 10.75 4.9-4.9a2.3 2.3 0 1 1 3.25 3.25l-6.55 6.55a4 4 0 0 1-5.66-5.66l6.2-6.2" />
                   </svg>
-                  添加参考文件
+                  参考文件
                 </button>
                 <input
                   ref={fileInputRef}
@@ -348,7 +344,7 @@ export function TaskWorkbench({ onSubmit }: {
                   type="button"
                   onClick={() => setMemoryEnabled(!memoryEnabled)}
                   title={memoryEnabled ? '跨对话记忆已开启' : '跨对话记忆已关闭'}
-                  className={`flex h-9 shrink-0 items-center gap-1.5 rounded-[9px] border px-3 text-xs font-medium transition ${memoryEnabled ? 'border-primary/30 bg-primary/10 text-primary' : 'border-ghost-border/70 bg-surface-low text-ink-secondary hover:border-primary/30 hover:text-ink'}`}
+                  className={`flex h-9 shrink-0 items-center gap-1.5 rounded-[9px] border px-3 text-xs font-medium transition ${memoryEnabled ? 'border-primary/30 bg-primary/10 text-primary' : 'border-ghost-border/70 bg-surface-low text-ink-secondary hover:border-primary/30 hover:text-ink dark:text-white/80 dark:hover:text-white'}`}
                 >
                   <span className="font-mono text-[13px]" aria-hidden="true">⌬</span>
                   记忆 {memoryEnabled ? 'ON' : 'OFF'}
@@ -357,24 +353,18 @@ export function TaskWorkbench({ onSubmit }: {
                 <div ref={modelControlRef} className="relative min-w-0">
                   <button
                     type="button"
+                    aria-label={`选择模型，当前 ${selectedModelName}`}
                     aria-expanded={modelOptionsOpen}
                     aria-controls="workbench-model-options"
                     onClick={() => setModelOptionsOpen(current => !current)}
-                    className={`flex h-9 max-w-[260px] items-center gap-2 rounded-[9px] border px-3 text-left text-xs font-medium transition ${modelOptionsOpen ? 'border-primary/45 bg-primary/8 text-primary' : 'border-ghost-border/70 bg-surface-low text-ink-secondary hover:border-primary/30 hover:text-ink'}`}
+                    className={`flex h-9 max-w-[260px] items-center gap-2 rounded-[9px] border px-3 text-left text-xs font-medium transition ${modelOptionsOpen ? 'border-primary/45 bg-primary/8 text-primary' : 'border-ghost-border/70 bg-surface-low text-ink-secondary hover:border-primary/30 hover:text-ink dark:text-white/80 dark:hover:text-white'}`}
                   >
-                    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
-                      <path strokeLinecap="round" d="M3 5h14M5.5 10h9M8 15h4" />
-                      <circle cx="7" cy="5" r="1.25" fill="currentColor" stroke="none" />
-                      <circle cx="12" cy="10" r="1.25" fill="currentColor" stroke="none" />
-                      <circle cx="10" cy="15" r="1.25" fill="currentColor" stroke="none" />
-                    </svg>
-                    <span className="shrink-0">推理模型</span>
-                    <span className="truncate text-ink-muted">{selectedModelName}</span>
+                    <span className="truncate">{selectedModelName}</span>
                     <svg className={`h-3.5 w-3.5 shrink-0 transition-transform ${modelOptionsOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m5.5 7.75 4.5 4.5 4.5-4.5" /></svg>
                   </button>
 
                   {modelOptionsOpen && (
-                    <div id="workbench-model-options" role="listbox" aria-label="推理模型" className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(360px,calc(100vw-4rem))] overflow-y-auto rounded-[10px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-1.5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
+                    <div id="workbench-model-options" role="listbox" aria-label="选择模型" className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-[min(360px,calc(100vw-4rem))] overflow-y-auto rounded-[10px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-1.5 shadow-[var(--shadow-glass)] backdrop-blur-xl">
                       {modelsLoading ? (
                         <p className="px-3 py-4 text-center text-xs text-ink-muted">正在读取模型…</p>
                       ) : models.map(item => {
@@ -406,12 +396,10 @@ export function TaskWorkbench({ onSubmit }: {
                 </div>
 
                 <button type="button" onClick={submit} disabled={!canSubmit} className="ml-auto rounded-[9px] bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-lg shadow-primary/15 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40">
-                  开始空间创作
+                  开始创作
                 </button>
               </div>
-            </div>
-        </section>
-
+        </FlowingLightFrame>
       </div>
     </div>
   )

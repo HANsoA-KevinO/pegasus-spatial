@@ -554,3 +554,48 @@ export async function hasQueuedPublicUserMessages(conversationId: string): Promi
   })
   return count > 0
 }
+
+/**
+ * Reserve one exact untargeted public user receipt for a continuation candidate.
+ * The candidate is not runnable yet, so no consumer can claim this row between
+ * the durable queue decision and AgentRun creation.
+ */
+export async function reserveNextPublicUserMessageForRun(
+  conversationId: string,
+  candidateRunId: string,
+): Promise<IdempotentQueuedMessageReceipt | null> {
+  await connectDB()
+  const document = await QueuedMessage.findOneAndUpdate(
+    {
+      conversation_id: conversationId,
+      target_run_id: null,
+      status: 'pending',
+      visibility: 'public',
+      source_kind: 'user',
+    },
+    { $set: { target_run_id: candidateRunId } },
+    { sort: { created_at: 1 }, returnDocument: 'after' },
+  )
+  return document ? receipt(document) : null
+}
+
+/** Release only one still-pending public receipt from its holding target. */
+export async function releasePendingPublicUserMessageTarget(
+  queueId: string,
+  messageId: string,
+  targetRunId: string,
+): Promise<boolean> {
+  await connectDB()
+  const result = await QueuedMessage.updateOne(
+    {
+      _id: queueId,
+      message_id: messageId,
+      target_run_id: targetRunId,
+      status: 'pending',
+      visibility: 'public',
+      source_kind: 'user',
+    },
+    { $set: { target_run_id: null } },
+  )
+  return result.modifiedCount === 1
+}

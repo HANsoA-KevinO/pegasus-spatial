@@ -105,7 +105,7 @@ function ReaderTabs({
 }) {
   if (tabs.length <= 1) return null
   return (
-    <nav aria-label="文献视图" className="flex flex-wrap items-center gap-1 rounded-xl border border-outline-variant/12 bg-surface-low/70 p-1">
+    <nav aria-label="文献视图" className="flex flex-wrap items-center gap-1">
       {tabs.map(tab => {
         const selected = tab.path === activePath
         return (
@@ -162,7 +162,7 @@ function PaperHeader({
   const remainingAuthorRecords = Math.max(0, (metadata?.authors.length ?? 0) - visibleAuthors.length)
 
   return (
-    <header className="border-b border-outline-variant/15 bg-[color-mix(in_srgb,var(--surface-container-lowest)_92%,var(--primary)_2%)] px-5 py-5 sm:px-8 sm:py-6">
+    <header className="px-5 py-5 sm:px-8 sm:py-6">
       <div className="mx-auto max-w-[820px]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -240,8 +240,8 @@ function StructuredFulltextView({
   }
 
   return (
-    <main className="bg-[color-mix(in_srgb,var(--surface-container-low)_70%,transparent)] px-2 py-3 sm:px-4 sm:py-5 lg:px-6">
-      <article className="mx-auto max-w-[820px] rounded-none border-y border-outline-variant/12 bg-surface-lowest px-5 py-5 shadow-none sm:rounded-[6px] sm:border sm:px-8 sm:py-8 sm:shadow-[0_8px_32px_rgba(40,48,64,0.035)] lg:px-12 lg:py-10">
+    <main className="px-2 py-3 sm:px-4 sm:py-5 lg:px-6">
+      <article className="mx-auto max-w-[820px] px-5 py-5 sm:px-8 sm:py-8 lg:px-12 lg:py-10">
         <div className="mx-auto max-w-[72ch]">
           <ScientificMarkdownAside>
             {source === 'sciverse' ? (
@@ -252,7 +252,7 @@ function StructuredFulltextView({
           </ScientificMarkdownAside>
           {sections.frontMatter && (
             <details
-              className="group mt-3 border-y border-outline-variant/16 bg-surface-lowest"
+              className="group mt-3 border-y border-outline-variant/16"
               data-testid="publisher-front-matter"
             >
               <summary className="flex cursor-pointer list-none items-center gap-2 py-2 font-sans text-[10.5px] font-semibold tracking-[0.015em] text-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 [&::-webkit-details-marker]:hidden">
@@ -290,8 +290,8 @@ function OriginalPdfView({ artifact, conversationId }: {
   }
   const baseUrl = `/api/conversations/${encodeURIComponent(conversationId)}/files/binary?path=${encodeURIComponent(artifact.path)}&v=${encodeURIComponent(artifact.sha256)}`
   return (
-    <main className="flex min-h-[700px] flex-1 flex-col bg-[#e8e9eb]">
-      <div className="flex shrink-0 items-center justify-between border-b border-black/10 bg-surface-lowest px-5 py-2.5 text-[11px] text-ink-muted">
+    <main className="flex min-h-[700px] flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-between px-5 py-2.5 text-[11px] text-ink-muted">
         <span>原始文件 · {formatBytes(artifact.sizeBytes) ?? '大小未知'}</span>
         <a href={`${baseUrl}&download=1`} className="rounded-lg bg-primary px-3 py-1.5 font-semibold text-on-primary transition hover:opacity-90">下载 PDF</a>
       </div>
@@ -375,8 +375,8 @@ function RecordPage({ title, description, children }: {
   children: ReactNode
 }) {
   return (
-    <main className="bg-[color-mix(in_srgb,var(--surface-container-low)_70%,transparent)] px-4 py-8 sm:px-8">
-      <section className="mx-auto max-w-[860px] rounded-[18px] border border-outline-variant/12 bg-surface-lowest px-7 py-8 shadow-[0_16px_50px_rgba(40,48,64,0.045)] sm:px-10">
+    <main className="px-4 py-8 sm:px-8">
+      <section className="mx-auto max-w-[860px] px-7 py-8 sm:px-10">
         <h2 className="text-xl font-semibold tracking-[-0.018em] text-ink">{title}</h2>
         <p className="mt-2 text-xs leading-5 text-ink-muted">{description}</p>
         <div className="mt-6">{children}</div>
@@ -387,8 +387,8 @@ function RecordPage({ title, description, children }: {
 
 function ReaderMessage({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <main className="flex min-h-80 items-center justify-center bg-surface-low/40 p-8 text-center">
-      <div className="max-w-md rounded-2xl border border-outline-variant/15 bg-surface-lowest px-8 py-7">
+    <main className="flex min-h-80 items-center justify-center p-8 text-center">
+      <div className="max-w-md px-8 py-7">
         <h2 className="text-sm font-semibold text-ink">{title}</h2>
         <p className="mt-2 text-xs leading-6 text-ink-muted">{children}</p>
       </div>
@@ -466,7 +466,7 @@ export function LiteraturePaperReader({
     || (provenanceLazy.isLoading && !provenanceRaw)
 
   return (
-    <section className="flex min-h-full flex-col bg-surface-lowest/60" data-testid="literature-paper-reader">
+    <section className="flex min-h-full flex-col" data-testid="literature-paper-reader" data-workspace-content="unframed">
       <PaperHeader
         source={identity.source}
         role={identity.role}

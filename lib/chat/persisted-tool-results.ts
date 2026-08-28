@@ -28,7 +28,9 @@ export function attachPersistedToolResult(
     parts[index] = {
       ...part,
       pending: false,
-      ...(result.is_error ? { is_error: true } : {}),
+      // Persistence is authoritative during hydration/reconnect. Explicitly
+      // clear a stale live error when the exact durable result succeeded.
+      is_error: result.is_error === true,
       ...(content !== undefined
         ? { content }
         : {}),

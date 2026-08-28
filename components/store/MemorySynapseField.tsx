@@ -10,6 +10,7 @@
  * MULTIPLY 混合在浅色底不糊;reduced-motion 渲染一帧静态。
  */
 import { useEffect, useRef } from 'react'
+import { useTheme } from 'next-themes'
 import styles from './MemorySynapseField.module.css'
 
 type Fam = 0 | 1 | 2
@@ -52,6 +53,7 @@ function makeNoise(rand: () => number) {
 export function MemorySynapseField({ className = '' }: { className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
+  const { resolvedTheme } = useTheme()
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -62,6 +64,9 @@ export function MemorySynapseField({ className = '' }: { className?: string }) {
 
     const reduced = typeof window !== 'undefined'
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const isDark = resolvedTheme === 'dark'
+      || (resolvedTheme === undefined && document.documentElement.classList.contains('dark'))
+    host.dataset.synapseTheme = isDark ? 'dark' : 'light'
 
     // 从 design tokens 取色(转 rgb 供 canvas alpha 合成)
     const css = getComputedStyle(document.documentElement)
@@ -74,16 +79,23 @@ export function MemorySynapseField({ className = '' }: { className?: string }) {
       const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16)
       return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
     }
+    // 这些 token 只由 Canvas 在运行时读取；部分 CSS 优化器会把“未被 CSS
+    // 声明消费”的自定义属性裁掉，因此每种主题都保留同值兜底，避免生产构建
+    // 意外退回浅色调色板。
+    const famFallbacks = isDark
+      ? ['#b8c8a9', '#b1c4ef', '#e1b97f']
+      : ['#74806a', '#5d77ad', '#b58a57']
     const fams: [number, number, number][] = [
-      hexToRgb(read('--mem-fam-a', '#74806a')),
-      hexToRgb(read('--mem-fam-b', read('--brand-primary', '#d75a3b'))),
-      hexToRgb(read('--mem-fam-c', '#b58a57')),
+      hexToRgb(read('--mem-fam-a', famFallbacks[0]!)),
+      hexToRgb(read('--mem-fam-b', famFallbacks[1]!)),
+      hexToRgb(read('--mem-fam-c', famFallbacks[2]!)),
     ]
-    const linkRgb = hexToRgb(read('--mem-link', '#a66c58'))
+    const linkRgb = hexToRgb(read('--mem-link', isDark ? '#8fa5d4' : '#a66c58'))
     const bgRgb = hexToRgb(read('--paper', '#fcfbf7'))
-    const fieldBlend: GlobalCompositeOperation = 'multiply'
-    const boost = 1
-    const boostFill = 1
+    const fieldBlend: GlobalCompositeOperation = isDark ? 'screen' : 'multiply'
+    const boost = isDark ? 1.85 : 1
+    const boostFill = isDark ? 1.4 : 1
+    const linkWidth = isDark ? 0.9 : 0.75
     const trailCover = 56 / 255
 
     let width = host.clientWidth
@@ -204,7 +216,7 @@ export function MemorySynapseField({ className = '' }: { className?: string }) {
       for (const [i, j, d] of links) {
         const a = (52 - (d / LINK_D) * 45) * boost
         ctx.strokeStyle = `rgba(${linkRgb[0]},${linkRgb[1]},${linkRgb[2]},${Math.min(1, a / 255)})`
-        ctx.lineWidth = 0.75
+        ctx.lineWidth = linkWidth
         ctx.beginPath()
         ctx.moveTo(nodes[i]!.x, nodes[i]!.y)
         ctx.lineTo(nodes[j]!.x, nodes[j]!.y)
@@ -264,6 +276,12 @@ export function MemorySynapseField({ className = '' }: { className?: string }) {
       for (const n of nodes) {
         const c = fams[n.fam]!
         const pulse = 1 + Math.sin(t * 1.4 + n.seed) * 0.16
+        if (isDark) {
+          ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},0.14)`
+          ctx.beginPath()
+          ctx.arc(n.x, n.y, n.r * pulse * 3.2, 0, Math.PI * 2)
+          ctx.fill()
+        }
         ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${Math.min(1, (120 * boostFill) / 255)})`
         ctx.beginPath()
         ctx.arc(n.x, n.y, n.r * pulse, 0, Math.PI * 2)
@@ -302,7 +320,7 @@ export function MemorySynapseField({ className = '' }: { className?: string }) {
     const ro = new ResizeObserver(() => { resize(); paintBase(1) })
     ro.observe(host)
     return () => { cancelAnimationFrame(raf); ro.disconnect() }
-  }, [])
+  }, [resolvedTheme])
 
   return (
     <div ref={hostRef} className={`${styles.synapseHost} ${className}`} aria-hidden>

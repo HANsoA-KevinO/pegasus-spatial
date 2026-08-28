@@ -100,11 +100,35 @@ function decodeImageDataUrl(
   maxBytes: number,
 ): { buffer: Buffer; mimeType: string } | null {
   if (typeof value !== 'string') return null
-  const match = value.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([^\s]+)$/i)
+  const match = value.trim().match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([^\s]+)$/i)
   if (!match) return null
 
-  const mimeType = match[1].toLowerCase()
+  const mimeType = match[1].toLowerCase() === 'image/jpg'
+    ? 'image/jpeg'
+    : match[1].toLowerCase()
   const encoded = match[2]
+  return decodeImageBase64(encoded, mimeType, maxBytes)
+}
+
+function decodeImageBase64(
+  value: unknown,
+  mimeTypeValue: unknown,
+  maxBytes: number,
+): { buffer: Buffer; mimeType: string } | null {
+  if (typeof value !== 'string') return null
+  const encoded = value.trim()
+  const explicitMimeType = typeof mimeTypeValue === 'string'
+    ? mimeTypeValue.trim().toLowerCase()
+    : ''
+  const declaredMimeType = explicitMimeType === 'image/jpg'
+    ? 'image/jpeg'
+    : explicitMimeType
+  if (declaredMimeType && !SUPPORTED_IMAGE_MIME_TYPES.has(declaredMimeType)) {
+    throw new ImageGenerationProviderError('NewAPI 返回了不支持的图片类型', {
+      code: 'invalid_provider_image',
+      requestMayHaveBeenAccepted: true,
+    })
+  }
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) || encoded.length % 4 === 1) {
     throw new ImageGenerationProviderError('NewAPI 返回了无效的图片 Base64', {
       code: 'invalid_provider_image',
@@ -130,15 +154,384 @@ function decodeImageDataUrl(
       requestMayHaveBeenAccepted: true,
     })
   }
-  return { buffer, mimeType }
+
+  const detectedMimeType = detectImageMimeType(buffer)
+  if (!detectedMimeType || (declaredMimeType && declaredMimeType !== detectedMimeType)) {
+    throw new ImageGenerationProviderError('NewAPI 返回的图片类型与文件内容不一致', {
+      code: 'invalid_provider_image',
+      requestMayHaveBeenAccepted: true,
+    })
+  }
+  return { buffer, mimeType: detectedMimeType }
 }
 
-function imageUrlFromPart(part: unknown): unknown {
-  if (!part || typeof part !== 'object') return undefined
-  const imageUrl = (part as { image_url?: unknown }).image_url
-  if (typeof imageUrl === 'string') return imageUrl
-  if (!imageUrl || typeof imageUrl !== 'object') return undefined
-  return (imageUrl as { url?: unknown }).url
+function detectImageMimeType(buffer: Buffer): string | null {
+  if (
+    buffer.length >= 8
+    && buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+    && buffer[4] === 0x0d
+    && buffer[5] === 0x0a
+    && buffer[6] === 0x1a
+    && buffer[7] === 0x0a
+  ) {
+    return 'image/png'
+  }
+  if (
+    buffer.length >= 3
+    && buffer[0] === 0xff
+    && buffer[1] === 0xd8
+    && buffer[2] === 0xff
+  ) {
+    return 'image/jpeg'
+  }
+  if (
+    buffer.length >= 12
+    && buffer.toString('ascii', 0, 4) === 'RIFF'
+    && buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) {
+    return 'image/webp'
+  }
+  if (
+    buffer.length >= 6
+    && (buffer.toString('ascii', 0, 6) === 'GIF87a' || buffer.toString('ascii', 0, 6) === 'GIF89a')
+  ) {
+    return 'image/gif'
+  }
+  return null
+}
+
+type ProviderRecord = Record<string, unknown>
+
+interface EncodedImageCandidate {
+  value: unknown
+  mimeType?: unknown
+  allowRawBase64: boolean
+}
+
+interface CandidateCollection {
+  candidates: EncodedImageCandidate[]
+  schemaInvalid: boolean
+  sawChatMessage: boolean
+}
+
+function isProviderRecord(value: unknown): value is ProviderRecord {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function candidateMimeType(record: ProviderRecord, inherited?: unknown): unknown {
+  return record.mime_type ?? record.media_type ?? record.mimeType ?? inherited
+}
+
+function collectUrlValue(
+  value: unknown,
+  state: CandidateCollection,
+  mimeType?: unknown,
+): void {
+  if (typeof value === 'string') {
+    state.candidates.push({ value, mimeType, allowRawBase64: false })
+    return
+  }
+  if (!isProviderRecord(value)) {
+    if (value !== undefined && value !== null) state.schemaInvalid = true
+    return
+  }
+
+  const nestedMimeType = candidateMimeType(value, mimeType)
+  if (value.b64_json !== undefined) {
+    state.candidates.push({ value: value.b64_json, mimeType: nestedMimeType, allowRawBase64: true })
+  }
+  if (value.image_base64 !== undefined) {
+    state.candidates.push({ value: value.image_base64, mimeType: nestedMimeType, allowRawBase64: true })
+  }
+  if (value.base64 !== undefined) {
+    state.candidates.push({ value: value.base64, mimeType: nestedMimeType, allowRawBase64: true })
+  }
+  if (value.url !== undefined) {
+    if (typeof value.url === 'string') {
+      state.candidates.push({ value: value.url, mimeType: nestedMimeType, allowRawBase64: false })
+    } else {
+      state.schemaInvalid = true
+    }
+  }
+}
+
+function collectImageValue(
+  value: unknown,
+  state: CandidateCollection,
+  options: { allowRawString: boolean; mimeType?: unknown },
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectImageValue(item, state, options)
+    return
+  }
+  if (typeof value === 'string') {
+    state.candidates.push({
+      value,
+      mimeType: options.mimeType,
+      allowRawBase64: options.allowRawString,
+    })
+    return
+  }
+  if (!isProviderRecord(value)) {
+    if (value !== undefined && value !== null) state.schemaInvalid = true
+    return
+  }
+
+  const mimeType = candidateMimeType(value, options.mimeType)
+  if (value.b64_json !== undefined) {
+    state.candidates.push({ value: value.b64_json, mimeType, allowRawBase64: true })
+  }
+  if (value.image_base64 !== undefined) {
+    state.candidates.push({ value: value.image_base64, mimeType, allowRawBase64: true })
+  }
+  if (
+    value.base64 !== undefined
+    && (
+      options.allowRawString
+      || (typeof value.type === 'string' && /image/i.test(value.type))
+    )
+  ) {
+    state.candidates.push({ value: value.base64, mimeType, allowRawBase64: true })
+  }
+  if (value.url !== undefined) collectUrlValue(value.url, state, mimeType)
+  if (value.image_url !== undefined) collectUrlValue(value.image_url, state, mimeType)
+
+  if (value.source !== undefined) {
+    if (isProviderRecord(value.source)) {
+      const sourceMimeType = candidateMimeType(value.source, mimeType)
+      if (value.source.type === 'base64' && value.source.data !== undefined) {
+        state.candidates.push({
+          value: value.source.data,
+          mimeType: sourceMimeType,
+          allowRawBase64: true,
+        })
+      }
+      collectImageValue(value.source, state, {
+        allowRawString: true,
+        mimeType: sourceMimeType,
+      })
+    } else if (value.source !== null) {
+      state.schemaInvalid = true
+    }
+  }
+
+  if (value.image !== undefined) {
+    collectImageValue(value.image, state, { allowRawString: true, mimeType })
+  }
+  if (
+    value.data !== undefined
+    && typeof value.type === 'string'
+    && /(?:^|_)image$|base64/i.test(value.type)
+  ) {
+    state.candidates.push({ value: value.data, mimeType, allowRawBase64: true })
+  }
+}
+
+function collectContent(
+  value: unknown,
+  state: CandidateCollection,
+  inheritedMimeType?: unknown,
+): void {
+  if (Array.isArray(value)) {
+    for (const part of value) collectContent(part, state, inheritedMimeType)
+    return
+  }
+  if (typeof value === 'string') {
+    // Plain model text is not image bytes. A direct Data URL remains a valid
+    // image content part, but arbitrary base64-looking prose must not be used.
+    state.candidates.push({ value, mimeType: inheritedMimeType, allowRawBase64: false })
+    return
+  }
+  if (!isProviderRecord(value)) {
+    if (value !== undefined && value !== null) state.schemaInvalid = true
+    return
+  }
+
+  const mimeType = candidateMimeType(value, inheritedMimeType)
+  collectImageValue(value, state, { allowRawString: false, mimeType })
+  if (value.content !== undefined) collectContent(value.content, state, mimeType)
+}
+
+function collectPayloadCandidates(payload: ProviderRecord): CandidateCollection {
+  const state: CandidateCollection = {
+    candidates: [],
+    schemaInvalid: false,
+    sawChatMessage: false,
+  }
+
+  if (payload.choices !== undefined) {
+    const choices = Array.isArray(payload.choices)
+      ? payload.choices
+      : isProviderRecord(payload.choices)
+        ? [payload.choices]
+        : []
+    if (!Array.isArray(payload.choices) && !isProviderRecord(payload.choices)) {
+      state.schemaInvalid = true
+    }
+    for (const choice of choices) {
+      if (!isProviderRecord(choice)) {
+        state.schemaInvalid = true
+        continue
+      }
+      let sawSupportedChoiceField = false
+      if (choice.message !== undefined) {
+        sawSupportedChoiceField = true
+        if (!isProviderRecord(choice.message)) {
+          state.schemaInvalid = true
+        } else {
+          state.sawChatMessage = true
+          if (choice.message.images !== undefined) {
+            collectImageValue(choice.message.images, state, { allowRawString: true })
+          }
+          if (choice.message.content !== undefined) {
+            collectContent(choice.message.content, state)
+          }
+        }
+      }
+      if (choice.images !== undefined) {
+        sawSupportedChoiceField = true
+        collectImageValue(choice.images, state, { allowRawString: true })
+      }
+      if (choice.content !== undefined) {
+        sawSupportedChoiceField = true
+        collectContent(choice.content, state)
+      }
+      if (!sawSupportedChoiceField) state.schemaInvalid = true
+    }
+  }
+
+  if (payload.images !== undefined) {
+    collectImageValue(payload.images, state, { allowRawString: true })
+  }
+  if (payload.image !== undefined) {
+    collectImageValue(payload.image, state, { allowRawString: true })
+  }
+  if (payload.content !== undefined) collectContent(payload.content, state)
+
+  if (payload.data !== undefined) {
+    if (Array.isArray(payload.data) || isProviderRecord(payload.data)) {
+      collectImageValue(payload.data, state, { allowRawString: false })
+    } else {
+      state.schemaInvalid = true
+    }
+  }
+
+  if (payload.output !== undefined) {
+    const output = Array.isArray(payload.output)
+      ? payload.output
+      : isProviderRecord(payload.output)
+        ? [payload.output]
+        : []
+    if (!Array.isArray(payload.output) && !isProviderRecord(payload.output)) {
+      state.schemaInvalid = true
+    }
+    for (const item of output) {
+      if (!isProviderRecord(item)) {
+        state.schemaInvalid = true
+        continue
+      }
+      const mimeType = candidateMimeType(item)
+      collectImageValue(item, state, { allowRawString: false, mimeType })
+      if (item.type === 'image_generation_call' && item.result !== undefined) {
+        state.candidates.push({ value: item.result, mimeType, allowRawBase64: true })
+      }
+      if (item.content !== undefined) collectContent(item.content, state, mimeType)
+    }
+  }
+
+  return state
+}
+
+const MAX_SUMMARY_DEPTH = 5
+const MAX_SUMMARY_KEYS = 10
+const MAX_SUMMARY_ARRAY_ITEMS = 2
+const SAFE_SUMMARY_KEYS = new Set([
+  'id',
+  'object',
+  'created',
+  'model',
+  'choices',
+  'index',
+  'message',
+  'role',
+  'images',
+  'image',
+  'image_url',
+  'url',
+  'content',
+  'type',
+  'text',
+  'data',
+  'b64_json',
+  'image_base64',
+  'base64',
+  'mime_type',
+  'media_type',
+  'mimeType',
+  'source',
+  'output',
+  'result',
+  'status',
+  'error',
+  'code',
+  'detail',
+  'request_id',
+  'revised_prompt',
+  'usage',
+  'api_key',
+  'diagnostics',
+])
+
+function safeSummaryKey(key: string): string {
+  return SAFE_SUMMARY_KEYS.has(key) ? key : '[opaque-key]'
+}
+
+/**
+ * Diagnostic shape only: property names, primitive types and array lengths.
+ * No scalar value (including API keys, URLs, model text or image bytes) is
+ * included in provider errors.
+ */
+function summarizeProviderStructure(value: unknown): string {
+  const seen = new WeakSet<object>()
+  const describe = (current: unknown, depth: number): string => {
+    if (current === null) return 'null'
+    if (Array.isArray(current)) {
+      const prefix = `array(len=${current.length})`
+      if (depth >= MAX_SUMMARY_DEPTH || current.length === 0) return prefix
+      const samples = current
+        .slice(0, MAX_SUMMARY_ARRAY_ITEMS)
+        .map(item => describe(item, depth + 1))
+      return `${prefix}[${samples.join(',')}${current.length > samples.length ? ',…' : ''}]`
+    }
+    if (typeof current !== 'object') return typeof current
+    if (seen.has(current)) return 'object(circular)'
+    if (depth >= MAX_SUMMARY_DEPTH) return 'object'
+    seen.add(current)
+    const entries = Object.entries(current as ProviderRecord)
+    const shown = entries.slice(0, MAX_SUMMARY_KEYS).map(([key, nested]) => (
+      `${safeSummaryKey(key)}:${describe(nested, depth + 1)}`
+    ))
+    seen.delete(current)
+    return `{${shown.join(',')}${entries.length > shown.length ? ',…' : ''}}`
+  }
+  return describe(value, 0).slice(0, 1_200)
+}
+
+function outputParseError(
+  message: string,
+  code: string,
+  data: unknown,
+): ImageGenerationProviderError {
+  return new ImageGenerationProviderError(
+    `${message}（响应结构：${summarizeProviderStructure(data)}）`,
+    {
+      code,
+      requestMayHaveBeenAccepted: true,
+    },
+  )
 }
 
 function parseOutput(
@@ -147,71 +540,31 @@ function parseOutput(
   headerRequestId?: string,
 ): ImageGenerationOutput {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
-    throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
-      code: 'invalid_provider_schema',
-      requestMayHaveBeenAccepted: true,
-    })
+    throw outputParseError('NewAPI 返回结构无效', 'invalid_provider_schema', data)
   }
-  const payload = data as {
-    id?: unknown
-    choices?: Array<{
-      message?: {
-        images?: unknown
-        content?: unknown
+  const payload = data as ProviderRecord
+  const collected = collectPayloadCandidates(payload)
+  let firstDecodeError: ImageGenerationProviderError | undefined
+  for (const candidate of collected.candidates) {
+    let decoded: { buffer: Buffer; mimeType: string } | null = null
+    try {
+      decoded = decodeImageDataUrl(candidate.value, maxBytes)
+      if (!decoded && candidate.allowRawBase64) {
+        if (
+          typeof candidate.value === 'string'
+          && /^(?:https?|blob):/i.test(candidate.value.trim())
+        ) {
+          continue
+        }
+        decoded = decodeImageBase64(candidate.value, candidate.mimeType, maxBytes)
       }
-    }>
-  }
-  if (payload.choices !== undefined && !Array.isArray(payload.choices)) {
-    throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
-      code: 'invalid_provider_schema',
-      requestMayHaveBeenAccepted: true,
-    })
-  }
-  const firstChoice = payload.choices?.[0]
-  if (firstChoice !== undefined && (!firstChoice || typeof firstChoice !== 'object')) {
-    throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
-      code: 'invalid_provider_schema',
-      requestMayHaveBeenAccepted: true,
-    })
-  }
-  const message = firstChoice?.message
-  if (message !== undefined && (!message || typeof message !== 'object')) {
-    throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
-      code: 'invalid_provider_schema',
-      requestMayHaveBeenAccepted: true,
-    })
-  }
-  if (!message) {
-    throw new ImageGenerationProviderError('NewAPI 返回中没有模型消息', {
-      code: 'provider_returned_no_message',
-      requestMayHaveBeenAccepted: true,
-    })
-  }
-
-  if (
-    (message.images !== undefined && !Array.isArray(message.images))
-    || (
-      message.content !== undefined
-      && typeof message.content !== 'string'
-      && !Array.isArray(message.content)
-    )
-  ) {
-    throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
-      code: 'invalid_provider_schema',
-      requestMayHaveBeenAccepted: true,
-    })
-  }
-
-  const candidates: unknown[] = []
-  if (Array.isArray(message.images)) {
-    for (const image of message.images) candidates.push(imageUrlFromPart(image))
-  }
-  if (Array.isArray(message.content)) {
-    for (const part of message.content) candidates.push(imageUrlFromPart(part))
-  }
-
-  for (const candidate of candidates) {
-    const decoded = decodeImageDataUrl(candidate, maxBytes)
+    } catch (error) {
+      if (error instanceof ImageGenerationProviderError) {
+        firstDecodeError ??= error
+        continue
+      }
+      throw error
+    }
     if (!decoded) continue
     return {
       ...decoded,
@@ -220,10 +573,24 @@ function parseOutput(
     }
   }
 
-  throw new ImageGenerationProviderError('NewAPI 返回中没有可用的 Data URL 图片', {
-    code: 'provider_returned_no_image',
-    requestMayHaveBeenAccepted: true,
-  })
+  if (firstDecodeError) {
+    throw outputParseError(firstDecodeError.message, firstDecodeError.code, data)
+  }
+  if (collected.schemaInvalid) {
+    throw outputParseError('NewAPI 返回结构无效', 'invalid_provider_schema', data)
+  }
+  if (payload.choices !== undefined && !collected.sawChatMessage) {
+    throw outputParseError(
+      'NewAPI 返回中没有模型消息',
+      'provider_returned_no_message',
+      data,
+    )
+  }
+  throw outputParseError(
+    'NewAPI 返回中没有可用的 Base64 或 Data URL 图片；远程 URL 不会被下载',
+    'provider_returned_no_image',
+    data,
+  )
 }
 
 export interface NewApiChatImageAdapterOptions {

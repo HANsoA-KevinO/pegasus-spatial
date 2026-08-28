@@ -10,6 +10,7 @@ import { claimImageAsset } from '@/lib/media/storage'
 import { MEDIA_ASSET_ID_PATTERN } from '@/lib/media/public-url'
 import { getConversation } from '@/lib/db/repository'
 import { getActiveAgentRun } from '@/lib/agent-runtime/repository'
+import { canAcceptQueuedUserInput } from '@/lib/chat/submission-routing'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
   }
 
   const activeRun = await getActiveAgentRun(conversation_id, userId)
-  if (!activeRun || !['queued', 'running'].includes(activeRun.status)) {
+  if (!canAcceptQueuedUserInput(activeRun)) {
     return NextResponse.json({
       error: 'No active agent loop for this conversation',
       code: 'no_active_run',
@@ -82,11 +83,11 @@ export async function POST(req: NextRequest) {
   // without creating a duplicate durable message.
   const latestActiveRun = await getActiveAgentRun(conversation_id, userId)
   if (
-    latestActiveRun
-    && ['queued', 'running'].includes(latestActiveRun.status)
+    canAcceptQueuedUserInput(latestActiveRun)
+    && latestActiveRun
     && latestActiveRun.run_id !== activeRun.run_id
   ) {
-    const retargeted = await retargetPendingQueuedMessage(
+    await retargetPendingQueuedMessage(
       receipt.queueId,
       receipt.messageId,
       activeRun.run_id,
@@ -94,12 +95,14 @@ export async function POST(req: NextRequest) {
     )
     return NextResponse.json({
       queued: true,
-      run_id: retargeted ? latestActiveRun.run_id : activeRun.run_id,
+      // The latest lookup proves this is the active execution target. A false
+      // CAS means the exact queue row was already claimed/rebound; it must not
+      // make Stop point back at the stale Run that already lost active_key.
+      run_id: latestActiveRun.run_id,
     })
   }
   if (
-    !latestActiveRun
-    || !['queued', 'running'].includes(latestActiveRun.status)
+    !canAcceptQueuedUserInput(latestActiveRun)
   ) {
     const discarded = await discardPendingQueuedMessage(receipt.queueId, receipt.messageId)
     if (discarded) {

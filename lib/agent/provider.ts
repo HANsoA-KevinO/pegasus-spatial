@@ -134,9 +134,14 @@ interface ProviderConfig {
 
 interface ProviderCallbacks {
   onTextChunk?: (chunk: string) => void
-  onToolUseStart?: (toolName: string) => void
-  onToolStart?: (tool: string, input: Record<string, unknown>) => void
-  onToolExecuted?: (tool: string, input: Record<string, unknown>, result: ToolResult) => void
+  onToolUseStart?: (toolName: string, toolUseId?: string) => void
+  onToolStart?: (tool: string, input: Record<string, unknown>, toolUseId?: string) => void
+  onToolExecuted?: (
+    tool: string,
+    input: Record<string, unknown>,
+    result: ToolResult,
+    toolUseId?: string,
+  ) => void
   onThinkingDelta?: (chunk: string) => void
   onRedactedThinking?: () => void
 }

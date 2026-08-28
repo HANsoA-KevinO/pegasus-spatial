@@ -1,6 +1,7 @@
 'use client'
 
-import { createElement, useEffect, useMemo, useState } from 'react'
+import { createElement, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import type { WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
 import { ProgressiveImage } from '@/components/media/ProgressiveImage'
@@ -11,40 +12,135 @@ function fileUrl(conversationId: string, artifact: WorkspaceArtifact, extra = ''
   return `/api/conversations/${encodeURIComponent(conversationId)}/files/binary?path=${encodeURIComponent(artifact.path)}${version}${extra}`
 }
 
-function formatBytes(value: number | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '大小未知'
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`
-}
-
 export function SpatialImageViewer({ artifact, conversationId }: {
   artifact: WorkspaceArtifact
   conversationId: string
 }) {
+  const [fullscreen, setFullscreen] = useState(false)
+  const [resolvedAspectRatio, setResolvedAspectRatio] = useState<string | null>(() => (
+    artifact.width && artifact.height ? `${artifact.width} / ${artifact.height}` : null
+  ))
+  const imageTriggerRef = useRef<HTMLButtonElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const src = fileUrl(conversationId, artifact, '&w=1600&inline=1')
-  const aspectRatio = artifact.width && artifact.height
-    ? `${artifact.width} / ${artifact.height}`
-    : '16 / 10'
+  const aspectRatio = resolvedAspectRatio ?? '16 / 10'
+
+  useEffect(() => {
+    if (!fullscreen) return
+
+    const previousOverflow = document.body.style.overflow
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : imageTriggerRef.current
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFullscreen(false)
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        closeButtonRef.current?.focus()
+      }
+    }
+
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', handleKeyDown)
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus())
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleKeyDown)
+      previouslyFocused?.focus()
+    }
+  }, [fullscreen])
 
   return (
-    <section className="min-h-full bg-[#f3f4f7] px-5 py-6 text-[#25293a] sm:px-8 sm:py-8">
-      <header className="mx-auto mb-5 flex max-w-5xl flex-wrap items-end justify-between gap-3 border-b border-black/10 pb-4">
-        <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">生成图像</p>
-          <h2 className="mt-1 text-base font-semibold tracking-[-0.01em]">{artifact.label}</h2>
-          <p className="mt-1 text-[11px] text-[#777d8f]">
-            {[artifact.mimeType, artifact.width && artifact.height ? `${artifact.width} × ${artifact.height}` : null, formatBytes(artifact.sizeBytes)].filter(Boolean).join(' · ')}
-          </p>
+    <>
+      <section className="relative flex h-full min-h-0 items-center justify-center overflow-hidden px-5 py-16 sm:px-8 sm:py-20" data-workspace-content="unframed">
+        <div className="absolute right-3 top-3 z-20 flex items-center gap-2 sm:right-4 sm:top-4" data-image-toolbar>
+          <button
+            type="button"
+            onClick={() => setFullscreen(true)}
+            aria-label="全屏展示图片"
+            title="全屏展示"
+            className="flex h-9 w-9 items-center justify-center rounded-ctrl border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md transition hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+          >
+            <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3.75h-4.5v4.5m12-4.5h4.5v4.5m0 7.5v4.5h-4.5m-7.5 0h-4.5v-4.5" />
+            </svg>
+          </button>
+          <a
+            href={fileUrl(conversationId, artifact, '&download=1')}
+            download
+            aria-label="下载原图"
+            title="下载原图"
+            className="flex h-9 w-9 items-center justify-center rounded-ctrl border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md transition hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+          >
+            <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3.75v10.5m0 0 4-4m-4 4-4-4M5.25 15.75v2.5a2 2 0 0 0 2 2h9.5a2 2 0 0 0 2-2v-2.5" />
+            </svg>
+          </a>
         </div>
-        <a className="rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-[11px] font-medium text-ink-secondary shadow-sm transition hover:border-primary/40 hover:text-primary-deep" href={fileUrl(conversationId, artifact, '&download=1')}>
-          下载原图
-        </a>
-      </header>
-      <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl border border-black/[0.08] bg-[linear-gradient(45deg,#eef0f4_25%,transparent_25%),linear-gradient(-45deg,#eef0f4_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#eef0f4_75%),linear-gradient(-45deg,transparent_75%,#eef0f4_75%)] bg-[length:24px_24px] shadow-[0_24px_70px_rgba(45,50,75,.15)]" style={{ aspectRatio }}>
-        <ProgressiveImage src={src} alt={artifact.label} frameClassName="h-full w-full" imageClassName="h-full w-full object-contain" />
-      </div>
-    </section>
+        <div
+          className="relative mx-auto max-h-[min(100%,48rem)] w-full max-w-5xl"
+          data-workspace-image-stage
+          style={{ aspectRatio }}
+        >
+          <button
+            ref={imageTriggerRef}
+            type="button"
+            onClick={() => setFullscreen(true)}
+            aria-label={`全屏展示图片：${artifact.label}`}
+            title="点击全屏展示"
+            className="group block h-full w-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/70"
+          >
+            <ProgressiveImage
+              src={src}
+              alt={artifact.label}
+              frameClassName="pmo-progressive-image--unframed pointer-events-none h-full w-full"
+              imageClassName="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.006]"
+              onLoad={event => {
+                const { naturalWidth, naturalHeight } = event.currentTarget
+                if (naturalWidth > 0 && naturalHeight > 0) {
+                  setResolvedAspectRatio(`${naturalWidth} / ${naturalHeight}`)
+                }
+              }}
+            />
+          </button>
+        </div>
+      </section>
+
+      {fullscreen && typeof document !== 'undefined' && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`全屏图片：${artifact.label}`}
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/[0.94] p-4 backdrop-blur-md sm:p-6"
+          onMouseDown={event => {
+            if (event.currentTarget === event.target) setFullscreen(false)
+          }}
+        >
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={() => setFullscreen(false)}
+            aria-label="退出图片全屏展示"
+            title="退出全屏"
+            className="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white shadow-xl backdrop-blur-md transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:right-6 sm:top-6"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
+          <div className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] sm:h-[calc(100vh-3rem)] sm:w-[calc(100vw-3rem)]">
+            <ProgressiveImage
+              src={src}
+              alt={artifact.label}
+              frameClassName="h-full w-full"
+              imageClassName="h-full w-full object-contain"
+            />
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   )
 }
 
@@ -54,6 +150,9 @@ export function SpatialModelViewer({ artifact, conversationId }: {
 }) {
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
+  const fullscreenTriggerRef = useRef<HTMLButtonElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const src = fileUrl(conversationId, artifact)
 
   useEffect(() => {
@@ -64,40 +163,113 @@ export function SpatialModelViewer({ artifact, conversationId }: {
     return () => { mounted = false }
   }, [])
 
-  return (
-    <section className="relative flex min-h-full flex-col overflow-hidden bg-[#eef0f5] text-[#25293a]">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-60 [background-image:linear-gradient(rgba(145,223,194,.06)_1px,transparent_1px),linear-gradient(90deg,rgba(145,223,194,.06)_1px,transparent_1px)] [background-size:44px_44px]" />
-      <header className="relative z-10 flex flex-wrap items-end justify-between gap-3 border-b border-black/10 bg-white/55 px-5 py-4 backdrop-blur-xl sm:px-7">
-        <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">3D 物体 · GLB</p>
-          <h2 className="mt-1 text-base font-semibold">{artifact.label}</h2>
-          <p className="mt-1 text-[11px] text-[#777d8f]">拖动旋转 · 滚轮缩放 · {formatBytes(artifact.sizeBytes)}</p>
-        </div>
-        <a className="rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-[11px] font-medium text-ink-secondary shadow-sm transition hover:border-primary/40 hover:text-primary-deep" href={`${src}&download=1`}>
-          下载 GLB
-        </a>
-      </header>
-      <div className="relative z-10 min-h-[520px] flex-1">
-        {ready ? createElement('model-viewer', {
-          src,
-          alt: artifact.label,
-          'camera-controls': true,
-          'auto-rotate': true,
-          'rotation-per-second': '12deg',
-          'shadow-intensity': '0.45',
-          'environment-image': 'neutral',
-          'interaction-prompt': 'auto',
-          style: { width: '100%', height: '100%', minHeight: '520px', background: 'transparent' },
-        }) : (
-          <div className="flex h-full min-h-[520px] items-center justify-center text-center">
-            <div>
-              <span className={`mx-auto block h-8 w-8 rounded-full border-2 ${failed ? 'border-red-400/70' : 'animate-spin border-black/10 border-t-primary'}`} />
-              <p className="mt-4 text-xs text-[#71778a]">{failed ? '3D 查看器加载失败，请下载 GLB 查看' : '正在初始化 3D 查看器…'}</p>
-            </div>
-          </div>
-        )}
+  useEffect(() => {
+    if (!fullscreen) return
+
+    const previousOverflow = document.body.style.overflow
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : fullscreenTriggerRef.current
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFullscreen(false)
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        closeButtonRef.current?.focus()
+      }
+    }
+
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', handleKeyDown)
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus())
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleKeyDown)
+      previouslyFocused?.focus()
+    }
+  }, [fullscreen])
+
+  const model = ready ? createElement('model-viewer', {
+    src,
+    alt: artifact.label,
+    'camera-controls': true,
+    'auto-rotate': true,
+    'rotation-per-second': '12deg',
+    'shadow-intensity': '0.45',
+    'environment-image': 'neutral',
+    'interaction-prompt': 'auto',
+    style: { width: '100%', height: '100%', background: 'transparent' },
+  }) : (
+    <div className="flex h-full w-full items-center justify-center text-center">
+      <div>
+        <span className={`mx-auto block h-8 w-8 rounded-full border-2 ${failed ? 'border-red-400/70' : 'animate-spin border-black/10 border-t-primary'}`} />
+        <p className="mt-4 text-xs text-[#71778a]">{failed ? '3D 查看器加载失败，请下载 GLB 查看' : '正在初始化 3D 查看器…'}</p>
       </div>
-    </section>
+    </div>
+  )
+
+  return (
+    <>
+      <section className="relative flex h-full min-h-0 items-center justify-center overflow-hidden px-5 py-16 text-ink sm:px-8 sm:py-20" data-workspace-content="unframed">
+        <div className="absolute right-3 top-3 z-20 flex items-center gap-2 sm:right-4 sm:top-4" data-model-toolbar>
+          <button
+            ref={fullscreenTriggerRef}
+            type="button"
+            onClick={() => setFullscreen(true)}
+            aria-label="全屏展示3D模型"
+            title="全屏展示"
+            className="flex h-9 w-9 items-center justify-center rounded-ctrl border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md transition hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+          >
+            <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3.75h-4.5v4.5m12-4.5h4.5v4.5m0 7.5v4.5h-4.5m-7.5 0h-4.5v-4.5" />
+            </svg>
+          </button>
+          <a
+            href={fileUrl(conversationId, artifact, '&download=1')}
+            download
+            aria-label="下载3D模型"
+            title="下载3D模型"
+            className="flex h-9 w-9 items-center justify-center rounded-ctrl border border-white/15 bg-black/55 text-white shadow-lg backdrop-blur-md transition hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+          >
+            <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3.75v10.5m0 0 4-4m-4 4-4-4M5.25 15.75v2.5a2 2 0 0 0 2 2h9.5a2 2 0 0 0 2-2v-2.5" />
+            </svg>
+          </a>
+        </div>
+        <div className="relative mx-auto h-full max-h-[min(100%,48rem)] w-full max-w-5xl" data-workspace-model-stage>
+          {!fullscreen && model}
+        </div>
+      </section>
+
+      {fullscreen && typeof document !== 'undefined' && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`全屏3D模型：${artifact.label}`}
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/[0.94] p-4 backdrop-blur-md sm:p-6"
+          onMouseDown={event => {
+            if (event.currentTarget === event.target) setFullscreen(false)
+          }}
+        >
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={() => setFullscreen(false)}
+            aria-label="退出3D模型全屏展示"
+            title="退出全屏"
+            className="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white shadow-xl backdrop-blur-md transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:right-6 sm:top-6"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
+          <div className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] sm:h-[calc(100vh-3rem)] sm:w-[calc(100vw-3rem)]">
+            {model}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   )
 }
 

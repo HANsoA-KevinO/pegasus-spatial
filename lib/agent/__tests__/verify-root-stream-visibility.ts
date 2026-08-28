@@ -9,6 +9,11 @@ import {
   discardBroadcast,
   getBroadcast,
 } from '../stream-registry'
+import {
+  interruptConversation,
+  registerAbort,
+  unregisterAbort,
+} from '../abort-registry'
 
 async function readSse(readable: ReadableStream<Uint8Array>): Promise<string> {
   const reader = readable.getReader()
@@ -47,6 +52,34 @@ async function main(): Promise<void> {
   assert.match(replay, /"type":"tool_start"/)
   assert.match(replay, /"type":"tool_done"/)
 
+  const winnerConversation = 'verify_submission_transport_isolation'
+  const loserTransport = `submission:${winnerConversation}:loser`
+  createBroadcast(winnerConversation)
+  bindBroadcastRun(winnerConversation, 'run_winner')
+  createBroadcast(loserTransport)
+  bindBroadcastRun(loserTransport, 'run_loser')
+  discardBroadcast(loserTransport)
+  assert.equal(
+    getBroadcast(winnerConversation)?.runId,
+    'run_winner',
+    'closing a losing submission transport must not close the winner Conversation channel',
+  )
+  discardBroadcast(winnerConversation)
+
+  const abortConversation = 'verify_abort_owner_fence'
+  const staleController = new AbortController()
+  const winnerController = new AbortController()
+  registerAbort(abortConversation, staleController, 'verify_user')
+  registerAbort(abortConversation, winnerController, 'verify_user')
+  unregisterAbort(abortConversation, staleController)
+  assert.equal(
+    interruptConversation(abortConversation),
+    true,
+    'a stale request must not unregister the newer winner AbortController',
+  )
+  assert.equal(winnerController.signal.aborted, true)
+  unregisterAbort(abortConversation, winnerController)
+
   const submitRoute = readFileSync(
     join(process.cwd(), 'app', 'api', 'chat', 'route.ts'),
     'utf8',
@@ -55,7 +88,13 @@ async function main(): Promise<void> {
     join(process.cwd(), 'app', 'api', 'chat', 'runs', '[runId]', 'stream', 'route.ts'),
     'utf8',
   )
-  assert.match(submitRoute, /discardBroadcast\(convId\)/)
+  assert.match(submitRoute, /`submission:\$\{convId\}:\$\{randomUUID\(\)\}`/)
+  assert.match(submitRoute, /discardBroadcast\(ownedBroadcastId\)/)
+  assert.match(
+    submitRoute,
+    /detachBroadcastSubscriber\?\.\(\)[\s\S]{0,180}discardBroadcast\(submissionBroadcastId\)[\s\S]{0,180}attachSubscriber\(convId, writer\)/,
+    'inline execution may promote its private transport only after durable Run reservation',
+  )
   assert.match(submitRoute, /if \(internalRunnerRun\) \{\s*bindBroadcastRun\(convId, internalRunnerRun\.run_id\)/)
   assert.match(
     submitRoute,

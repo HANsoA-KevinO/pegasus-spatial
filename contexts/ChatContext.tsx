@@ -77,7 +77,7 @@ const ChatContext = createContext<ChatContextValue | null>(null)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [model, setModel] = useState<ModelProvider>('main_standard')
-  const [memoryEnabled, setMemoryEnabled] = useState(true)
+  const [memoryEnabled, setMemoryEnabled] = useState(false)
   const [researchDomain, setResearchDomain] = useState('开放空间创作')
   const [quotedSelection, setQuotedSelection] = useState<QuotedSelection | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -93,7 +93,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }) => {
     if (settings.orchestrator_model) setModel(settings.orchestrator_model as ModelProvider)
     if (settings.research_domain !== undefined) setResearchDomain(settings.research_domain)
-    setMemoryEnabled(settings.memory_enabled !== false)
+    setMemoryEnabled(settings.memory_enabled === true)
   }, [])
 
   const chat = useChat({ model, memoryEnabled, researchDomain, onConversationLoaded: handleConversationLoaded })

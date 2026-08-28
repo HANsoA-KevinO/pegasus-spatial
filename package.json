@@ -51,7 +51,7 @@
     "literature-tools:smoke:arxiv": "RUN_LIVE_LITERATURE_SMOKE=1 node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/smoke-arxiv-literature-tools.ts",
     "literature-tools:smoke:sciverse": "RUN_LIVE_SCIVERSE_SMOKE=1 node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/smoke-sciverse-literature-tools.ts",
     "document-parser:verify": "jiti lib/document-parsers/__tests__/verify-local-pdf-parser.ts",
-    "chat-contracts:verify": "jiti components/chat/__tests__/verify-chat-submission-contracts.ts && jiti lib/chat/__tests__/verify-persisted-tool-results.ts",
+    "chat-contracts:verify": "jiti components/chat/__tests__/verify-chat-submission-contracts.ts && jiti lib/chat/__tests__/verify-persisted-tool-results.ts && jiti lib/chat/__tests__/verify-live-tool-parts.ts",
     "root-stream:verify": "jiti lib/agent/__tests__/verify-root-stream-visibility.ts",
     "tool-input-boundary:verify": "jiti lib/agent/__tests__/verify-tool-input-boundary.ts",
     "research-tools:verify": "npm run workspace-documents:verify && npm run literature-tools:verify && npm run document-parser:verify && npm run tool-contracts:verify",

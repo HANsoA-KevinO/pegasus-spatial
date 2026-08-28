@@ -1089,7 +1089,7 @@ export function BreathingAirMass({ state }: BreathingAirMassProps): JSX.Element 
     <div
       ref={rootRef}
       aria-hidden="true"
-      data-effect-name="呼吸气团"
+      data-effect-name="灵动云"
       data-state={state}
       data-renderer="fallback"
       className="pmo-breathing-air-mass"
@@ -1097,7 +1097,7 @@ export function BreathingAirMass({ state }: BreathingAirMassProps): JSX.Element 
       <canvas
         ref={canvasRef}
         className="pmo-breathing-air-mass__canvas"
-        style={{ filter: 'blur(12px) saturate(1.04)' }}
+        style={{ filter: 'blur(8px) saturate(1.12)' }}
       />
     </div>
   )

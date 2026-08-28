@@ -72,8 +72,13 @@ export interface AgentProvider {
     invocation?: ToolExecutionInvocation,
   ): Promise<ToolResult>
   onTextChunk?(chunk: string): void
-  onToolStart?(tool: string, input: Record<string, unknown>): void
-  onToolExecuted?(tool: string, input: Record<string, unknown>, result: ToolResult): void
+  onToolStart?(tool: string, input: Record<string, unknown>, toolUseId?: string): void
+  onToolExecuted?(
+    tool: string,
+    input: Record<string, unknown>,
+    result: ToolResult,
+    toolUseId?: string,
+  ): void
 }
 
 interface FairGateLease {
@@ -1674,7 +1679,7 @@ export async function agentLoop(
             startedAt: new Date(),
           })
         }
-        provider.onToolStart?.(tu.name, tu.input)
+        provider.onToolStart?.(tu.name, tu.input, tu.id)
         const result: ToolResult = tu.inputRejection
           ? {
               content: rejectedToolInputResultMessage(tu.inputRejection),
@@ -1692,7 +1697,7 @@ export async function agentLoop(
               })
         controlBoundary ??= result.control
         toolCalls.push({ tool: tu.name, input: tu.input, result })
-        provider.onToolExecuted?.(tu.name, tu.input, result)
+        provider.onToolExecuted?.(tu.name, tu.input, result, tu.id)
         // Build tool_result content. URL-backed media becomes persistable asset
         // blocks directly; no bytes pass through the loop or SSE.
         let toolResultContent: ToolResultContent = result.content

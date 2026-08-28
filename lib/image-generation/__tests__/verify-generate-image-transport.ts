@@ -3,6 +3,13 @@ import { ImageGenerationProviderError } from '../errors'
 import { NewApiChatImageAdapter } from '../providers/newapi-chat-image'
 import { fetchImageGenerationJSON } from '../transport'
 
+const IMAGE_BYTES = {
+  png: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVR4nGPgEpH7DwABpAE8k4sOtwAAAABJRU5ErkJggg==', 'base64'),
+  jpeg: Buffer.from('/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAwT/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCbAFAH/9k=', 'base64'),
+  webp: Buffer.from('UklGRi4AAABXRUJQVlA4ICIAAABwAQCdASoBAAEAAUAmJZQCdAFAAAD+/DeBV/fU6D4r4AAA', 'base64'),
+  gif: Buffer.from('R0lGODlhAQABAIAAAExpcQoUHiH5BAUAAAAALAAAAAABAAEAAAICTAEAOw==', 'base64'),
+} as const
+
 function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
   return (async (_url, init) => {
     const signal = init?.signal
@@ -79,7 +86,7 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
             images: [{
               type: 'image_url',
               image_url: {
-                url: `data:image/png;base64,${Buffer.from('generated-image').toString('base64')}`,
+                url: `data:image/png;base64,${IMAGE_BYTES.png.toString('base64')}`,
               },
             }],
           },
@@ -100,7 +107,7 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
   assert.equal(body.messages[0].role, 'user')
   assert.match(body.messages[0].content, /16:9/)
   assert.equal(new Headers(capturedInit?.headers).get('content-type'), 'application/json')
-  assert.equal(output.buffer.toString(), 'generated-image')
+  assert.ok(output.buffer.equals(IMAGE_BYTES.png))
   assert.equal(output.mimeType, 'image/png')
   assert.equal(output.providerRequestId, 'req_test')
 }
@@ -125,7 +132,7 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
               {
                 type: 'image_url',
                 image_url: {
-                  url: `data:image/webp;base64,${Buffer.from('edited-image').toString('base64')}`,
+                  url: `data:image/webp;base64,${IMAGE_BYTES.webp.toString('base64')}`,
                 },
               },
             ],
@@ -153,9 +160,174 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
     type: 'text',
     text: 'move the chair',
   })
-  assert.equal(output.buffer.toString(), 'edited-image')
+  assert.ok(output.buffer.equals(IMAGE_BYTES.webp))
   assert.equal(output.mimeType, 'image/webp')
   assert.equal(output.providerRequestId, 'chatcmpl_image_edit')
+}
+
+// NewAPI gateways may preserve Chat, Images or Responses output envelopes.
+// The adapter accepts their common in-body Base64/Data URL variants without
+// changing the frozen Chat Completions request endpoint.
+for (const testCase of [
+  {
+    name: 'singleton Chat choice and raw images string',
+    payload: {
+      id: 'chat_singleton',
+      choices: {
+        message: {
+          images: IMAGE_BYTES.png.toString('base64'),
+        },
+      },
+    },
+    expected: IMAGE_BYTES.png,
+    mimeType: 'image/png',
+    requestId: 'chat_singleton',
+  },
+  {
+    name: 'singleton Chat image object with url',
+    payload: {
+      id: 'chat_image_url',
+      choices: [{
+        message: {
+          images: {
+            url: `data:image/jpeg;base64,${IMAGE_BYTES.jpeg.toString('base64')}`,
+          },
+        },
+      }],
+    },
+    expected: IMAGE_BYTES.jpeg,
+    mimeType: 'image/jpeg',
+    requestId: 'chat_image_url',
+  },
+  {
+    name: 'singleton Chat content object with image_url string',
+    payload: {
+      id: 'chat_content_object',
+      choices: [{
+        message: {
+          content: {
+            type: 'image_url',
+            image_url: `data:image/webp;base64,${IMAGE_BYTES.webp.toString('base64')}`,
+          },
+        },
+      }],
+    },
+    expected: IMAGE_BYTES.webp,
+    mimeType: 'image/webp',
+    requestId: 'chat_content_object',
+  },
+  {
+    name: 'Images data b64_json preferred over a remote url',
+    payload: {
+      id: 'images_b64_json',
+      data: [{
+        url: 'https://remote.invalid/must-not-download.png',
+        b64_json: IMAGE_BYTES.png.toString('base64'),
+      }],
+    },
+    expected: IMAGE_BYTES.png,
+    mimeType: 'image/png',
+    requestId: 'images_b64_json',
+  },
+  {
+    name: 'Responses singleton output and content objects',
+    payload: {
+      id: 'responses_content',
+      output: {
+        content: {
+          type: 'output_image',
+          image_base64: IMAGE_BYTES.webp.toString('base64'),
+          media_type: 'image/webp',
+        },
+      },
+    },
+    expected: IMAGE_BYTES.webp,
+    mimeType: 'image/webp',
+    requestId: 'responses_content',
+  },
+  {
+    name: 'Responses content b64_json',
+    payload: {
+      id: 'responses_b64_json',
+      output: [{
+        content: [{
+          type: 'output_image',
+          b64_json: IMAGE_BYTES.png.toString('base64'),
+        }],
+      }],
+    },
+    expected: IMAGE_BYTES.png,
+    mimeType: 'image/png',
+    requestId: 'responses_b64_json',
+  },
+  {
+    name: 'Responses image generation call result',
+    payload: {
+      id: 'responses_result',
+      output: [{
+        type: 'image_generation_call',
+        result: IMAGE_BYTES.png.toString('base64'),
+      }],
+    },
+    expected: IMAGE_BYTES.png,
+    mimeType: 'image/png',
+    requestId: 'responses_result',
+  },
+  {
+    name: 'top-level image object with explicit GIF MIME',
+    payload: {
+      id: 'top_level_gif',
+      image: {
+        image_base64: IMAGE_BYTES.gif.toString('base64'),
+        mime_type: 'image/gif',
+      },
+    },
+    expected: IMAGE_BYTES.gif,
+    mimeType: 'image/gif',
+    requestId: 'top_level_gif',
+  },
+]) {
+  let fetchCalls = 0
+  let capturedUrl = ''
+  const adapter = new NewApiChatImageAdapter({
+    apiKey: 'test-key',
+    apiBase: 'https://api.test/v1',
+    allowPaidCalls: true,
+    fetchImpl: (async (url) => {
+      fetchCalls += 1
+      capturedUrl = String(url)
+      return new Response(JSON.stringify(testCase.payload), { status: 200 })
+    }) as typeof fetch,
+  })
+  const output = await adapter.generate({ prompt: testCase.name })
+  assert.equal(fetchCalls, 1)
+  assert.equal(capturedUrl, 'https://api.test/v1/chat/completions')
+  assert.ok(output.buffer.equals(testCase.expected))
+  assert.equal(output.mimeType, testCase.mimeType)
+  assert.equal(output.providerRequestId, testCase.requestId)
+}
+
+// A remote-only image URL is diagnostic information, never a download target.
+{
+  let fetchCalls = 0
+  const remoteUrl = 'https://remote.invalid/generated.png?token=must-stay-private'
+  const adapter = new NewApiChatImageAdapter({
+    apiKey: 'test-key',
+    apiBase: 'https://api.test/v1',
+    allowPaidCalls: true,
+    fetchImpl: (async () => {
+      fetchCalls += 1
+      return new Response(JSON.stringify({ data: [{ url: remoteUrl }] }), { status: 200 })
+    }) as typeof fetch,
+  })
+  await assert.rejects(adapter.generate({ prompt: 'remote-only result' }), error => {
+    assert.ok(error instanceof ImageGenerationProviderError)
+    assert.equal(error.code, 'provider_returned_no_image')
+    assert.match(error.message, /远程 URL 不会被下载/)
+    assert.doesNotMatch(error.message, /remote\.invalid|must-stay-private/)
+    return true
+  })
+  assert.equal(fetchCalls, 1)
 }
 
 // Provider identity and configuration fingerprint are stable, normalized and secret-free.
@@ -282,6 +454,37 @@ for (const testCase of [
     code: 'invalid_provider_image',
   },
   {
+    name: 'base64-looking text in an image field',
+    payload: {
+      choices: [{ message: { images: 'done' } }],
+    },
+    code: 'invalid_provider_image',
+  },
+  {
+    name: 'image MIME does not match file bytes',
+    payload: {
+      choices: [{
+        message: {
+          images: `data:image/png;base64,${IMAGE_BYTES.jpeg.toString('base64')}`,
+        },
+      }],
+    },
+    code: 'invalid_provider_image',
+  },
+  {
+    name: 'generic base64 on an output text part',
+    payload: {
+      output: [{
+        type: 'message',
+        content: [{
+          type: 'output_text',
+          base64: IMAGE_BYTES.png.toString('base64'),
+        }],
+      }],
+    },
+    code: 'provider_returned_no_image',
+  },
+  {
     name: 'invalid schema',
     payload: { choices: { unexpected: true } },
     code: 'invalid_provider_schema',
@@ -299,6 +502,48 @@ for (const testCase of [
     assert.ok(error instanceof ImageGenerationProviderError)
     assert.equal(error.code, testCase.code)
     assert.equal(error.requestMayHaveBeenAccepted, true)
+    assert.match(error.message, /响应结构/)
+    return true
+  })
+}
+
+// Parse diagnostics expose shape only: keys, types and array lengths. Scalar
+// values such as credentials, URLs, model text and encoded image bytes stay out.
+{
+  const secret = 'provider-secret-that-must-not-appear'
+  const encodedImageBytes = Buffer.alloc(128, 0xab).toString('base64')
+  const secretAsKey = 'short-secret-key'
+  const encodedBytesAsKey = encodedImageBytes.slice(0, 16)
+  const remoteUrl = `https://remote.invalid/result.png?api_key=${secret}`
+  const providerText = `gateway diagnostic containing ${secret}`
+  const adapter = new NewApiChatImageAdapter({
+    apiKey: 'test-key',
+    apiBase: 'https://api.test/v1',
+    allowPaidCalls: true,
+    fetchImpl: (async () => new Response(JSON.stringify({
+      api_key: secret,
+      [secretAsKey]: true,
+      diagnostics: {
+        raw_image_bytes: encodedImageBytes,
+        remote_url: remoteUrl,
+        [encodedBytesAsKey]: 'encoded bytes placed in a property name',
+      },
+      output: [{
+        content: [{ type: 'output_text', text: providerText }],
+      }],
+    }), { status: 200 })) as typeof fetch,
+  })
+  await assert.rejects(adapter.generate({ prompt: 'shape-only diagnostics' }), error => {
+    assert.ok(error instanceof ImageGenerationProviderError)
+    assert.equal(error.code, 'provider_returned_no_image')
+    assert.match(error.message, /api_key:string/)
+    assert.match(error.message, /\[opaque-key\]:string/)
+    assert.match(error.message, /output:array\(len=1\)/)
+    assert.doesNotMatch(error.message, new RegExp(secret))
+    assert.doesNotMatch(error.message, new RegExp(encodedImageBytes))
+    assert.doesNotMatch(error.message, new RegExp(secretAsKey))
+    assert.doesNotMatch(error.message, new RegExp(encodedBytesAsKey))
+    assert.doesNotMatch(error.message, /raw_image_bytes|remote\.invalid|gateway diagnostic/)
     return true
   })
 }

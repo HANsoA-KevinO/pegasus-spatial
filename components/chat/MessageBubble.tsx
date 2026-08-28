@@ -8,6 +8,7 @@ import { AskUserQuestionItem, DisplayPart } from '@/lib/types'
 import { buildBrowserMediaUrl } from '@/lib/media/browser-url'
 import { ProgressiveImage } from '@/components/media/ProgressiveImage'
 import { isSpatialTool, SpatialJobCard } from './SpatialJobCard'
+import { isToolCallFailure } from '@/lib/chat/spatial-tool-presentation'
 
 // ============================================================
 // Sci-Pegasus · Editorial Timeline MessageBubble
@@ -465,7 +466,7 @@ function ToolCallRow({
 }) {
   const { pres, past } = verbFor(part.tool)
   const isLoading = !!part.pending
-  const isError = !!part.is_error
+  const isError = isToolCallFailure(part)
   const stateClass = isError ? 'failed' : isLoading ? 'loading' : 'completed'
   const nameText = displayToolName(part)
 
@@ -500,7 +501,7 @@ function ToolCallRow({
           tool={part.tool}
           content={part.content}
           pending={part.pending}
-          isError={part.is_error}
+          isError={isError}
         />
       )}
     </div>
@@ -547,7 +548,7 @@ function ProcessBubble({
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i]
     if (p.type === 'interrupted') { terminalFail = true; break }
-    if (p.type === 'tool_call') { terminalFail = !!p.is_error; break }
+    if (p.type === 'tool_call') { terminalFail = isToolCallFailure(p); break }
   }
 
   // Ceremony: on streaming → complete transition, fire the completion once

@@ -23,20 +23,20 @@ export function AppBackground({
       {sidebarWidth > 0 && (
         <div
           data-layer="sidebar-background"
-          className="absolute inset-y-0 left-0 bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)] transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+          className="pmo-resizable-panel absolute inset-y-0 left-0 bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)]"
           style={{ width: sidebarWidth }}
         />
       )}
       {conversationPaneWidth && (
         <div
           data-layer="conversation-background"
-          className="absolute bottom-0 right-0 top-16 bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)]"
+          className="absolute bottom-0 right-0 top-16 bg-[color-mix(in_srgb,var(--glass-panel-bg)_38%,transparent)]"
           style={{ width: conversationPaneWidth }}
         />
       )}
       <div
         data-layer="breathing-air-region"
-        className="absolute bottom-0 right-0 top-16 overflow-hidden transition-[left] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+        className="pmo-resizable-offset absolute bottom-0 right-0 top-16 overflow-hidden"
         style={{ left: sidebarWidth }}
       >
         <BreathingAirMass state={state} />
@@ -44,8 +44,8 @@ export function AppBackground({
       <div
         className="absolute inset-0 transition-all duration-700"
         style={{
-          backdropFilter: state === 'idle' ? 'blur(18px) saturate(1.25)' : 'blur(2px)',
-          WebkitBackdropFilter: state === 'idle' ? 'blur(18px) saturate(1.25)' : 'blur(2px)',
+          backdropFilter: state === 'idle' ? 'blur(7px) saturate(1.16)' : 'blur(2px)',
+          WebkitBackdropFilter: state === 'idle' ? 'blur(7px) saturate(1.16)' : 'blur(2px)',
         }}
       />
     </div>

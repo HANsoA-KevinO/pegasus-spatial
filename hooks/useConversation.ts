@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { cleanConversationTitle } from '@/lib/chat/conversation-title'
 
 interface ConversationSummary {
   conversation_id: string
@@ -21,7 +22,10 @@ export function useConversations() {
       const res = await fetch('/api/conversations')
       if (res.ok) {
         const data = await res.json()
-        setConversations(data)
+        setConversations((data as ConversationSummary[]).map(conversation => ({
+          ...conversation,
+          title: cleanConversationTitle(conversation.title),
+        })))
       }
     } catch {
       // ignore
@@ -117,7 +121,7 @@ export function useConversationTitle(conversationId: string | null | undefined) 
     fetch(`/api/conversations/${conversationId}`)
       .then(r => (r.ok ? r.json() : null))
       .then((data: { title?: unknown } | null) => {
-        if (!cancelled && data && typeof data.title === 'string') setTitle(data.title)
+        if (!cancelled && data && typeof data.title === 'string') setTitle(cleanConversationTitle(data.title))
       })
       .catch(() => { /* 保持 null */ })
     return () => { cancelled = true }

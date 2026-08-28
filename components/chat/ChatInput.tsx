@@ -4,7 +4,6 @@ import { useState, useRef, useEffect, useCallback, KeyboardEvent, ChangeEvent } 
 import { QuotedSelection } from './ChatContainer'
 import { ImageAttachment, ModelProvider } from '@/lib/types'
 import { useChatContext } from '@/contexts/ChatContext'
-import type { ContextUsageState } from '@/hooks/chat-compaction-state'
 import { useModels } from '@/hooks/useModels'
 import { buildBrowserMediaUrl } from '@/lib/media/browser-url'
 import { ProgressiveImage } from '@/components/media/ProgressiveImage'
@@ -15,7 +14,6 @@ interface ChatInputProps {
   onStop: () => void
   quotedSelection?: QuotedSelection | null
   onClearQuote?: () => void
-  contextUsage?: ContextUsageState | null
 }
 
 const APP_VERSION = 'v0.1.0'
@@ -69,7 +67,7 @@ function flyGhost(srcRect: DOMRect | null, text: string) {
   }))
 }
 
-export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQuote, contextUsage }: ChatInputProps) {
+export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQuote }: ChatInputProps) {
   const {
     model,
     setModel,
@@ -310,7 +308,7 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
 
   return (
     <div
-      className="px-4 pb-4 pt-2"
+      className="px-4 pb-2 pt-2"
       onDrop={handleDrop}
       onDragOver={e => e.preventDefault()}
     >
@@ -415,7 +413,7 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
               : spatialObservationDraft ? '描述你希望 Agent 如何修改这个视角中的空间…'
               : pendingImages.length > 0 ? '描述你想要的操作…'
               : quotedSelection ? '描述你想要的修改…'
-              : '描述你想创造、修订或审阅的空间与 3D 资产…'
+              : '把想法告诉 AI，一起推敲细节、推进方案，逐步完善你的空间与 3D 资产…'
             }
             rows={1}
             className="pmo-input-textarea"
@@ -566,19 +564,8 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
           </div>
         </div>
 
-        {/* Editorial footer — keyboard hints + token ticker. */}
-        <div className="pmo-input-meta">
-          <span>
-            Press <span className="pmo-kbd">⌘</span>
-            <span className="pmo-kbd">↵</span> to send ·{' '}
-            <span className="pmo-kbd">/</span> for commands
-          </span>
-          <span className="pmo-tokens">
-            PEGASUS SPATIAL · {APP_VERSION} ·{' '}
-            {contextUsage
-              ? <><b>{contextUsage.compressible.toLocaleString()}</b>{' '}TOKENS</>
-              : <>CONTEXT —</>}
-          </span>
+        <div className="pmo-input-meta" aria-label="产品版本">
+          <span>PEGASUS SPATIAL · {APP_VERSION}</span>
         </div>
       </div>
     </div>

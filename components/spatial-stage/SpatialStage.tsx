@@ -7,7 +7,9 @@ import type { SceneObjectInstance, SceneViewpoint } from '@/lib/spatial/scene-ty
 import type { WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
 import { useChatContext } from '@/contexts/ChatContext'
 import { useGridFSContent } from '@/hooks/useGridFSContent'
+import { conciseSceneDisplayName } from '@/lib/spatial/presentation-name'
 import { AholoWorldCanvas, type SpatialCanvasHandle, type SpatialQualityRenderState, type StageCameraPose } from './AholoWorldCanvas'
+import { SceneModelIcon } from './SpatialSceneList'
 import { chooseWorldRenderSource, listWorldManifests, parseWorldStageManifest, worldBinaryUrl } from './world-stage-model'
 import styles from './SpatialStage.module.css'
 
@@ -19,6 +21,7 @@ interface RenderCommand { command_id: string; observation_id: string; viewpoint:
 
 const RENDER_COMMAND_IDLE_POLL_MS = 2_500
 const RENDER_COMMAND_ACTIVE_POLL_MS = 250
+const EMBEDDED_NAVIGATION_HINT_DISMISSED_KEY = 'pegasus-spatial-embedded-navigation-hint-dismissed'
 
 function shortId(value: string | null | undefined): string {
   if (!value) return '—'
@@ -65,8 +68,18 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
   const [error, setError] = useState<string | null>(null)
   const [activeDrawer, setActiveDrawer] = useState<'library' | 'inspector' | null>(null)
   const [libraryTab, setLibraryTab] = useState<'assets' | 'scenes' | 'history'>('assets')
+  const [showEmbeddedNavigationHint, setShowEmbeddedNavigationHint] = useState(false)
+  const [cameraMenuOpen, setCameraMenuOpen] = useState(false)
+  const cameraMenuRef = useRef<HTMLDivElement>(null)
   const manifestPreviewPath = initialManifestPath || null
   const isManifestPreview = manifestPreviewPath !== null
+  const standaloneStageHref = useMemo(() => {
+    const query = new URLSearchParams()
+    if (manifestPreviewPath) query.set('manifest', manifestPreviewPath)
+    else if (selectedSceneId) query.set('scene', selectedSceneId)
+    const search = query.toString()
+    return `/spatial/${encodeURIComponent(conversationId)}${search ? `?${search}` : ''}`
+  }, [conversationId, manifestPreviewPath, selectedSceneId])
 
   const refreshScenes = useCallback(async () => {
     const list = await json<{ scenes: SceneSummary[] }>(`/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes`)
@@ -90,11 +103,31 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
   useEffect(() => { setPreviewVersion(null) }, [selectedSceneId])
   useEffect(() => { if (sceneId) setSelectedSceneId(sceneId) }, [sceneId])
   useEffect(() => {
+    if (!embedded) { setShowEmbeddedNavigationHint(false); return }
+    try { setShowEmbeddedNavigationHint(localStorage.getItem(EMBEDDED_NAVIGATION_HINT_DISMISSED_KEY) !== '1') }
+    catch { setShowEmbeddedNavigationHint(true) }
+  }, [embedded])
+  useEffect(() => {
     if (!activeDrawer) return
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setActiveDrawer(null) }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [activeDrawer])
+  useEffect(() => {
+    if (!cameraMenuOpen) return
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!cameraMenuRef.current?.contains(event.target as Node)) setCameraMenuOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCameraMenuOpen(false)
+    }
+    document.addEventListener('mousedown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [cameraMenuOpen])
 
   // An explicit Workspace manifest link is a World preview, not a request to open the
   // project's current Scene. Keep the query path authoritative (including query changes)
@@ -175,7 +208,100 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
     } catch (cause) { setError(cause instanceof Error ? cause.message : '观察提交失败。'); setBusy(null) }
   }
 
-  return <main className={`${styles.stageShell} ${embedded ? styles.stageEmbedded : ''}`}>
+  const dismissEmbeddedNavigationHint = () => {
+    setShowEmbeddedNavigationHint(false)
+    try { localStorage.setItem(EMBEDDED_NAVIGATION_HINT_DISMISSED_KEY, '1') } catch { /* local preference is best effort */ }
+  }
+
+  const stageActions = <>
+    <button
+      type="button"
+      className={styles.globalQualityToggle}
+      data-active={qualityMode === 'ply'}
+      aria-pressed={qualityMode === 'ply'}
+      disabled={plyCapableCount === 0}
+      onClick={toggleQualityMode}
+      aria-label={qualityMode === 'ply' ? '切换到 GLB 实时模式' : '切换到高质量 PLY 模式'}
+      title="整个 Scene 统一切换 GLB 与 PLY"
+    >
+      {qualityMode === 'ply'
+        ? `高质量 PLY ${qualityRenderState.loadedCount ?? 0}/${plyCapableCount}`
+        : 'GLB 实时模式'}
+    </button>
+    <div ref={cameraMenuRef} className={styles.cameraMenu}>
+      <button
+        type="button"
+        className={styles.cameraMenuTrigger}
+        data-open={cameraMenuOpen}
+        aria-expanded={cameraMenuOpen}
+        aria-controls="spatial-camera-menu"
+        title="选择视角"
+        onClick={() => setCameraMenuOpen(open => !open)}
+      >
+        <span>视角</span>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6 3.5 3.5L11.5 6" /></svg>
+      </button>
+      {cameraMenuOpen && <div id="spatial-camera-menu" className={styles.cameraMenuPopover} role="group" aria-label="选择空间视角">
+        <button
+          type="button"
+          aria-pressed={cameraMode === 'user'}
+          data-active={cameraMode === 'user'}
+          onClick={() => { setCameraMode('user'); setCameraMenuOpen(false) }}
+        >
+          <span>用户视角</span><i aria-hidden="true">{cameraMode === 'user' ? '✓' : ''}</i>
+        </button>
+        <button
+          type="button"
+          aria-pressed={cameraMode === 'agent'}
+          data-active={cameraMode === 'agent'}
+          disabled={!displayedSceneData?.scene.agent_viewpoint}
+          title={displayedSceneData?.scene.agent_viewpoint ? '查看 Agent 保存的观察相机' : 'Agent 尚未设置观察相机'}
+          onClick={() => { setCameraMode('agent'); setCameraMenuOpen(false) }}
+        >
+          <span>Agent 视角</span><i aria-hidden="true">{cameraMode === 'agent' ? '✓' : ''}</i>
+        </button>
+        <span className={styles.cameraMenuDivider} role="separator" />
+        <button
+          type="button"
+          onClick={() => { setCameraMode('user'); canvasRef.current?.resetUserView(); setCameraMenuOpen(false) }}
+        >
+          <span>重置视角</span>
+        </button>
+      </div>}
+    </div>
+    <button
+      type="button"
+      className={`${styles.assetLibraryButton} ${activeDrawer === 'library' ? styles.actionActive : ''}`}
+      aria-controls="spatial-library-drawer"
+      aria-expanded={activeDrawer === 'library'}
+      aria-label="资产"
+      data-tooltip="资产"
+      data-spatial-asset-trigger
+      onClick={() => setActiveDrawer(current => current === 'library' ? null : 'library')}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m12 3.5 8 4.2-8 4.2-8-4.2 8-4.2Z" />
+        <path d="m4 12 8 4.2 8-4.2M4 16.3l8 4.2 8-4.2" />
+      </svg>
+    </button>
+    <button
+      type="button"
+      className={`${styles.editStageButton} ${activeDrawer === 'inspector' ? styles.actionActive : ''}`}
+      aria-controls="spatial-inspector-drawer"
+      aria-expanded={activeDrawer === 'inspector'}
+      aria-label="修改空间"
+      data-tooltip="修改空间"
+      onClick={() => setActiveDrawer(current => current === 'inspector' ? null : 'inspector')}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15.75 5.25 3 3M6.75 17.25l2.72-.54a3 3 0 0 0 1.5-.82l8.28-8.28a2.12 2.12 0 0 0-3-3l-8.28 8.28a3 3 0 0 0-.82 1.5l-.54 2.72a.12.12 0 0 0 .14.14Z" /><path d="M5 20h14" /></svg>
+    </button>
+  </>
+
+  return <main
+    className={`${styles.stageShell} ${embedded ? styles.stageEmbedded : ''}`}
+    data-spatial-stage-mode={embedded ? 'embedded' : 'standalone'}
+    data-navigation-hint-visible={embedded && showEmbeddedNavigationHint && !activeDrawer}
+  >
     <section className={styles.viewportColumn} aria-label="空间舞台画布">
       <AholoWorldCanvas
         ref={canvasRef}
@@ -190,22 +316,20 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
         qualityMode={qualityMode}
         qualityReloadToken={qualityReloadToken}
         selectedInstanceId={selectedInstanceId}
+        framingKey={displayedSceneData
+          ? `${displayedSceneData.scene.scene_id}:${displayedSceneData.revision.revision_id}`
+          : legacyArtifact ? `manifest:${legacyArtifact.path}:${legacyRender?.sha256 ?? ''}` : null}
         onQualityStateChange={setQualityRenderState}
         onSelectInstance={setSelectedInstanceId}
         onCameraChange={setCameraPose}
       />
 
-      <header className={styles.stageHeader}>
+      {!embedded && <header className={styles.stageHeader} data-spatial-stage-header>
         <div className={styles.stageIdentity}>
           <Link href="/" className={styles.backButton} aria-label="返回对话">←</Link>
-          <span className={styles.liveMark} />
           <div>
-            <p>空间舞台</p>
             <h1>{displayedSceneData?.scene.title ?? legacyManifest?.title ?? projectTitle ?? '未命名空间'}</h1>
           </div>
-          <span className={previewVersion && !isManifestPreview ? styles.historyPill : styles.statusPill}>
-            {isManifestPreview ? 'World 预览' : previewVersion ? `历史 v${displayedSceneData?.revision.version}` : `v${displayedSceneData?.revision.version ?? '—'}`}
-          </span>
         </div>
 
         <div className={styles.headerMeta} aria-label="空间状态">
@@ -214,30 +338,20 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
           <span>{assetUrl ? '渲染就绪' : isProjectLoading ? '读取中' : '等待 World'}</span>
         </div>
 
-        <div className={styles.headerActions}>
-          <button
-            type="button"
-            className={styles.globalQualityToggle}
-            data-active={qualityMode === 'ply'}
-            disabled={plyCapableCount === 0}
-            onClick={toggleQualityMode}
-            title="整个 Scene 统一切换 GLB 与 PLY"
-          >
-            {qualityMode === 'ply' ? `高质量 PLY ${qualityRenderState.loadedCount ?? 0}/${plyCapableCount}` : 'GLB 实时模式'}
-          </button>
-          <div className={styles.cameraSwitch} aria-label="相机视角">
-            <button type="button" className={cameraMode === 'user' ? styles.cameraActive : ''} onClick={() => setCameraMode('user')}>用户视角</button>
-            <button type="button" className={cameraMode === 'agent' ? styles.cameraActive : ''} disabled={!displayedSceneData?.scene.agent_viewpoint} title={displayedSceneData?.scene.agent_viewpoint ? '查看 Agent 保存的观察相机' : 'Agent 尚未设置观察相机'} onClick={() => setCameraMode('agent')}>Agent 视角</button>
-          </div>
-          <button type="button" className={activeDrawer === 'library' ? styles.actionActive : ''} aria-controls="spatial-library-drawer" aria-expanded={activeDrawer === 'library'} onClick={() => setActiveDrawer(current => current === 'library' ? null : 'library')}>资产</button>
-          <button type="button" className={activeDrawer === 'inspector' ? styles.actionActive : ''} aria-controls="spatial-inspector-drawer" aria-expanded={activeDrawer === 'inspector'} onClick={() => setActiveDrawer(current => current === 'inspector' ? null : 'inspector')}>观察</button>
-        </div>
-      </header>
+        <div className={styles.headerActions}>{stageActions}</div>
+      </header>}
 
-      <div className={styles.viewportToolbar}>
-        <div><span className={styles.toolBadge}>{cameraMode === 'agent' ? 'AGENT CAMERA' : 'FREE CAMERA'}</span><strong>{cameraMode === 'agent' ? '正在查看 Agent 的观察点' : 'WASD / Q E 自由移动 · 左键环视'}</strong></div>
-        <button type="button" disabled={cameraMode !== 'user'} onClick={() => canvasRef.current?.resetUserView()}>重置视角</button>
-      </div>
+      {embedded && <Link
+        href={standaloneStageHref}
+        className={styles.embeddedFullscreenButton}
+        aria-label="进入全屏完整空间舞台"
+        data-embedded-stage-fullscreen
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M8 21H4a1 1 0 0 1-1-1v-4m13 5h4a1 1 0 0 0 1-1v-4" />
+        </svg>
+        <span>全屏空间舞台</span>
+      </Link>}
 
       <div className={styles.selectionToast} data-visible={Boolean(selectedInstance)}>
         <span>已选择</span>
@@ -246,17 +360,23 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
         {selectedInstance && <button type="button" onClick={() => setSelectedInstanceId(null)}>取消</button>}
       </div>
 
-      <div className={styles.viewportFooter}>
+      {!embedded && <div className={styles.viewportFooter}>
         <div className={styles.cameraReadout}><span className={styles.coordinateLabel}>相机</span><code>{vectorText(cameraPose?.position)}</code></div>
-        <div className={styles.cameraReadout}><span className={styles.coordinateLabel}>看向</span><code>{vectorText(cameraPose?.target)}</code></div>
-        <p>相对坐标</p>
-      </div>
+      </div>}
 
-      <div className={styles.agentPresence}>
-        <span className={styles.agentOrb} />
-        <p><strong>主 Agent 观察机位</strong><small>{displayedSceneData?.scene.agent_viewpoint ? '已显示位置与朝向' : '尚未设置'}</small></p>
-        <em>{displayedSceneData?.scene.agent_viewpoint ? 'LIVE' : 'OFFLINE'}</em>
-      </div>
+      {embedded && showEmbeddedNavigationHint && !activeDrawer && <aside
+        className={styles.embeddedNavigationHint}
+        aria-label="空间舞台移动操作提示"
+        data-embedded-navigation-hint
+      >
+        <div className={styles.embeddedNavigationInstructions}>
+          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 平移</span>
+          <span><kbd>Q</kbd><kbd>E</kbd> 升降</span>
+          <span><kbd>Shift</kbd> 加速</span>
+          <span>左键拖动环视</span>
+        </div>
+        <button type="button" onClick={dismissEmbeddedNavigationHint}>不再提醒</button>
+      </aside>}
     </section>
 
     {activeDrawer === 'library' && <aside id="spatial-library-drawer" className={styles.buildRail} aria-label="场景资产库">
@@ -287,7 +407,22 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
 
       {libraryTab === 'scenes' && <section id="spatial-scenes-panel" role="tabpanel" aria-labelledby="spatial-scenes-tab" className={styles.railSection}>
         <div className={styles.sectionLabel}><span>项目场景</span><em>{scenes.length}</em></div>
-        <div className={styles.buildList}>{scenes.map(scene => <button key={scene.scene_id} type="button" className={`${styles.buildItem} ${scene.scene_id === selectedSceneId ? styles.buildItemActive : ''}`} onClick={() => setSelectedSceneId(scene.scene_id)}><span className={styles.buildIndex}>v{scene.current_version}</span><span className={styles.buildCopy}><strong>{scene.title}</strong><small>{shortId(scene.scene_id)}</small></span><i /></button>)}</div>
+        <div className={styles.buildList}>{scenes.map(scene => {
+          const active = scene.scene_id === selectedSceneId
+          const displayName = conciseSceneDisplayName(scene.title)
+          return <button
+            key={scene.scene_id}
+            type="button"
+            className={`${styles.buildItem} ${active ? styles.buildItemActive : ''}`}
+            aria-label={`打开场景模型：${displayName}`}
+            aria-pressed={active}
+            data-model-kind="scene"
+            onClick={() => setSelectedSceneId(scene.scene_id)}
+          >
+            <span className={styles.sceneModelIcon} aria-hidden="true"><SceneModelIcon /></span>
+            <strong>{displayName}</strong>
+          </button>
+        })}</div>
       </section>}
 
       {libraryTab === 'history' && <section id="spatial-history-panel" role="tabpanel" aria-labelledby="spatial-history-tab" className={styles.historySection}>
@@ -301,7 +436,6 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
         })}</div>
         {previewVersion && <button type="button" className={styles.returnCurrent} onClick={() => setPreviewVersion(null)}>返回当前版本</button>}
       </section>}
-      <div className={styles.railFooter}><span>AUTO REVISION</span><p>版本由系统自动保存；Agent 无需管理 revision ID。</p></div>
     </aside>}
 
     {activeDrawer === 'inspector' && <aside id="spatial-inspector-drawer" className={styles.inspector} aria-label="对象与观察">

@@ -2,15 +2,24 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
+import { useTheme } from 'next-themes'
 import { useChatContext } from '@/contexts/ChatContext'
-import { useConversationTitle } from '@/hooks/useConversation'
-import { useLiteraturePaperSummaries } from '@/hooks/useLiteraturePaperSummaries'
-import { parsePaperSummaryFile } from '@/lib/literature/paper-summaries'
 import { WorkspaceFileExplorer } from '@/components/workspace/WorkspaceFileExplorer'
 import { SpatialSceneList } from '@/components/spatial-stage/SpatialSceneList'
 import { useSpatialScenes } from '@/hooks/useSpatialScenes'
+import {
+  LEFT_SIDEBAR_LIMITS,
+  useWorkspaceLayout,
+} from '@/contexts/WorkspaceLayoutContext'
 import { ConversationList } from './ConversationList'
 import { FeedbackDialog } from './FeedbackDialog'
+import { PanelResizeHandle } from './PanelResizeHandle'
+
+const THEME_OPTIONS = [
+  { value: 'system', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+] as const
 
 function SidebarModeTab({ selected, disabled = false, label, count, onClick }: {
   selected: boolean
@@ -67,6 +76,12 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
 export function AppSidebar({ className = '' }: { className?: string }) {
   const router = useRouter()
   const pathname = usePathname()
+  const { theme, setTheme } = useTheme()
+  const {
+    leftSidebarWidth,
+    setLeftSidebarWidth,
+    resetLeftSidebarWidth,
+  } = useWorkspaceLayout()
   const {
     conversationId,
     artifacts,
@@ -88,38 +103,16 @@ export function AppSidebar({ className = '' }: { className?: string }) {
 
   const collapsed = sidebarCollapsed
   const [showMenu, setShowMenu] = useState(false)
+  const [showThemeSub, setShowThemeSub] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [shimmering, setShimmering] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const canBrowseFiles = pathname === '/' && Boolean(conversationId)
   const effectiveView = canBrowseFiles ? sidebarView : 'projects'
   const spatialScenes = useSpatialScenes(canBrowseFiles ? conversationId : null, canBrowseFiles)
-  const { title: activeProjectTitle } = useConversationTitle(canBrowseFiles ? conversationId : null)
-  const paperFingerprint = useMemo(() => {
-    const bundles = new Map<string, Set<string>>()
-    for (const artifact of artifacts) {
-      const parsed = parsePaperSummaryFile(artifact.path)
-      if (!parsed) continue
-      let roles = bundles.get(parsed.identity.directory)
-      if (!roles) {
-        roles = new Set<string>()
-        bundles.set(parsed.identity.directory, roles)
-      }
-      roles.add(parsed.relativePath)
-    }
-    return [...bundles]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([directory, roles]) => `${directory}:${[...roles].sort().join(',')}`)
-      .join('\u0000')
-  }, [artifacts])
-  const paperSummaries = useLiteraturePaperSummaries(
-    canBrowseFiles ? conversationId : null,
-    paperFingerprint,
-    effectiveView === 'files',
-  )
-  const paperSummaryByDirectory = useMemo(
-    () => new Map(paperSummaries.papers.map(paper => [paper.directory, paper])),
-    [paperSummaries.papers],
+  const openableArtifacts = useMemo(
+    () => artifacts.filter(artifact => artifact.type === 'image' || artifact.type === 'model3d'),
+    [artifacts],
   )
 
   const handleCreate = () => {
@@ -145,12 +138,19 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     if (!spatialScenes.scenes.some(scene => scene.scene_id === activeSceneId)) setActiveSceneId(null)
   }, [activeSceneId, setActiveSceneId, spatialScenes.hasLoaded, spatialScenes.scenes])
 
+  useEffect(() => {
+    if (effectiveView !== 'files' || openableArtifacts.length === 0) return
+    if (openableArtifacts.some(artifact => artifact.path === activeArtifactPath)) return
+    setActiveArtifactPath(openableArtifacts[0]!.path)
+  }, [activeArtifactPath, effectiveView, openableArtifacts, setActiveArtifactPath])
+
   // Close menu on outside click
   useEffect(() => {
     if (!showMenu) return
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowMenu(false)
+        setShowThemeSub(false)
       }
     }
     document.addEventListener('mousedown', handler)
@@ -163,12 +163,14 @@ export function AppSidebar({ className = '' }: { className?: string }) {
           毛玻璃合成和内容，使文字、图标与控件始终位于气团之上。 */}
       <aside
         aria-label="项目与文件导航"
-        className={`h-screen fixed left-0 top-0 pt-16 flex flex-col bg-transparent backdrop-blur-[20px] backdrop-saturate-150 z-40 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
-          collapsed ? 'w-16' : 'w-[280px]'
-        } ${className}`}
-        style={{ boxShadow: '1px 0 0 rgba(20,26,38,0.08), 10px 0 30px -18px rgba(16,20,32,0.15)' }}
+        data-resizable-panel="left-sidebar"
+        className={`pmo-resizable-panel h-screen fixed left-0 top-0 pt-16 flex flex-col bg-transparent backdrop-blur-[20px] backdrop-saturate-150 z-40 ${className}`}
+        style={{
+          width: collapsed ? 64 : leftSidebarWidth,
+          boxShadow: '1px 0 0 rgba(20,26,38,0.08), 10px 0 30px -18px rgba(16,20,32,0.15)',
+        }}
       >
-        <div className={`flex shrink-0 items-center gap-2 py-2 ${collapsed ? 'flex-col px-3' : 'px-4'}`}>
+        <div className={`relative flex shrink-0 items-center gap-2 py-2 ${collapsed ? 'flex-col px-3' : 'px-4'}`}>
           <button
             type="button"
             onClick={() => setSidebarCollapsed(!collapsed)}
@@ -180,7 +182,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          {!collapsed && <span className="min-w-0 flex-1 text-[12.5px] font-semibold uppercase tracking-[0.12em] text-ink-muted">空间创作导航</span>}
+          {!collapsed && <span className="pointer-events-none absolute inset-x-0 px-14 text-center text-[12.5px] font-semibold uppercase tracking-[0.12em] text-ink-muted">空间创作导航</span>}
           {collapsed && (
             <button
               type="button"
@@ -211,7 +213,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
             <CollapsedNavigationButton
               active={effectiveView === 'scenes'}
               disabled={!canBrowseFiles}
-              label={canBrowseFiles ? `场景，共 ${spatialScenes.scenes.length} 个` : '请先打开项目'}
+              label={canBrowseFiles ? `模型，共 ${spatialScenes.scenes.length} 个` : '请先打开项目'}
               count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
               onClick={() => {
                 openScenes()
@@ -222,8 +224,8 @@ export function AppSidebar({ className = '' }: { className?: string }) {
             <CollapsedNavigationButton
               active={effectiveView === 'files'}
               disabled={!canBrowseFiles}
-              label={canBrowseFiles ? `文件，共 ${artifacts.length} 个` : '请先打开项目'}
-              count={canBrowseFiles ? artifacts.length : undefined}
+              label={canBrowseFiles ? `文件，共 ${openableArtifacts.length} 个` : '请先打开项目'}
+              count={canBrowseFiles ? openableArtifacts.length : undefined}
               onClick={() => {
                 if (!canBrowseFiles) return
                 setSidebarView('files')
@@ -244,7 +246,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                 <SidebarModeTab
                   selected={effectiveView === 'scenes'}
                   disabled={!canBrowseFiles}
-                  label="场景"
+                  label="模型"
                   count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
                   onClick={openScenes}
                 />
@@ -252,13 +254,10 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                   selected={effectiveView === 'files'}
                   disabled={!canBrowseFiles}
                   label="文件"
-                  count={canBrowseFiles ? artifacts.length : undefined}
+                  count={canBrowseFiles ? openableArtifacts.length : undefined}
                   onClick={() => setSidebarView('files')}
                 />
               </div>
-              {!canBrowseFiles && (
-                <p className="px-1 pt-2 text-[11px] leading-4 text-ink-muted">创建或打开项目后，可在“场景”查看空间版本，在“文件”查看生成产物。</p>
-              )}
             </div>
 
             {effectiveView === 'projects' ? (
@@ -285,7 +284,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                 />
               </div>
             ) : effectiveView === 'scenes' ? (
-              <div role="tabpanel" aria-label="场景" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <div role="tabpanel" aria-label="模型" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 <SpatialSceneList
                   scenes={spatialScenes.scenes}
                   activeSceneId={activeSceneId}
@@ -299,18 +298,9 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               </div>
             ) : (
               <div role="tabpanel" aria-label="文件" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                <div className="mx-4 mb-2 mt-1 rounded-card border border-outline-variant/10 bg-white/35 px-3 py-2.5 dark:bg-white/[0.025]">
-                  <p className="truncate text-[13px] font-semibold text-ink" title={activeProjectTitle ?? '当前研究项目'}>{activeProjectTitle ?? '当前研究项目'}</p>
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">Workspace</span>
-                    <span className="font-mono text-[10px] tabular-nums text-ink-faint">{artifacts.length} files</span>
-                  </div>
-                </div>
                 {conversationId && (
                   <WorkspaceFileExplorer
-                    conversationId={conversationId}
-                    artifacts={artifacts}
-                    paperSummaries={paperSummaryByDirectory}
+                    artifacts={openableArtifacts}
                     activePath={activeArtifactPath}
                     inFlightPaths={inFlightPaths}
                     onSelect={setActiveArtifactPath}
@@ -326,8 +316,8 @@ export function AppSidebar({ className = '' }: { className?: string }) {
           {/* Settings & Help button + popover */}
           <div className="relative" ref={menuRef}>
             <button
-              onClick={() => setShowMenu(!showMenu)}
-              className={`flex items-center gap-3 rounded-card text-ink-muted hover:text-on-surface hover:bg-white/50 transition-all h-9 ${
+              onClick={() => { setShowMenu(!showMenu); setShowThemeSub(false) }}
+              className={`flex items-center gap-3 rounded-card text-ink-muted hover:text-on-surface hover:bg-white/50 dark:hover:bg-white/[0.07] transition-all h-9 ${
                 collapsed ? 'justify-center px-0 w-full' : 'px-2 w-full'
               }`}
               title="设置与帮助"
@@ -341,6 +331,45 @@ export function AppSidebar({ className = '' }: { className?: string }) {
 
             {showMenu && (
               <div className="absolute bottom-full left-0 mb-2 w-56 rounded-card bg-[var(--glass-panel-bg)] backdrop-blur-[20px] backdrop-saturate-150 shadow-[var(--shadow-glass)] border border-[var(--glass-panel-border)] py-2 z-50 animate-fade-in">
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowThemeSub(!showThemeSub)}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-ink-secondary transition-colors hover:bg-surface-low hover:text-ink"
+                  >
+                    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+                    </svg>
+                    <span className="flex-1 text-left">主题</span>
+                    <svg className={`h-3.5 w-3.5 transition-transform ${showThemeSub ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                    </svg>
+                  </button>
+                  {showThemeSub && (
+                    <div className="mx-2 mb-1 rounded-ctrl bg-surface-low/60 py-1">
+                      {THEME_OPTIONS.map(option => (
+                        <button
+                          type="button"
+                          key={option.value}
+                          onClick={() => {
+                            setTheme(option.value)
+                            setShowThemeSub(false)
+                            setShowMenu(false)
+                          }}
+                          className="flex w-full items-center gap-3 rounded-ctrl px-4 py-2 text-sm text-ink-secondary transition-colors hover:bg-surface-lowest hover:text-ink"
+                        >
+                          <span className="flex-1 text-left">{option.label}</span>
+                          {theme === option.value && (
+                            <svg className="h-4 w-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Feedback */}
                 <button
                   onClick={() => { setShowMenu(false); setShowFeedback(true) }}
@@ -366,6 +395,17 @@ export function AppSidebar({ className = '' }: { className?: string }) {
             )}
           </div>
         </div>
+        {!collapsed && (
+          <PanelResizeHandle
+            edge="right"
+            label="调整左侧导航栏宽度"
+            value={leftSidebarWidth}
+            min={LEFT_SIDEBAR_LIMITS.min}
+            max={LEFT_SIDEBAR_LIMITS.max}
+            onChange={setLeftSidebarWidth}
+            onReset={resetLeftSidebarWidth}
+          />
+        )}
       </aside>
 
       {/* Feedback dialog — rendered outside sidebar */}

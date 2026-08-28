@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
@@ -26,13 +26,11 @@ interface WorkspacePanelProps {
   quotedSelection?: QuotedSelection | null
 }
 
-export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection, quotedSelection }: WorkspacePanelProps) {
+export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection }: WorkspacePanelProps) {
   const {
     activeArtifactPath,
     activeSceneId,
     conversationId,
-    setSidebarCollapsed,
-    setSidebarView,
   } = useChatContext()
   const { title: projectTitle } = useConversationTitle(conversationId)
   const active = artifacts.find(item => item.path === activeArtifactPath) ?? artifacts[0]
@@ -44,7 +42,10 @@ export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection, quote
 
   if (activeSceneId && conversationId) {
     return (
-      <section className="h-full min-w-0 border-r border-[var(--glass-panel-border)]">
+      <section
+        className="relative h-full min-h-0 min-w-0 overflow-hidden border-r border-[var(--glass-panel-border)]"
+        data-workspace-stage-container
+      >
         <SpatialStage
           embedded
           sceneId={activeSceneId}
@@ -59,108 +60,27 @@ export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection, quote
 
   if (!active) {
     return (
-      <div className="h-full p-4">
-        <div className="flex h-full items-center justify-center rounded-2xl border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] backdrop-blur-xl">
-          <div className="text-center">
-            {isStreaming && <span className="mx-auto mb-4 block h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />}
-            <p className="text-sm font-medium text-ink-secondary">{isStreaming ? 'Agent 正在构建空间产物…' : '空间产物会显示在这里'}</p>
-            <p className="mt-1 text-xs text-ink-muted">生成图、GLB 物体、World manifest 与可观察评审</p>
-          </div>
+      <div className="flex h-full items-center justify-center p-4" data-workspace-canvas>
+        <div className="text-center">
+          {isStreaming && <span className="mx-auto mb-4 block h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />}
+          <p className="text-sm font-medium text-ink-secondary">{isStreaming ? 'Agent 正在构建空间产物…' : '空间产物会显示在这里'}</p>
+          <p className="mt-1 text-xs text-ink-muted">生成图、GLB 物体、World manifest 与可观察评审</p>
         </div>
       </div>
     )
   }
-
   return (
-    <section className="flex h-full min-w-0 flex-col border-r border-[var(--glass-panel-border)] bg-[color-mix(in_srgb,var(--glass-panel-bg)_42%,transparent)]">
-      <WorkspaceBreadcrumb
-        path={active.path}
-        onRevealInSidebar={() => {
-          setSidebarView('files')
-          setSidebarCollapsed(false)
-        }}
-      />
+    <section className="flex h-full min-w-0 flex-col border-r border-[var(--glass-panel-border)]" data-workspace-canvas>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
-        <ArtifactBody artifact={active} onQuoteSelection={onQuoteSelection} quotedSelection={quotedSelection} />
+        <ArtifactBody artifact={active} onQuoteSelection={onQuoteSelection} />
       </div>
     </section>
   )
 }
 
-function WorkspaceBreadcrumb({ path, onRevealInSidebar }: {
-  path: string
-  onRevealInSidebar: () => void
-}) {
-  const [copied, setCopied] = useState(false)
-  const segments = path.split('/').filter(Boolean)
-  const extension = segments.at(-1)?.split('.').pop()?.toUpperCase() ?? 'FILE'
-
-  const copyPath = async () => {
-    try {
-      await navigator.clipboard.writeText(path)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1200)
-    } catch { /* Clipboard can be denied in embedded browsers. */ }
-  }
-
-  return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--glass-panel-border)] bg-[color-mix(in_srgb,var(--glass-panel-bg)_74%,transparent)] px-3 backdrop-blur-xl">
-      <button
-        type="button"
-        onClick={onRevealInSidebar}
-        aria-label="在文件资源管理器中显示"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-ctrl text-ink-muted transition hover:bg-surface-low hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
-      >
-        <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75A2.25 2.25 0 016 4.5h4.19c.6 0 1.17.24 1.59.66l1.06 1.06c.42.42.99.66 1.59.66H18A2.25 2.25 0 0120.25 9v8.25A2.25 2.25 0 0118 19.5H6a2.25 2.25 0 01-2.25-2.25V6.75z" />
-        </svg>
-      </button>
-
-      <nav aria-label="当前文件路径" className="min-w-0 flex-1 overflow-hidden">
-        <ol className="flex min-w-0 items-center gap-1 whitespace-nowrap text-[11px] text-ink-muted">
-          <li className="shrink-0 font-medium text-ink-secondary">Workspace</li>
-          {segments.map((segment, index) => {
-            const isLast = index === segments.length - 1
-            const hideMiddle = segments.length > 4 && index > 0 && index < segments.length - 2
-            if (hideMiddle && index !== 1) return null
-            return (
-              <li key={`${segment}-${index}`} className={`flex min-w-0 items-center gap-1 ${isLast ? 'flex-1' : 'shrink-0'}`}>
-                <span aria-hidden="true" className="text-outline-variant">/</span>
-                {hideMiddle ? (
-                  <span className="rounded px-1 font-mono text-ink-faint" title={segments.slice(1, -2).join('/')}>…</span>
-                ) : (
-                  <span
-                    className={`${isLast ? 'truncate font-mono font-semibold text-ink' : 'max-w-28 truncate font-mono'}`}
-                    title={segments.slice(0, index + 1).join('/')}
-                  >
-                    {segment}
-                  </span>
-                )}
-              </li>
-            )
-          })}
-        </ol>
-      </nav>
-
-      <span className="hidden shrink-0 rounded-md bg-surface-low px-1.5 py-1 font-mono text-[9px] font-semibold tracking-[0.08em] text-ink-faint sm:inline">
-        {extension}
-      </span>
-      <button
-        type="button"
-        onClick={copyPath}
-        className="shrink-0 rounded-ctrl px-2 py-1.5 text-[10px] font-medium text-ink-muted transition hover:bg-surface-low hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
-        aria-label={copied ? '路径已复制' : '复制完整路径'}
-      >
-        {copied ? '已复制' : '复制路径'}
-      </button>
-    </header>
-  )
-}
-
-function ArtifactBody({ artifact, onQuoteSelection, quotedSelection }: {
+function ArtifactBody({ artifact, onQuoteSelection }: {
   artifact: WorkspaceArtifact
   onQuoteSelection?: (selection: QuotedSelection) => void
-  quotedSelection?: QuotedSelection | null
 }) {
   const {
     conversationId,
@@ -174,14 +94,14 @@ function ArtifactBody({ artifact, onQuoteSelection, quotedSelection }: {
 
   if (beingEdited) return <ArtifactLoadingOverlay artifact={artifact} />
   if (artifact.gridfsPending && lazy.isLoading && !content) {
-    return <div className="m-4 flex h-[calc(100%-2rem)] flex-col gap-3 rounded-2xl bg-surface-lowest/70 p-8"><ShimmerBlock className="w-1/3" h={24} /><ShimmerBlock className="flex-1" /></div>
+    return <div className="flex h-full flex-col gap-3 p-8"><ShimmerBlock className="w-1/3" h={24} /><ShimmerBlock className="flex-1" /></div>
   }
   if (lazy.error) {
     return <div className="p-8 text-sm text-error">无法加载该产物：{lazy.error}</div>
   }
   if (artifact.type === 'image') {
     return conversationId
-      ? <SpatialImageViewer artifact={artifact} conversationId={conversationId} />
+      ? <SpatialImageViewer key={artifact.path} artifact={artifact} conversationId={conversationId} />
       : <div className="p-8 text-sm text-error">图片所属项目尚未加载。</div>
   }
   if (artifact.type === 'model3d') {
@@ -217,10 +137,12 @@ function ArtifactBody({ artifact, onQuoteSelection, quotedSelection }: {
       window.getSelection()?.removeAllRanges()
     }
   }
-  const quotedHere = quotedSelection?.path === artifact.path
-
   return (
-    <article onMouseUp={captureSelection} className={`m-4 min-h-[calc(100%-2rem)] rounded-2xl border bg-surface-lowest/85 px-8 py-7 shadow-sm ${quotedHere ? 'border-primary/25' : 'border-outline-variant/10'}`}>
+    <article
+      onMouseUp={captureSelection}
+      className="min-h-full px-8 py-7"
+      data-workspace-content="unframed"
+    >
       {artifact.type === 'markdown' ? (
         <div className="prose prose-sm mx-auto max-w-[76ch] text-ink">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
@@ -262,8 +184,8 @@ function DocumentArtifactBody({ artifact, conversationId }: {
   const isPdf = artifact.mimeType === 'application/pdf'
 
   return (
-    <section className="flex h-full min-h-[520px] flex-col bg-surface-lowest/60">
-      <header className="shrink-0 border-b border-[var(--glass-panel-border)] bg-surface-lowest/90 px-5 py-4">
+    <section className="flex h-full min-h-[520px] flex-col" data-workspace-content="unframed">
+      <header className="shrink-0 px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-ink" title={artifact.filename}>{artifact.filename ?? artifact.label}</h2>

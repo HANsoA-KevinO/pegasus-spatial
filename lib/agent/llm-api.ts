@@ -21,12 +21,53 @@ export interface StreamResult {
   usage: TokenUsage
 }
 
+function abortedStreamResult(): StreamResult {
+  return {
+    content: [],
+    stop_reason: 'aborted',
+    usage: { input_tokens: 0, output_tokens: 0 },
+  }
+}
+
+function wasAborted(error: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true
+    || (error instanceof Error && error.name === 'AbortError')
+}
+
+async function cancelReaderSafely(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+  try {
+    await reader.cancel()
+  } catch {
+    // The reader may already be errored by the abort that interrupted read().
+  }
+}
+
+/** Wait for a retry without keeping an interrupted Run alive through backoff. */
+async function waitForRetry(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return false
+
+  return new Promise(resolve => {
+    const finish = (shouldRetry: boolean) => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      resolve(shouldRetry)
+    }
+    const onAbort = () => finish(false)
+
+    const timer = setTimeout(() => finish(true), ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    // Close the small race between the initial check and listener registration.
+    if (signal?.aborted) finish(false)
+  })
+}
+
 export async function callAnthropicAPIStream(
   request: AnthropicRequest,
   baseUrl?: string,
   apiKey?: string,
   onTextDelta?: (text: string) => void,
-  onToolUseStart?: (toolName: string) => void,
+  onToolUseStart?: (toolName: string, toolUseId?: string) => void,
   onThinkingDelta?: (text: string) => void,
   onRedactedThinking?: () => void,
   abortSignal?: AbortSignal,
@@ -65,15 +106,19 @@ export async function callAnthropicAPIStream(
         signal: abortSignal,
       })
     } catch (fetchErr) {
-      // AbortError: return empty result instead of throwing (caller handles gracefully)
-      if ((fetchErr as Error).name === 'AbortError') {
+      // Node fetch can throw TypeError when abort(reason) uses a string rather
+      // than a DOMException, so the signal is the authoritative abort source.
+      if (wasAborted(fetchErr, abortSignal)) {
         console.log('[llm-api] Request aborted')
-        return { content: [], stop_reason: 'aborted', usage: { input_tokens: 0, output_tokens: 0 } }
+        return abortedStreamResult()
       }
       const cause = (fetchErr as Error).cause
       console.error(`[llm-api] fetch failed (attempt ${attempt}/${MAX_ATTEMPTS}). Cause:`, cause ?? (fetchErr as Error).message)
       if (attempt < MAX_ATTEMPTS) {
-        await new Promise(r => setTimeout(r, BACKOFF_MS[attempt - 1]))
+        if (!(await waitForRetry(BACKOFF_MS[attempt - 1], abortSignal))) {
+          console.log('[llm-api] Request aborted during retry backoff')
+          return abortedStreamResult()
+        }
         continue
       }
       throw fetchErr
@@ -82,13 +127,20 @@ export async function callAnthropicAPIStream(
     if (res.ok) break
 
     lastErrText = await res.text().catch(() => '')
+    if (abortSignal?.aborted) {
+      console.log('[llm-api] Request aborted while reading error response')
+      return abortedStreamResult()
+    }
     const isUpstreamTransient =
       (res.status === 422 && lastErrText.includes('Upstream request error')) ||
       (res.status >= 500 && res.status < 600)
 
     if (isUpstreamTransient && attempt < MAX_ATTEMPTS) {
       console.warn(`[llm-api] Upstream transient ${res.status} on attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${BACKOFF_MS[attempt - 1]}ms...`)
-      await new Promise(r => setTimeout(r, BACKOFF_MS[attempt - 1]))
+      if (!(await waitForRetry(BACKOFF_MS[attempt - 1], abortSignal))) {
+        console.log('[llm-api] Request aborted during retry backoff')
+        return abortedStreamResult()
+      }
       continue
     }
     // Non-retryable or out of attempts
@@ -117,11 +169,24 @@ export async function callAnthropicAPIStream(
     // Check abort before each read — return partial results instead of throwing
     if (abortSignal?.aborted) {
       console.log('[llm-api] Aborted during streaming, returning partial results')
-      try { reader.cancel() } catch { /* ignore */ }
+      stopReason = 'aborted'
+      await cancelReaderSafely(reader)
       break
     }
 
-    const { done, value } = await reader.read()
+    let readResult: ReadableStreamReadResult<Uint8Array>
+    try {
+      readResult = await reader.read()
+    } catch (readErr) {
+      if (!wasAborted(readErr, abortSignal)) throw readErr
+
+      console.log('[llm-api] Aborted while waiting for stream data, returning partial results')
+      stopReason = 'aborted'
+      await cancelReaderSafely(reader)
+      break
+    }
+
+    const { done, value } = readResult
     if (done) break
 
     buffer += decoder.decode(value, { stream: true })
@@ -161,7 +226,7 @@ export async function callAnthropicAPIStream(
               input: {},
             })
             toolInputs.set(idx, '')
-            onToolUseStart?.(event.content_block.name)
+            onToolUseStart?.(event.content_block.name, event.content_block.id)
           } else if (event.content_block?.type === 'thinking') {
             blocks.set(idx, { type: 'thinking', thinking: '', signature: '' })
           } else if (event.content_block?.type === 'redacted_thinking') {

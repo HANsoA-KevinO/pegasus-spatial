@@ -724,7 +724,7 @@ export async function executeMemberAgentRun(
     const conversationDoc = await getConversation(run.conversation_id, run.user_id)
     if (!conversationDoc) throw new Error('Member Agent Conversation no longer exists.')
     const conversation = asConversationDoc(conversationDoc)
-    const memoryEnabled = conversation.settings?.memory_enabled !== false
+    const memoryEnabled = conversation.settings?.memory_enabled === true
 
     // A TaskUpdate(waiting) may durably commit before its tool_result and Run
     // checkpoint are appended. The Task is no longer `running`, but the exact
