@@ -7,6 +7,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -96,6 +97,10 @@ function mongoDatabaseName(uri: string): string {
 export function demoMongoRuntime(uri: string): DemoMongoRuntime {
   const parsed = new URL(uri)
   return (parsed.port || LOCAL_MONGO_PORT) === DOCKER_MONGO_PORT ? 'docker' : 'local'
+}
+
+export function createDemoAgentRuntimeSecret(): string {
+  return randomBytes(32).toString('hex')
 }
 
 async function mongoIsReachable(uri: string): Promise<boolean> {
@@ -279,6 +284,12 @@ export async function startManagedDemoApp(
       PORT: String(APP_PORT),
       APP_PUBLIC_URL: `http://localhost:${APP_PORT}`,
       AGENT_RUNTIME_INTERNAL_BASE_URL: `http://127.0.0.1:${APP_PORT}`,
+      // Team supervision creates durable follow-up Runs even in the local
+      // single-user demo. Keep their executor enabled so those Runs cannot
+      // occupy a conversation indefinitely. The signing key is ephemeral and
+      // inherited only by this loopback-bound child process.
+      AGENT_RUNTIME_BACKGROUND_RUNNER: '1',
+      AGENT_RUNTIME_INTERNAL_SECRET: createDemoAgentRuntimeSecret(),
       MEDIA_PUBLIC_BASE_URL: `http://localhost:${APP_PORT}`,
       SPATIAL_PAID_CALLS_ENABLED: '0',
     },

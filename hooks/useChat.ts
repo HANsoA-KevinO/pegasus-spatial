@@ -220,6 +220,9 @@ export function useChat(options: UseChatOptions) {
     handlers: {
       onConversationIdMigration?: (realId: string) => void
       trackTokenUsage?: boolean
+      /** Stable target for this Run's streamed assistant message. Mid-turn
+       * user input may no longer leave that assistant as the final array item. */
+      assistantMessageId?: string
     },
   ) => {
     const evtType = data.type as string
@@ -249,11 +252,17 @@ export function useChat(options: UseChatOptions) {
 
     if (evtType === 'done') {
       try { localStorage.removeItem(ACTIVE_CONVERSATION_KEY) } catch { /* ignore */ }
-      activeRunIdsRef.current.delete(myKey)
+      const eventRunId = typeof data.run_id === 'string' ? data.run_id : undefined
+      if (!eventRunId || activeRunIdsRef.current.get(myKey) === eventRunId) {
+        activeRunIdsRef.current.delete(myKey)
+      }
     }
 
     if (evtType === 'interrupted' || (evtType === 'error' && data.run_id)) {
-      activeRunIdsRef.current.delete(myKey)
+      const eventRunId = typeof data.run_id === 'string' ? data.run_id : undefined
+      if (!eventRunId || activeRunIdsRef.current.get(myKey) === eventRunId) {
+        activeRunIdsRef.current.delete(myKey)
+      }
     }
 
     // A lease handoff is not a user-visible failure. The caller reconnects to
@@ -344,15 +353,29 @@ export function useChat(options: UseChatOptions) {
       return
     }
 
-    // Message-content events: mutate the cached conversation's last assistant message
+    // Message-content events must stay bound to the assistant bubble created
+    // for this exact stream. A mid-turn user message is appended after that
+    // bubble, so blindly mutating the array tail silently drops subsequent
+    // deltas, terminal states, and errors.
     const cachedEntry = cacheRef.current.get(myKey)
     if (!cachedEntry) return
     const prev = cachedEntry.messages
-    const last = prev[prev.length - 1]
-    if (!last || last.role !== 'assistant') return
+    let targetIndex = -1
+    if (handlers.assistantMessageId) {
+      targetIndex = prev.findIndex(message => message.id === handlers.assistantMessageId)
+    } else {
+      for (let index = prev.length - 1; index >= 0; index -= 1) {
+        if (prev[index].role === 'assistant') {
+          targetIndex = index
+          break
+        }
+      }
+    }
+    const target = targetIndex >= 0 ? prev[targetIndex] : undefined
+    if (!target || target.role !== 'assistant') return
     const updated = [...prev]
-    let parts = [...(last.parts ?? [])]
-    let content = last.content
+    let parts = [...(target.parts ?? [])]
+    let content = target.content
 
     // Mongo-backed reconnect streams expose a bounded snapshot instead of
     // replaying every transient delta. Replace the current streaming text
@@ -368,7 +391,7 @@ export function useChat(options: UseChatOptions) {
         }
       }
       if (!replaced && text) parts.push({ type: 'text', text })
-      updated[updated.length - 1] = { ...last, content: text, parts }
+      updated[targetIndex] = { ...target, content: text, parts }
       cachedEntry.messages = updated
       syncToReact(myKey)
       return
@@ -525,7 +548,7 @@ export function useChat(options: UseChatOptions) {
         return
     }
 
-    updated[updated.length - 1] = { ...last, content, parts }
+    updated[targetIndex] = { ...target, content, parts }
     cachedEntry.messages = updated
     syncToReact(myKey)
   }
@@ -569,13 +592,14 @@ export function useChat(options: UseChatOptions) {
 
       // Mid-turn input: enqueue message instead of starting new request
       if (isLoading && conversationId) {
+        const key = activeKeyRef.current
+        const optimisticMessageId = `mid-${Date.now()}`
         try {
           // Optimistic UI: show user message immediately
-          const key = activeKeyRef.current
           const cached = cacheRef.current.get(key)
           if (cached) {
             cached.messages = [...cached.messages, {
-              id: `mid-${Date.now()}`,
+              id: optimisticMessageId,
               role: 'user' as const,
               content: text,
               parts: [{ type: 'text' as const, text }],
@@ -583,15 +607,49 @@ export function useChat(options: UseChatOptions) {
             }]
             syncToReact(key)
           }
-          await fetch('/api/chat/interrupt', {
+          const response = await fetch('/api/chat/interrupt', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ conversation_id: conversationId, message: text, images }),
           })
+          let failurePayload: { error?: string; code?: string } | null = null
+          if (!response.ok) {
+            try {
+              failurePayload = await response.json() as { error?: string; code?: string }
+            } catch { /* keep bounded fallback */ }
+          }
+          if (response.status === 409 && failurePayload?.code === 'no_active_run') {
+            // The durable Run may finish in the small window between React's
+            // loading state and this request reaching the server. Remove the
+            // optimistic queue bubble and fall through to the normal new-turn
+            // path so the user never has to resend the message manually.
+            if (cached) {
+              cached.messages = cached.messages.filter(message => message.id !== optimisticMessageId)
+              syncToReact(key)
+            }
+            activeRunIdsRef.current.delete(key)
+          } else if (!response.ok) {
+            const detail = failurePayload?.error ?? `追加消息失败（HTTP ${response.status}）`
+            throw new Error(detail)
+          } else {
+            return
+          }
         } catch (err) {
           console.error('[useChat] Failed to send mid-turn message:', err)
+          const cached = cacheRef.current.get(key)
+          if (cached) {
+            const message = err instanceof Error ? err.message : '追加消息失败，请稍后重试'
+            cached.messages = [...cached.messages, {
+              id: `mid-error-${Date.now()}`,
+              role: 'assistant',
+              content: `**错误**: ${message}`,
+              parts: [{ type: 'text', text: `错误：${message}` }],
+              timestamp: new Date(),
+            }]
+            syncToReact(key)
+          }
+          return
         }
-        return
       }
 
       // Mutable key — migrates from '_new' to real ID when server responds
@@ -638,6 +696,18 @@ export function useChat(options: UseChatOptions) {
         parts: [],
         isStreaming: true,
         timestamp: new Date(),
+      }
+
+      const updateAssistantMsg = (
+        updater: (message: ChatMessage) => ChatMessage,
+      ) => {
+        updateMsgs(prev => {
+          const targetIndex = prev.findIndex(message => message.id === assistantMsg.id)
+          if (targetIndex < 0 || prev[targetIndex].role !== 'assistant') return prev
+          const updated = [...prev]
+          updated[targetIndex] = updater(updated[targetIndex])
+          return updated
+        })
       }
 
       // Write initial messages directly to cache, then sync
@@ -721,6 +791,7 @@ export function useChat(options: UseChatOptions) {
           }
           applySSEEvent(myKey, data, {
             trackTokenUsage: true,
+            assistantMessageId: assistantMsg.id,
             onConversationIdMigration(realId) {
               if (myKey === '_new' && realId) {
                 const cachedEntry = cacheRef.current.get('_new')
@@ -765,11 +836,8 @@ export function useChat(options: UseChatOptions) {
       } catch (err) {
         if ((err as Error).name === 'AbortError') {
           // User clicked stop — mark all pending tool calls as interrupted + add truncation marker
-          updateMsgs(prev => {
-            const updated = [...prev]
-            const last = updated[updated.length - 1]
-            if (!last || last.role !== 'assistant') return prev
-            const parts = [...(last.parts || [])]
+          updateAssistantMsg(target => {
+            const parts = [...(target.parts || [])]
             for (let i = 0; i < parts.length; i++) {
               const p = parts[i]
               if (p.type === 'tool_call' && p.pending) {
@@ -780,38 +848,29 @@ export function useChat(options: UseChatOptions) {
               }
             }
             parts.push({ type: 'interrupted' })
-            updated[updated.length - 1] = { ...last, parts }
-            return updated
+            return { ...target, parts }
           })
         } else {
-          updateMsgs(prev => {
-            const updated = [...prev]
-            const last = updated[updated.length - 1]
-            if (!last || last.role !== 'assistant') return prev
-            updated[updated.length - 1] = {
-              ...last,
-              content: last.content + `\n\n**错误**: ${(err as Error).message}`,
+          updateAssistantMsg(target => {
+            return {
+              ...target,
+              content: target.content + `\n\n**错误**: ${(err as Error).message}`,
             }
-            return updated
           })
         }
       } finally {
         // Mark stream as finished
-        updateMsgs(prev => {
-          const updated = [...prev]
-          const last = updated[updated.length - 1]
-          if (!last || last.role !== 'assistant') return prev
-          updated[updated.length - 1] = { ...last, isStreaming: false }
-          return updated
-        })
-        abortsRef.current.delete(myKey)
-        setRunningConversationIds(prev => {
-          const next = new Set(prev)
-          next.delete(myKey)
-          return next
-        })
-        if (activeKeyRef.current === myKey) {
-          setIsLoading(false)
+        updateAssistantMsg(target => ({ ...target, isStreaming: false }))
+        if (abortsRef.current.get(myKey) === abortController) {
+          abortsRef.current.delete(myKey)
+          setRunningConversationIds(prev => {
+            const next = new Set(prev)
+            next.delete(myKey)
+            return next
+          })
+          if (activeKeyRef.current === myKey) {
+            setIsLoading(false)
+          }
         }
 
         // Reattach to the durable Runner immediately. Artifact hydration is a
@@ -957,6 +1016,7 @@ export function useChat(options: UseChatOptions) {
       syncToReact(convId)
     }
 
+    let continuationRunId: string | null = null
     try {
       if (runId) activeRunIdsRef.current.set(convId, runId)
       const streamUrl = runId
@@ -966,10 +1026,11 @@ export function useChat(options: UseChatOptions) {
       if (res.status === 204) {
         // Loop already ended between the /api/conversations fetch and the reconnect attempt — drop placeholder
         const c = cacheRef.current.get(convId)
-        if (c && c.messages.length > 0) {
-          const last = c.messages[c.messages.length - 1]
-          if (last.role === 'assistant' && last.parts?.length === 0 && !last.content) {
-            c.messages = c.messages.slice(0, -1)
+        if (c) {
+          const targetIndex = c.messages.findIndex(message => message.id === reconnectPlaceholderId)
+          const target = targetIndex >= 0 ? c.messages[targetIndex] : undefined
+          if (target?.role === 'assistant' && target.parts?.length === 0 && !target.content) {
+            c.messages = c.messages.filter((_, index) => index !== targetIndex)
             syncToReact(convId)
           }
         }
@@ -979,33 +1040,50 @@ export function useChat(options: UseChatOptions) {
 
       const reader = res.body.getReader()
       await readSSE(reader, (data) => {
-        applySSEEvent(convId, data, { trackTokenUsage: true })
+        if (
+          data.type === 'run_detached'
+          && typeof data.run_id === 'string'
+          && data.run_id !== runId
+        ) {
+          continuationRunId = data.run_id
+        }
+        applySSEEvent(convId, data, {
+          trackTokenUsage: true,
+          assistantMessageId: reconnectPlaceholderId,
+        })
       })
     } catch {
       // Stream ended / aborted — UI already updated by events or finally block
     } finally {
       const c = cacheRef.current.get(convId)
       if (c) {
-        const last = c.messages[c.messages.length - 1]
-        if (last?.id === reconnectPlaceholderId && last.isStreaming) {
+        const targetIndex = c.messages.findIndex(message => message.id === reconnectPlaceholderId)
+        const target = targetIndex >= 0 ? c.messages[targetIndex] : undefined
+        if (target?.isStreaming) {
           // If the Run completed between the conversation snapshot and this
           // subscription, no delta is produced. Never leave a blank assistant
           // bubble behind merely because a reconnect raced with completion.
-          const hasVisibleContent = Boolean(last.content)
-            || Boolean(last.parts && last.parts.length > 0)
-          c.messages = hasVisibleContent
-            ? [...c.messages.slice(0, -1), { ...last, isStreaming: false }]
-            : c.messages.slice(0, -1)
+          const hasVisibleContent = Boolean(target.content)
+            || Boolean(target.parts && target.parts.length > 0)
+          const updated = [...c.messages]
+          if (hasVisibleContent) updated[targetIndex] = { ...target, isStreaming: false }
+          else updated.splice(targetIndex, 1)
+          c.messages = updated
           syncToReact(convId)
         }
       }
-      abortsRef.current.delete(convId)
-      setRunningConversationIds(prev => {
-        const next = new Set(prev)
-        next.delete(convId)
-        return next
-      })
-      if (activeKeyRef.current === convId) setIsLoading(false)
+      if (abortsRef.current.get(convId) === abortController) {
+        abortsRef.current.delete(convId)
+        setRunningConversationIds(prev => {
+          const next = new Set(prev)
+          next.delete(convId)
+          return next
+        })
+        if (activeKeyRef.current === convId) setIsLoading(false)
+      }
+      if (continuationRunId) {
+        void consumeReconnectStream(convId, continuationRunId)
+      }
     }
   }
 

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { enqueueMessage } from '@/lib/agent/message-queue'
+import {
+  discardPendingQueuedMessage,
+  enqueueMessage,
+  retargetPendingQueuedMessage,
+} from '@/lib/agent/message-queue'
 import type { ImageAttachment } from '@/lib/types'
 import { resolveLocalOwner } from '@/lib/local-owner'
 import { claimImageAsset } from '@/lib/media/storage'
@@ -33,7 +37,10 @@ export async function POST(req: NextRequest) {
 
   const activeRun = await getActiveAgentRun(conversation_id, userId)
   if (!activeRun || !['queued', 'running'].includes(activeRun.status)) {
-    return NextResponse.json({ error: 'No active agent loop for this conversation' }, { status: 409 })
+    return NextResponse.json({
+      error: 'No active agent loop for this conversation',
+      code: 'no_active_run',
+    }, { status: 409 })
   }
 
   const MAX_IMAGES_PER_MESSAGE = 5
@@ -61,12 +68,47 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  await enqueueMessage(
+  const receipt = await enqueueMessage(
     conversation_id,
     message,
     claimedImages.length ? claimedImages : undefined,
     activeRun.run_id,
   )
+
+  // Close the Run-boundary TOCTOU window: the original Run may terminalize
+  // after the first lookup but before the queue insert. If another active Run
+  // already won, move this exact pending row to it. If no Run owns it, remove
+  // the row so the browser can retry the same input through normal /api/chat
+  // without creating a duplicate durable message.
+  const latestActiveRun = await getActiveAgentRun(conversation_id, userId)
+  if (
+    latestActiveRun
+    && ['queued', 'running'].includes(latestActiveRun.status)
+    && latestActiveRun.run_id !== activeRun.run_id
+  ) {
+    const retargeted = await retargetPendingQueuedMessage(
+      receipt.queueId,
+      receipt.messageId,
+      activeRun.run_id,
+      latestActiveRun.run_id,
+    )
+    return NextResponse.json({
+      queued: true,
+      run_id: retargeted ? latestActiveRun.run_id : activeRun.run_id,
+    })
+  }
+  if (
+    !latestActiveRun
+    || !['queued', 'running'].includes(latestActiveRun.status)
+  ) {
+    const discarded = await discardPendingQueuedMessage(receipt.queueId, receipt.messageId)
+    if (discarded) {
+      return NextResponse.json({
+        error: 'No active agent loop for this conversation',
+        code: 'no_active_run',
+      }, { status: 409 })
+    }
+  }
 
   return NextResponse.json({ queued: true, run_id: activeRun.run_id })
 }

@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict'
-import { demoMongoRuntime, resolveDemoAppPort } from '../demo-local'
+import {
+  createDemoAgentRuntimeSecret,
+  demoMongoRuntime,
+  resolveDemoAppPort,
+} from '../demo-local'
 
 assert.equal(resolveDemoAppPort(undefined), 3200)
 assert.equal(resolveDemoAppPort('3201'), 3201)
@@ -18,5 +22,8 @@ assert.equal(
   demoMongoRuntime('mongodb://localhost/pegasus_spatial'),
   'local',
 )
+
+const runtimeSecret = createDemoAgentRuntimeSecret()
+assert.match(runtimeSecret, /^[a-f0-9]{64}$/)
 
 console.log('demo-local configuration verification passed')

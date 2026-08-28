@@ -380,6 +380,53 @@ export async function releaseQueuedMessagesForRun(targetRunId: string): Promise<
 }
 
 /**
+ * Move one still-pending user follow-up onto the Run that won a boundary race.
+ * The exact queue/message identity prevents an unrelated message from being
+ * rebound, while accepting a null target covers terminal release that happened
+ * just before a continuation Run became visible.
+ */
+export async function retargetPendingQueuedMessage(
+  queueId: string,
+  messageId: string,
+  fromRunId: string,
+  toRunId: string,
+): Promise<boolean> {
+  await connectDB()
+  const result = await QueuedMessage.updateOne(
+    {
+      _id: queueId,
+      message_id: messageId,
+      status: 'pending',
+      target_run_id: { $in: [fromRunId, null] },
+      visibility: 'public',
+      source_kind: 'user',
+    },
+    { $set: { target_run_id: toRunId } },
+  )
+  return result.modifiedCount === 1
+}
+
+/**
+ * Remove one optimistic queue delivery before the browser retries it as a
+ * normal turn. Claimed/acknowledged rows are deliberately retained because a
+ * Run already owns their delivery.
+ */
+export async function discardPendingQueuedMessage(
+  queueId: string,
+  messageId: string,
+): Promise<boolean> {
+  await connectDB()
+  const result = await QueuedMessage.deleteOne({
+    _id: queueId,
+    message_id: messageId,
+    status: 'pending',
+    visibility: 'public',
+    source_kind: 'user',
+  })
+  return result.deletedCount === 1
+}
+
+/**
  * Repair the standalone-Mongo crash window between terminalizing a Root Run
  * and releasing its durable Team-update receipts. Only internal
  * team-supervision rows are eligible: member-only `source_kind=agent` rows
@@ -487,6 +534,23 @@ export async function hasQueuedMessages(conversationId: string, targetRunId?: st
     ...(targetRunId
       ? { $or: [{ target_run_id: targetRunId }, { target_run_id: null }] }
       : { target_run_id: null }),
+  })
+  return count > 0
+}
+
+/**
+ * Detect user-authored follow-ups that survived the exact Run they targeted.
+ * These rows need a new public Root continuation; internal Team receipts have
+ * their own supervision delivery path and must not trigger this fallback.
+ */
+export async function hasQueuedPublicUserMessages(conversationId: string): Promise<boolean> {
+  await connectDB()
+  const count = await QueuedMessage.countDocuments({
+    conversation_id: conversationId,
+    target_run_id: null,
+    status: 'pending',
+    visibility: 'public',
+    source_kind: 'user',
   })
   return count > 0
 }

@@ -11,6 +11,7 @@ import { agentLoop } from '@/lib/agent/loop'
 import {
   acknowledgeDequeuedMessages,
   dequeueMessages,
+  hasQueuedPublicUserMessages,
   partitionQueuedMessages,
   releaseQueuedMessagesForRun,
   repairTerminalRootTeamQueueReceipts,
@@ -1465,7 +1466,7 @@ export async function POST(req: NextRequest) {
         queuedContent.push({
           type: 'text',
           text: queuedMessage.sourceKind === 'user'
-            ? `<system-reminder>\nThe user sent this follow-up before the previous run could consume it:\n\n${queuedMessage.content}\n\nTreat it as user input that arrived before the current message.\n</system-reminder>`
+            ? queuedMessage.content
             : buildUntrustedDataReminder('team_updates', {
                 source: queuedMessage.sourceKind ?? 'agent',
                 content: queuedMessage.content,
@@ -1480,6 +1481,19 @@ export async function POST(req: NextRequest) {
           sequence: nextRunMessageSequence++,
           source_queue_id: queuedMessage.queueId,
           visibility: queuedMessage.visibility,
+        }
+      })
+      const initialQueuedModelMessages = initialQueuedMessages.map((queuedMessage, index) => {
+        const source = initialQueued[index]
+        if (source?.sourceKind !== 'user') return queuedMessage
+        return {
+          ...queuedMessage,
+          content: queuedMessage.content.map(block => block.type === 'text'
+            ? {
+                type: 'text' as const,
+                text: `<system-reminder>\nThe user sent this follow-up before the previous run could consume it:\n\n${source.content}\n\nTreat it as user input that arrived before the current message.\n</system-reminder>`,
+              }
+            : block),
         }
       })
       const persistedMessageIds = new Set(
@@ -1523,7 +1537,7 @@ export async function POST(req: NextRequest) {
         ...historyMessages,
         ...restoredStartedMessages,
         ...recoveryMessages,
-        ...initialQueuedMessages,
+        ...initialQueuedModelMessages,
         ...pendingInputMessages,
         ...(directUserMessage ? [directUserMessage] : []),
       ]
@@ -2149,6 +2163,7 @@ export async function POST(req: NextRequest) {
       // longer written; the Conversation APIs derive their compatibility
       // fields from the latest Run and only fall back for pre-V2 records.
       let runReachedTerminalState = false
+      let runCompletedNormally = false
       if (result.waitingForUser) {
         const statusStored = await setRunStatus(
           agentRunId,
@@ -2209,9 +2224,60 @@ export async function POST(req: NextRequest) {
         })
         if (!statusStored) throw new AgentRunLeaseLostError(agentRunId)
         runReachedTerminalState = true
+        runCompletedNormally = true
       }
       if (runReachedTerminalState) {
         await releaseQueuedMessagesForRun(agentRunId)
+      }
+      if (
+        runCompletedNormally
+        && isAgentRunnerEnabled()
+        && await hasQueuedPublicUserMessages(convId)
+      ) {
+        const continuationRunId = newAgentRunId()
+        try {
+          await createAgentRun({
+            runId: continuationRunId,
+            conversationId: convId,
+            userId,
+            request: {
+              message: buildUntrustedDataReminder('agent_update', {
+                content: 'A user follow-up arrived at the previous Run boundary. Consume the queued public input and respond to it now.',
+              }),
+              settings: {
+                ...activeAgentRun.request.settings,
+                memory_enabled: memoryEnabled,
+              },
+              internal: { kind: 'agent_update' },
+            },
+            startedMessageId: newMessageId(),
+            teamId: activeAgentRun.team_id,
+            agentId: activeAgentRun.agent_id,
+            agentSessionId: activeAgentRun.agent_session_id,
+            trigger: 'message',
+            policyVersion: activeAgentRun.policy_version,
+            rootVisible: true,
+            executionMode: 'conversation',
+          })
+          console.log(`[chat] Scheduled queued user continuation ${continuationRunId}`)
+          write({
+            type: 'run_detached',
+            run_id: continuationRunId,
+            conversation_id: convId,
+            message: '检测到尚未处理的追加消息，已自动进入下一轮。',
+          })
+          wakeAgentRunner()
+        } catch (error) {
+          if (error instanceof ActiveAgentRunError) {
+            // A concurrent public request already opened the continuation and
+            // will claim the same untargeted queue row.
+            wakeAgentRunner()
+          } else {
+            // The user-authored row stays pending and recoverable. Do not turn
+            // an already completed answer into a false terminal failure.
+            console.error('[chat] Failed to schedule queued user continuation:', (error as Error).message)
+          }
+        }
       }
 
       // Queue memory extraction only after a clean, complete loop. Waiting

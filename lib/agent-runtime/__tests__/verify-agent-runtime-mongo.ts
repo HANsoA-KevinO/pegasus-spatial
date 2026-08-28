@@ -466,6 +466,48 @@ async function main(): Promise<void> {
       releasedClaim[0].claimId,
     )
 
+    const boundaryReceipt = await messageQueue.enqueueMessage(
+      queueConversationId,
+      'move me to the Run that won the boundary race',
+      undefined,
+      'run_queue_boundary_old',
+    )
+    assert.equal(await messageQueue.retargetPendingQueuedMessage(
+      boundaryReceipt.queueId,
+      boundaryReceipt.messageId,
+      'run_queue_boundary_old',
+      'run_queue_boundary_new',
+    ), true)
+    const boundaryClaim = await messageQueue.dequeueMessages(
+      queueConversationId,
+      'run_queue_boundary_new',
+      { targetedOnly: true },
+    )
+    assert.equal(boundaryClaim.length, 1)
+    assert.equal(boundaryClaim[0].messageId, boundaryReceipt.messageId)
+    assert.equal(await messageQueue.discardPendingQueuedMessage(
+      boundaryReceipt.queueId,
+      boundaryReceipt.messageId,
+    ), false, 'a claimed delivery must never be discarded by the retry path')
+    await messageQueue.acknowledgeDequeuedMessages(
+      boundaryClaim.map(message => message.queueId),
+      boundaryClaim[0].claimId,
+    )
+
+    const retryReceipt = await messageQueue.enqueueMessage(
+      queueConversationId,
+      'retry me through the normal chat route',
+      undefined,
+      'run_queue_retry_old',
+    )
+    assert.equal(await messageQueue.discardPendingQueuedMessage(
+      retryReceipt.queueId,
+      retryReceipt.messageId,
+    ), true)
+    assert.equal(await QueuedMessage.countDocuments({
+      _id: retryReceipt.queueId,
+    }), 0)
+
     await messageQueue.enqueueMessage(queueConversationId, 'recover stale claim')
     const staleClaim = await messageQueue.dequeueMessages(queueConversationId)
     assert.equal(staleClaim.length, 1)
