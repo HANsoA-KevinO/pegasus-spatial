@@ -64,10 +64,10 @@ function extensionBadge(path: string): { label: string; tone: string } {
   const extension = path.split('.').pop()?.toLowerCase() ?? ''
   if (extension === 'md') return { label: 'MD', tone: 'text-primary/75' }
   if (extension === 'pdf') return { label: 'PDF', tone: 'text-[#a35f58]' }
-  if (extension === 'json' || extension === 'jsonl') return { label: '{ }', tone: 'text-[#527c82]' }
+  if (extension === 'json' || extension === 'jsonl') return { label: '{ }', tone: 'text-[#6e735c]' }
   if (extension === 'csv') return { label: 'CSV', tone: 'text-[#668267]' }
-  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(extension)) return { label: 'IMG', tone: 'text-[#806d94]' }
-  if (extension === 'glb' || extension === 'gltf') return { label: '3D', tone: 'text-[#527c82]' }
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(extension)) return { label: 'IMG', tone: 'text-primary' }
+  if (extension === 'glb' || extension === 'gltf') return { label: '3D', tone: 'text-[#8a6848]' }
   if (extension === 'txt') return { label: 'TXT', tone: 'text-ink-faint' }
   return { label: extension.slice(0, 4).toUpperCase() || 'FILE', tone: 'text-ink-faint' }
 }
@@ -313,10 +313,16 @@ export function WorkspaceFileExplorer({
                   onFocus={() => setFocusedPath(node.path)}
                   onClick={() => activateNode(node)}
                   onKeyDown={event => handleTreeKeyDown(event, node)}
-                  className={`group relative flex h-[30px] w-full min-w-0 max-w-full items-center overflow-hidden rounded-lg pr-2 text-left transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${isSelected ? 'bg-primary/10 font-semibold text-primary' : 'text-ink-secondary hover:bg-white/45 hover:text-ink dark:hover:bg-white/[0.05]'}`}
+                  className={`group relative flex h-[30px] w-full min-w-0 max-w-full items-center overflow-hidden rounded-lg pr-2 text-left transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${isSelected ? 'bg-primary/10 font-semibold text-primary' : 'text-ink-secondary hover:bg-white/45 hover:text-ink'}`}
                   style={{ paddingLeft: 6 + depth * 14 }}
                 >
-                  {isSelected && <span aria-hidden="true" className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary shadow-[0_0_7px_rgba(93,119,173,.45)]" />}
+                  {isSelected && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-primary"
+                      style={{ boxShadow: '0 0 7px color-mix(in srgb, var(--primary) 45%, transparent)' }}
+                    />
+                  )}
                   <span className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center text-ink-faint">
                     {isFolder ? <ChevronIcon open={isOpen} /> : null}
                   </span>
@@ -355,7 +361,7 @@ function SearchResult({ artifact, active, paperSummary, onSelect }: {
       aria-selected={active}
       aria-label={`${artifact.label || artifact.path.split('/').at(-1) || artifact.path}，${paperSummary?.title ?? artifact.path}`}
       onClick={() => onSelect(artifact.path)}
-      className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-ctrl px-2 py-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 ${active ? 'bg-primary/10 text-primary' : 'text-ink-secondary hover:bg-white/45 hover:text-ink dark:hover:bg-white/[0.05]'}`}
+      className={`group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-ctrl px-2 py-1.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 ${active ? 'bg-primary/10 text-primary' : 'text-ink-secondary hover:bg-white/45 hover:text-ink'}`}
     >
       <FileTypeMark path={artifact.path} />
       <span className="min-w-0 flex-1">

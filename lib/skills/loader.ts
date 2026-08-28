@@ -3,7 +3,7 @@ import path from 'path'
 import { SkillDefinition } from '../types'
 
 const PROJECT_GUIDE_SKILLS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  'spatial-creation': Object.freeze(['spatial-creation']),
+  'spatial-creation': Object.freeze(['imagegen', 'spatial-creation']),
   'materials-discovery': Object.freeze([
     'research-orchestration',
     'literature-discovery',

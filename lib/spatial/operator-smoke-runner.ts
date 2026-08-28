@@ -7,6 +7,7 @@ import { getConversation } from '../db/repository'
 import { NewApiChatImageAdapter } from '../image-generation/providers/newapi-chat-image'
 import { mongoImageGenerationReceiptStore } from '../image-generation/receipt-store'
 import { IMAGE_ASPECT_RATIOS, type ImageGenerationReceipt } from '../image-generation/types'
+import { ensureProviderImageDeliveryUrl } from '../media/storage'
 import {
   createDefaultGenerateImageDependencies,
   executeGenerateImage,
@@ -139,6 +140,33 @@ function assertHttpsBase(label: string, raw: string | undefined): URL {
   return parsed
 }
 
+function assertImageBase(env: NodeJS.ProcessEnv): { url: URL; insecureDevelopmentHttp: boolean } {
+  let parsed: URL
+  try {
+    parsed = new URL(requiredText('LLM_BASE_URL', env.LLM_BASE_URL, 2_048))
+  } catch (error) {
+    throw new Error('LLM_BASE_URL 不是有效的 HTTP(S) URL。', { cause: error })
+  }
+  if (
+    !['http:', 'https:'].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash
+  ) throw new Error('LLM_BASE_URL 必须是无内嵌凭证、query 或 fragment 的 HTTP(S) URL。')
+  const insecureDevelopmentHttp = parsed.protocol === 'http:'
+  if (insecureDevelopmentHttp && (
+    env.NODE_ENV === 'production'
+    || env.PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP !== '1'
+  )) {
+    throw new Error(
+      'LLM_BASE_URL 使用 HTTP；仅在非 production 且显式设置 '
+      + 'PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP=1 时允许开发 smoke。',
+    )
+  }
+  return { url: parsed, insecureDevelopmentHttp }
+}
+
 function providerKey(provider: SpatialOperatorSmokeProvider, env: NodeJS.ProcessEnv): string {
   const value = provider === 'aholo'
     ? env.AHOLO_API_KEY || env.AHOLO_API_TOKEN
@@ -156,12 +184,18 @@ export function validateOperatorSmokeConfiguration(
   assertGlobalPaidGateClosed(env)
   providerKey(provider, env)
   if (provider === 'image') {
-    assertHttpsBase('LLM_BASE_URL', env.LLM_BASE_URL)
+    const imageBase = assertImageBase(env)
     const model = env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim() || 'GPT-image-2'
     if (model !== 'GPT-image-2') throw new Error('图片 smoke 必须冻结精确模型别名 GPT-image-2。')
     return [
       { name: 'global_paid_gate', ok: true, detail: '0（普通聊天保持关闭）' },
-      { name: 'image_transport', ok: true, detail: 'HTTPS NewAPI Chat Completions' },
+      {
+        name: 'image_transport',
+        ok: true,
+        detail: imageBase.insecureDevelopmentHttp
+          ? 'HTTP 开发例外已显式启用；prompt、输入图和返回图均为明文传输'
+          : 'HTTPS NewAPI Chat Completions',
+      },
       { name: 'image_model', ok: true, detail: 'GPT-image-2' },
       { name: 'supplier_submit', ok: true, detail: 'dry-run 未调用供应商' },
     ]
@@ -291,6 +325,7 @@ function spatialToolDependencies(): SpatialToolDependencies {
     getSpatialJobResult,
     waitSpatialJobResult,
     inspectSpatialArtifactResult,
+    resolveProviderRasterUrl: asset => ensureProviderImageDeliveryUrl(asset.assetId),
     now: () => new Date(),
   }
 }

@@ -153,6 +153,10 @@ export interface SpatialBuildJobRecord {
   unknown_reason: string | null
   /** Exact, credential-free hostnames observed before the allowlist existed. */
   configuration_blocked_hosts?: string[]
+  /** New product Jobs opt in to one durable terminal update for Root. */
+  completion_notification_requested?: boolean
+  completion_notified_at?: Date | null
+  completion_notification_last_error?: string | null
   created_at: Date
   updated_at: Date
   finished_at: Date | null
@@ -192,6 +196,8 @@ export interface PrepareSpatialBuildInput {
   request: SpatialBuildRequestSnapshot
   /** Trusted operator-only preparation seam; product tools always use worker. */
   executionGate?: SpatialExecutionGate
+  /** Product tools request one terminal completion reminder; operator fixtures may opt out. */
+  notifyOnTerminal?: boolean
 }
 
 export interface ClaimedSpatialBuildJob {

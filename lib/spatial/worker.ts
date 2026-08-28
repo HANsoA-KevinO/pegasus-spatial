@@ -11,6 +11,7 @@ import {
   type ProcessSpatialBuildOptions,
 } from './processor'
 import type { ClaimedSpatialBuildJob } from './types'
+import { isSpatialTerminalStatus, type SpatialBuildJobRecord } from './types'
 
 export interface SpatialBuildWorkerOptions extends ProcessSpatialBuildOptions {
   ownerId?: string
@@ -19,6 +20,8 @@ export interface SpatialBuildWorkerOptions extends ProcessSpatialBuildOptions {
   concurrency?: number
   heartbeatMs?: number
   onError?: (error: unknown) => void
+  /** Best-effort fast path; the recovery sweep remains authoritative. */
+  onTerminalJob?: (job: SpatialBuildJobRecord) => Promise<void> | void
 }
 
 export interface SpatialBuildWorker {
@@ -41,7 +44,7 @@ export interface SpatialBuildWorkerRuntime {
     dependencies: ProcessSpatialBuildDependencies,
     options: SpatialBuildWorkerOptions,
     signal: AbortSignal,
-  ): Promise<void>
+  ): Promise<ClaimedSpatialBuildJob | void>
   setTimeout(callback: () => void, delayMs: number): SpatialWorkerTimer
   clearTimeout(timer: SpatialWorkerTimer): void
 }
@@ -55,7 +58,7 @@ async function processWithHeartbeat(
   dependencies: ProcessSpatialBuildDependencies,
   options: SpatialBuildWorkerOptions,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<ClaimedSpatialBuildJob> {
   const heartbeatMs = Math.max(1_000, finiteInteger(options.heartbeatMs, 20_000))
   const leaseMs = Math.max(5_000, finiteInteger(options.leaseMs, 90_000), heartbeatMs * 3)
   const timer = setInterval(() => {
@@ -63,7 +66,7 @@ async function processWithHeartbeat(
   }, heartbeatMs)
   timer.unref()
   try {
-    await processClaimedSpatialBuildJob(claim, dependencies, { ...options, signal })
+    return await processClaimedSpatialBuildJob(claim, dependencies, { ...options, signal })
   } finally {
     clearInterval(timer)
   }
@@ -92,7 +95,10 @@ export function startSpatialBuildWorker(
   const pollIntervalMs = Math.max(250, finiteInteger(options.pollIntervalMs, 2_000))
   const heartbeatMs = Math.max(1_000, finiteInteger(options.heartbeatMs, 20_000))
   const leaseMs = Math.max(5_000, finiteInteger(options.leaseMs, 90_000), heartbeatMs * 3)
-  const concurrency = Math.max(1, Math.min(8, finiteInteger(options.concurrency, 2)))
+  // Keep the local process healthy without imposing a project backlog limit.
+  // Every accepted build is durable; this value only controls how many lease
+  // transitions and provider HTTP operations this worker performs at once.
+  const concurrency = Math.max(1, Math.min(32, finiteInteger(options.concurrency, 8)))
   const controller = new AbortController()
   const running = new Set<Promise<void>>()
   let stopped = false
@@ -132,6 +138,11 @@ export function startSpatialBuildWorker(
 
   const launch = (claim: ClaimedSpatialBuildJob) => {
     const task = runtime.processClaim(claim, dependencies, options, controller.signal)
+      .then(async settled => {
+        if (settled && isSpatialTerminalStatus(settled.job.status)) {
+          await options.onTerminalJob?.(settled.job)
+        }
+      })
       .catch(report)
       .finally(() => {
         running.delete(task)

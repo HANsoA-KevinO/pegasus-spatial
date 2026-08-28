@@ -4,19 +4,13 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================
-   Design System: "Pegasus Spatial · Soft Neutral"
+   Design System: "Pegasus Spatial · Architectural Atelier"
    ============================================================
    Philosophy:
-     - Soft neutral white ground (Apple iCloud / Notion register —
-       almost-white with a faint cool undertone, not warm cream)
-     - Graphite-blue #5d77ad preserved as anchor primary
-       (literati ink reads cleaner against neutral white than cream)
-     - Ink is neutral charcoal, not warm — harmonizes with the
-       cool-leaning surface stack
-     - No 1px borders; boundaries come from surface tonal shifts
-     - Primary holds weight at: hero title, filled primary actions,
-       active-state tints, content authority words (citations, numbers,
-       model names), ceremony motion colors
+     - Warm paper and ivory surfaces recall an architectural studio.
+     - Graphite ink carries structure; terracotta marks active creation.
+     - Boundaries rely on restrained tonal shifts and hairlines.
+     - The 3D world remains the visual subject; interface chrome recedes.
    ============================================================ */
 
 :root {
@@ -34,30 +28,30 @@
      var(--hairline) real border + shadow (not by deepening Base, which
      produces lavender wash). Chrome (sidebar/chat) keeps its original warm
      gray so existing pages match the user's earlier design memory. */
-  --surface:                 #f8f9fb;   /* Base — body / page default */
-  --surface-container-low:   #f1f3f7;   /* Chrome — sidebar / chat / top nav. 冷中性,略深于 base 做侧栏区分 */
-  --surface-container:       #f0f0f3;   /* Inset / hover zones */
-  --surface-container-high:  #e6e6ea;   /* Deeper inset */
-  --surface-container-highest: #dbdbe0;
-  --surface-container-lowest: #ffffff;  /* Elevated cards — pure white */
-  --surface-bright:          #ffffff;   /* AI insight / focused panel */
+  --surface:                 #f4f1ea;
+  --surface-container-low:   #ece8df;
+  --surface-container:       #e5e0d6;
+  --surface-container-high:  #ddd7cc;
+  --surface-container-highest: #d2cbc0;
+  --surface-container-lowest: #fcfbf7;
+  --surface-bright:          #fffefa;
   /* Semantic alias — both AppSidebar (Tailwind `bg-surface-sidebar`) and the
    * ChatContainer / right-side panel reach for this name. Keep it as a single
    * alias so the two surfaces stay in lockstep. */
   --surface-sidebar:         var(--surface-container-low);
 
   /* 工作区文档面「纸」(类别 9)—— 干净近白纸底 + 柔投影,作为浮在活背景上的内容画布。 */
-  --paper:                   #ffffff;
-  --paper-edge:              rgba(20, 26, 38, 0.06);
+  --paper:                   #fcfbf7;
+  --paper-edge:              rgba(32, 37, 34, 0.08);
   --shadow-paper:            0 1px 2px rgba(16,18,24,0.05), 0 22px 50px -26px rgba(16,20,32,0.28), inset 0 1px 0 rgba(255,255,255,0.7);
 
   /* --- Text Hierarchy (neutral charcoal, never pure black) --- */
   /* 墨色层级 · 冷中性重标定(W1 面已转冷灰,墨色随之从暖中性灰改冷蓝 charcoal +
      拉高 muted 对比:旧 #86868b 在 #f8f9fb 上仅 ~3.5:1、色温偏暖不搭)。 */
-  --on-surface:              #191c23;   /* Primary text — cool near-black */
-  --on-surface-variant:      #3a404c;   /* Secondary body — cool charcoal */
-  --secondary-text:          #646b7a;   /* Labels, metadata, nav — cool blue-gray, ~4.8:1 */
-  --outline-variant:         #cbd0d9;   /* Ghost borders (use at 10-20% opacity) */
+  --on-surface:              #202522;
+  --on-surface-variant:      #4e544f;
+  --secondary-text:          #70756f;
+  --outline-variant:         #c7c2b8;
 
   /* --- Token aliases used pervasively across .pmo-* classes.
    * Previously these were referenced in CSS as `var(--ink-secondary)` etc.
@@ -67,24 +61,24 @@
    * without rewriting every call site. */
   --ink-secondary:           var(--on-surface-variant);
   --ink-muted:               var(--secondary-text);
-  --ink-faint:               #949ba9;   /* Placeholder, disabled text — cool, a touch darker */
-  --hairline:                #d2d6dd;   /* Visible 1px borders on elevated cards */
-  --surface-sink:            #e4e7ec;   /* Disabled fill / sunken inset */
+  --ink-faint:               #949991;
+  --hairline:                #d4cfc5;
+  --surface-sink:            #e4dfd6;
 
   /* --- 品牌主色单一源头（设计系统先行 · 全站唯一来源） --- */
-  --brand-primary:           #5d77ad;   /* 品牌青蓝主色 · 唯一定义处 */
-  --brand-primary-deep:      #3f568a;   /* 品牌青蓝深色 · hover/active */
+  --brand-primary:           #d75a3b;
+  --brand-primary-deep:      #b7442b;
 
-  /* --- Primary (graphite blue, unchanged — literati ink on white) --- */
+  /* --- Primary (terracotta signal on warm paper) --- */
   --primary:                 var(--brand-primary);
-  --primary-container:       #98b2ec;
+  --primary-container:       #f3d9d0;
   --primary-deep:            var(--brand-primary-deep);   /* Hover / active darker primary */
-  --on-primary:              #ffffff;   /* Pure white on the cool blue */
-  --on-primary-container:    #1a2744;
+  --on-primary:              #ffffff;   /* White on terracotta */
+  --on-primary-container:    #6a281c;
 
   /* --- Secondary --- */
-  --secondary-container:     #d5e3fc;
-  --on-secondary-container:  #57657a;
+  --secondary-container:     #e4dfd5;
+  --on-secondary-container:  #555b56;
 
   /* --- Semantic --- */
   --error:                   #ba1a1a;
@@ -95,7 +89,7 @@
   --warning-container:       #ffe0b2;
 
   /* --- Tint & Glass --- */
-  --surface-tint:            #5d77ad;
+  --surface-tint:            #d75a3b;
   --scrim:                   rgba(31, 31, 35, 0.5);
 
   /* --- Ambient Shadows (neutral basis to match soft white) --- */
@@ -121,13 +115,13 @@
    * 07/10/12/18 numeric aliases match the opacity percentages used at call
    * sites; weak/mid/strong are the semantic names. Both forms point to the
    * same values so existing CSS that uses either compiles correctly. */
-  --primary-tint-weak:       rgba(93, 119, 173, 0.07);
-  --primary-tint-mid:        rgba(93, 119, 173, 0.12);
-  --primary-tint-strong:     rgba(93, 119, 173, 0.22);
-  --primary-tint-07:         rgba(93, 119, 173, 0.07);
-  --primary-tint-10:         rgba(93, 119, 173, 0.10);
-  --primary-tint-12:         rgba(93, 119, 173, 0.12);
-  --primary-tint-18:         rgba(93, 119, 173, 0.18);
+  --primary-tint-weak:       rgba(215, 90, 59, 0.07);
+  --primary-tint-mid:        rgba(215, 90, 59, 0.12);
+  --primary-tint-strong:     rgba(215, 90, 59, 0.22);
+  --primary-tint-07:         rgba(215, 90, 59, 0.07);
+  --primary-tint-10:         rgba(215, 90, 59, 0.10);
+  --primary-tint-12:         rgba(215, 90, 59, 0.12);
+  --primary-tint-18:         rgba(215, 90, 59, 0.18);
 
   /* --- 圆角刻度（四档收敛）---
    * 主题无关，明暗共用。Tailwind 工具类经 @theme inline 生成
@@ -145,83 +139,11 @@
   --backdrop-dot: rgba(18, 20, 26, 0.15);
 }
 
-/* ============================================================
-   Dark Mode — Editorial Night
-   ============================================================ */
+/* The competition build deliberately ships one visual identity. Even if a
+   stale `dark` class is injected before hydration, it inherits the warm-paper
+   tokens above instead of opening a second black/blue palette. */
 .dark {
-  --surface:                 #111318;
-  --surface-container-low:   #191c22;
-  --surface-container:       #1e2128;
-  --surface-container-high:  #282c34;
-  --surface-container-highest: #33373f;
-  --surface-container-lowest: #0d0f13;
-  --surface-bright:          #33373f;
-  --surface-sidebar:         var(--surface-container-low);
-
-  /* 暗色纸面 = 近黑纸底(比活背景略亮一档,浮起感) */
-  --paper:                   #171a21;
-  --paper-edge:              rgba(240, 243, 249, 0.08);
-  --shadow-paper:            0 1px 2px rgba(0,0,0,0.4), 0 24px 54px -26px rgba(0,0,0,0.66), inset 0 1px 0 rgba(255,255,255,0.05);
-
-  --on-surface:              #e2e4e9;
-  --on-surface-variant:      #bfc4cd;
-  --secondary-text:          #8b92a0;
-  --outline-variant:         #3d4250;
-
-  /* Dark-mode counterparts for the aliases defined above in :root */
-  --ink-secondary:           var(--on-surface-variant);
-  --ink-muted:               var(--secondary-text);
-  --ink-faint:               #5d6370;
-  --hairline:                #3d4250;
-  --surface-sink:            #282c34;
-
-  --primary:                 #a0b4e0;
-  --primary-container:       #4a6499;
-  --primary-deep:            #7990bc;
-  --on-primary:              #111318;
-  --on-primary-container:    #d5e0f7;
-
-  --secondary-container:     #2a3448;
-  --on-secondary-container:  #b0c0da;
-
-  --error:                   #f2b8b5;
-  --error-container:         #8c1d18;
-  --success:                 #81c784;
-  --success-container:       #1b5e20;
-  --warning:                 #ffb74d;
-  --warning-container:       #e65100;
-
-  --surface-tint:            #a0b4e0;
-  --scrim:                   rgba(0, 0, 0, 0.6);
-
-  --shadow-color:            rgba(0, 0, 0, 0.2);
-  --shadow-ambient:          0 4px 24px rgba(0, 0, 0, 0.2);
-  --shadow-elevated:         0 8px 40px rgba(0, 0, 0, 0.25);
-  --shadow-hover:            0 6px 30px rgba(0, 0, 0, 0.3);
-
-  /* 玻璃岛材质 · 暗色(底更实一点保长文本可读;阴影加深;顶高光降到微光) */
-  --glass-panel-bg:          rgba(25, 28, 35, 0.66);
-  --glass-panel-border:      rgba(240, 243, 249, 0.10);
-  --shadow-glass:            0 1px 2px rgba(0, 0, 0, 0.35),
-                             0 16px 40px -16px rgba(0, 0, 0, 0.60),
-                             inset 0 1px 0 rgba(255, 255, 255, 0.06);
-
-  /* Primary authority tints — dark variant. Both numeric (07/10/12/18)
-   * and semantic (weak/mid/strong) aliases are defined so all call sites
-   * resolve. */
-  --primary-tint-weak:       rgba(160, 180, 224, 0.08);
-  --primary-tint-mid:        rgba(160, 180, 224, 0.14);
-  --primary-tint-strong:     rgba(160, 180, 224, 0.26);
-  --primary-tint-07:         rgba(160, 180, 224, 0.08);
-  --primary-tint-10:         rgba(160, 180, 224, 0.10);
-  --primary-tint-12:         rgba(160, 180, 224, 0.14);
-  --primary-tint-18:         rgba(160, 180, 224, 0.22);
-
-  --background: var(--surface);
-  --foreground: var(--on-surface);
-
-  /* 全站根静态网点 · 暗色 */
-  --backdrop-dot: rgba(228, 233, 242, 0.09);
+  color-scheme: light;
 }
 
 @theme inline {
@@ -450,14 +372,14 @@ mark.workspace-quote-highlight {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--primary) 40%, transparent),
     0 0 0 3px color-mix(in srgb, var(--primary) 8%, transparent),
-    0 4px 16px -4px rgba(93, 119, 173, 0.22);
+    0 4px 16px -4px color-mix(in srgb, var(--primary) 22%, transparent);
 }
 .dark .pmo-field-focus:focus,
 .dark .pmo-field-focus:focus-within {
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--primary) 52%, transparent),
     0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent),
-    0 4px 18px -4px rgba(93, 119, 173, 0.30);
+    0 4px 18px -4px color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
 /* 工作区文档面。文档/制品 = 一张浮在活背景上的纸:
@@ -674,9 +596,9 @@ mark.workspace-quote-highlight {
    once, when generation completes.
    ------------------------------------------------------------ */
 @keyframes pmo-pulse-record {
-  0%   { transform: scale(1);     box-shadow: 0 0 0 0  rgba(93,119,173,0);    }
-  35%  { transform: scale(1.015); box-shadow: 0 0 0 8px rgba(93,119,173,0.18); }
-  100% { transform: scale(1);     box-shadow: 0 0 0 0  rgba(93,119,173,0);    }
+  0%   { transform: scale(1);     box-shadow: 0 0 0 0 transparent; }
+  35%  { transform: scale(1.015); box-shadow: 0 0 0 8px color-mix(in srgb, var(--primary) 18%, transparent); }
+  100% { transform: scale(1);     box-shadow: 0 0 0 0 transparent; }
 }
 
 .pmo-pulse-record {
@@ -768,7 +690,7 @@ mark.workspace-quote-highlight {
   background: linear-gradient(
     to left,
     transparent 48%,
-    rgba(93, 119, 173, 0.22) 50%,
+    color-mix(in srgb, var(--primary) 22%, transparent) 50%,
     transparent 52%
   );
   transform: translateX(100%);
@@ -1130,7 +1052,7 @@ button.pmo-memory-node:hover {
   left: 0;
   right: 0;
   opacity: 1;
-  box-shadow: 0 0 8px rgba(93, 119, 173, 0.35);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--primary) 35%, transparent);
 }
 
 /* ------------------------------------------------------------
@@ -1178,10 +1100,10 @@ button.pmo-memory-node:hover {
 }
 
 .pmo-btn-primary:hover:not(:disabled) {
-  background: #4d67a0;
+  background: var(--primary-deep);
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(93,119,173,0.32),
-              0 0 0 6px rgba(93,119,173,0.10);
+  box-shadow: 0 6px 20px rgba(183, 68, 43, 0.28),
+              0 0 0 6px rgba(215, 90, 59, 0.10);
 }
 
 .pmo-btn-primary:active:not(:disabled) {
@@ -1619,7 +1541,7 @@ button.pmo-memory-node:hover {
   height: 4.5px;
   border-radius: 50%;
   background: var(--primary);
-  box-shadow: 0 0 0 2px rgba(93, 119, 173, 0.18);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
   animation: pmo-dot-breathe-tool 1.15s var(--ease-fluid) infinite;
 }
 .pmo-tool.completed .pmo-tool-live,
@@ -1645,12 +1567,12 @@ button.pmo-memory-node:hover {
   0%, 80%, 100% {
     opacity: 0.25;
     transform: scale(0.85);
-    box-shadow: 0 0 0 2px rgba(93, 119, 173, 0.08);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 8%, transparent);
   }
   40% {
     opacity: 1;
     transform: scale(1.08);
-    box-shadow: 0 0 0 3px rgba(93, 119, 173, 0.22);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
   }
 }
 
@@ -2019,7 +1941,7 @@ button.pmo-memory-node:hover {
   height: 4.5px;
   border-radius: 50%;
   background: var(--primary);
-  box-shadow: 0 0 0 2px rgba(93, 119, 173, 0.18);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
   animation: pmo-dot-breathe-tool 1.15s var(--ease-fluid) infinite;
 }
 .pmo-waiting .pmo-waiting-dots span:nth-child(2) { animation-delay: 0.2s; }
@@ -2256,7 +2178,7 @@ button.pmo-memory-node:hover {
   color: var(--ink-faint);
 }
 .pmo-panel-textarea:focus {
-  border-color: rgba(93, 119, 173, 0.28);
+  border-color: color-mix(in srgb, var(--primary) 28%, transparent);
   background: var(--surface-lowest);
 }
 .pmo-panel-select {
@@ -2274,10 +2196,10 @@ button.pmo-memory-node:hover {
   transition: border-color 0.25s var(--ease-develop), background 0.25s var(--ease-develop);
 }
 .pmo-panel-select:hover {
-  border-color: rgba(93, 119, 173, 0.18);
+  border-color: color-mix(in srgb, var(--primary) 18%, transparent);
 }
 .pmo-panel-select.open {
-  border-color: rgba(93, 119, 173, 0.28);
+  border-color: color-mix(in srgb, var(--primary) 28%, transparent);
   background: var(--surface-lowest);
 }
 .pmo-panel-submit {
@@ -2297,12 +2219,12 @@ button.pmo-memory-node:hover {
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 4px 16px -4px rgba(93, 119, 173, 0.35);
+  box-shadow: 0 4px 16px -4px color-mix(in srgb, var(--primary) 35%, transparent);
   transition: background 0.22s var(--ease-develop), box-shadow 0.22s var(--ease-develop);
 }
 .pmo-panel-submit:hover {
   background: var(--primary-deep);
-  box-shadow: 0 6px 20px -4px rgba(93, 119, 173, 0.45);
+  box-shadow: 0 6px 20px -4px color-mix(in srgb, var(--primary) 45%, transparent);
 }
 .pmo-panel-submit:disabled {
   background: var(--surface-sink);
@@ -2368,7 +2290,7 @@ button.pmo-memory-node:hover {
   pointer-events: none;
   transition: border-color 0.3s var(--ease-develop);
 }
-.pmo-composer.focus::before { border-color: rgba(93, 119, 173, 0.22); }
+.pmo-composer.focus::before { border-color: color-mix(in srgb, var(--primary) 22%, transparent); }
 
 .pmo-composer::after {
   content: '';
@@ -2389,9 +2311,9 @@ button.pmo-memory-node:hover {
   animation: pmo-input-shimmer 620ms ease-out;
 }
 @keyframes pmo-input-shimmer {
-  0%   { box-shadow: 0 0 0 0 rgba(93, 119, 173, 0); }
-  40%  { box-shadow: 0 0 0 2px rgba(93, 119, 173, 0.18), 0 0 32px rgba(93, 119, 173, 0.22); }
-  100% { box-shadow: 0 0 0 0 rgba(93, 119, 173, 0); }
+  0%   { box-shadow: 0 0 0 0 transparent; }
+  40%  { box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent), 0 0 32px color-mix(in srgb, var(--primary) 22%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 .pmo-ibtn {
@@ -2450,7 +2372,7 @@ button.pmo-memory-node:hover {
   transition: border-color 0.25s var(--ease-develop), color 0.25s var(--ease-develop);
 }
 .pmo-model-chip:hover {
-  border-color: rgba(93, 119, 173, 0.28);
+  border-color: color-mix(in srgb, var(--primary) 28%, transparent);
   color: var(--on-surface);
 }
 .pmo-model-chip .name {
@@ -2506,8 +2428,8 @@ button.pmo-memory-node:hover {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 900px 600px at 35% 22%, rgba(93, 119, 173, 0.10), transparent 65%),
-    radial-gradient(ellipse 700px 500px at 75% 50%, rgba(152, 178, 236, 0.06), transparent 65%);
+    radial-gradient(ellipse 900px 600px at 35% 22%, color-mix(in srgb, var(--primary) 10%, transparent), transparent 65%),
+    radial-gradient(ellipse 700px 500px at 75% 50%, color-mix(in srgb, var(--on-surface) 4%, transparent), transparent 65%);
   pointer-events: none;
   z-index: 0;
 }
@@ -2614,7 +2536,7 @@ button.pmo-memory-node:hover {
   border-color: color-mix(in srgb, var(--primary) 45%, transparent);
   box-shadow: var(--shadow-glass),
               0 0 0 3px color-mix(in srgb, var(--primary) 9%, transparent),
-              0 8px 26px -6px rgba(93, 119, 173, 0.20);
+              0 8px 26px -6px color-mix(in srgb, var(--primary) 20%, transparent);
 }
 
 .pmo-input-textarea {
@@ -2829,14 +2751,14 @@ button.pmo-memory-node:hover {
   color: #fff;
   font-size: 13px;
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(93, 119, 173, 0.28);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 28%, transparent);
   cursor: pointer;
   position: relative;
   overflow: hidden;
   transition: box-shadow 0.2s var(--ease-develop), opacity 0.15s var(--ease-develop);
 }
 .pmo-send-btn:hover:not(:disabled) {
-  box-shadow: 0 3px 12px rgba(93, 119, 173, 0.4);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--primary) 40%, transparent);
 }
 .pmo-send-btn:disabled {
   opacity: 0.4;
@@ -2952,7 +2874,7 @@ button.pmo-memory-node:hover {
   transition: background 0.15s var(--ease-develop);
 }
 .pmo-popover-custom-add:hover {
-  background: var(--primary-tint-mid, rgba(93, 119, 173, 0.14));
+  background: var(--primary-tint-mid, color-mix(in srgb, var(--primary) 14%, transparent));
 }
 .pmo-popover-custom-add-plus {
   width: 14px;
@@ -3103,7 +3025,7 @@ button.pmo-memory-node:hover {
 }
 .pmo-recent-card:hover {
   border-color: color-mix(in srgb, var(--primary) 45%, var(--glass-panel-border));
-  box-shadow: var(--shadow-glass), 0 2px 10px rgba(93, 119, 173, 0.10);
+  box-shadow: var(--shadow-glass), 0 2px 10px color-mix(in srgb, var(--primary) 10%, transparent);
 }
 .pmo-recent-card-title {
   font-size: 11.5px;
@@ -3119,4 +3041,80 @@ button.pmo-memory-node:hover {
   font-size: 9px;
   letter-spacing: 0.06em;
   color: var(--ink-muted);
+}
+
+/* Pegasus Spatial landing — a compact creative console, not an onboarding form. */
+.pmo-spatial-home {
+  --home-ink: #202522;
+  --home-muted: #70756f;
+  --home-line: rgba(32, 37, 34, .13);
+  --home-mint: #d75a3b;
+  position: relative;
+  display: grid;
+  min-height: 100%;
+  width: 100%;
+  grid-template-rows: 1fr auto;
+  overflow: auto;
+  color: var(--home-ink);
+  background:
+    radial-gradient(circle at 82% 18%, rgba(226, 137, 104, .19), transparent 32%),
+    radial-gradient(circle at 12% 84%, rgba(164, 190, 165, .20), transparent 28%),
+    #f4f1ea;
+  isolation: isolate;
+}
+.pmo-spatial-home::before {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background-image: linear-gradient(rgba(45, 52, 47, .045) 1px, transparent 1px), linear-gradient(90deg, rgba(45, 52, 47, .045) 1px, transparent 1px);
+  background-size: 52px 52px;
+  content: "";
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+.pmo-spatial-home-glow {
+  position: absolute;
+  top: -30%;
+  right: -12%;
+  z-index: -1;
+  width: 70vw;
+  height: 80vh;
+  background: radial-gradient(ellipse, rgba(215, 90, 59, .14), transparent 68%);
+  pointer-events: none;
+}
+.pmo-spatial-home-footer > div > span,
+.pmo-spatial-recents > span { color: var(--home-muted); font-family: var(--font-geist-mono), monospace; font-size: 9px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+.pmo-spatial-launcher { width: min(900px, calc(100% - 48px)); margin: auto; padding: 5vh 0 7vh; }
+.pmo-spatial-launcher-kicker { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.pmo-spatial-launcher-kicker span { display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid rgba(215, 90, 59, .32); border-radius: 50%; color: var(--home-mint); font-family: var(--font-geist-mono), monospace; font-size: 9px; background: rgba(255,254,250,.76); }
+.pmo-spatial-launcher-kicker p { margin: 0; color: var(--home-muted); font-size: 11px; }
+.pmo-spatial-launcher h1 { max-width: 780px; margin: 0; font-family: "Iowan Old Style", "Songti SC", Georgia, serif; font-size: clamp(43px, 6.4vw, 82px); font-weight: 500; line-height: .99; letter-spacing: -.055em; }
+.pmo-spatial-launcher-copy { max-width: 650px; margin: 24px 0 32px; color: var(--home-muted); font-size: 13px; line-height: 1.8; }
+.pmo-spatial-composer { overflow: hidden; border: 1px solid rgba(32, 37, 34, .13); border-radius: 16px; background: rgba(255, 254, 250, .9); box-shadow: 0 26px 80px rgba(59, 47, 40, .13), inset 0 1px rgba(255,255,255,.82); backdrop-filter: blur(24px); }
+.pmo-spatial-composer > textarea { display: block; width: 100%; min-height: 150px; resize: vertical; border: 0; padding: 24px 26px 14px; color: var(--home-ink); font-family: inherit; font-size: 17px; line-height: 1.65; background: transparent; outline: none; }
+.pmo-spatial-composer > textarea::placeholder { color: #9a9f97; }
+.pmo-spatial-composer:focus-within { border-color: rgba(215, 90, 59, .42); box-shadow: 0 28px 84px rgba(59, 47, 40, .15), 0 0 0 4px rgba(215, 90, 59, .07); }
+.pmo-spatial-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--home-line); padding: 11px; }
+.pmo-spatial-context-switcher { display: flex; min-width: 0; gap: 3px; overflow-x: auto; }
+.pmo-spatial-context-switcher button { flex: none; border: 0; border-radius: 8px; padding: 8px 10px; color: #7a8079; font-size: 10px; background: transparent; cursor: pointer; }
+.pmo-spatial-context-switcher button:hover { color: var(--home-ink); background: rgba(215, 90, 59, .06); }
+.pmo-spatial-context-switcher button[aria-pressed="true"] { color: var(--home-mint); background: rgba(215, 90, 59, .1); }
+.pmo-spatial-start { display: flex; flex: none; align-items: center; gap: 18px; border: 1px solid #d75a3b; border-radius: 9px; padding: 12px 15px; color: #fff; font-size: 12px; font-weight: 750; background: linear-gradient(135deg, #df6b4d, #c94d30); box-shadow: 0 8px 20px rgba(170, 65, 42, .22); cursor: pointer; }
+.pmo-spatial-start:disabled { cursor: not-allowed; filter: grayscale(.4); opacity: .35; }
+.pmo-spatial-constraints { margin-top: 13px; border: 1px solid var(--home-line); border-radius: 13px; background: rgba(255, 255, 255, .62); backdrop-filter: blur(18px); }
+.pmo-spatial-constraints summary { padding: 12px 15px; color: #656b65; font-size: 11px; cursor: pointer; }
+.pmo-spatial-constraints summary span { margin-left: 7px; color: #959a93; font-size: 9px; }
+.pmo-spatial-constraints textarea { display: block; width: calc(100% - 24px); margin: 0 12px 12px; resize: vertical; border: 1px solid var(--home-line); border-radius: 9px; padding: 12px; color: var(--home-ink); font: inherit; font-size: 12px; line-height: 1.6; background: rgba(255,255,255,.74); outline: none; }
+.pmo-spatial-home-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; border-top: 1px solid var(--home-line); padding: 18px clamp(24px, 5vw, 72px) 24px; }
+.pmo-spatial-home-footer p { margin: 6px 0 0; color: var(--home-muted); font-size: 10px; }
+.pmo-spatial-recents { display: flex; max-width: 55%; align-items: center; gap: 7px; }
+.pmo-spatial-recents button { display: flex; min-width: 0; max-width: 200px; align-items: center; gap: 10px; border: 1px solid var(--home-line); border-radius: 9px; padding: 8px 10px; color: var(--home-ink); background: rgba(255,255,255,.72); cursor: pointer; }
+.pmo-spatial-recents b { overflow: hidden; font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.pmo-spatial-recents i { color: var(--home-mint); font-style: normal; }
+@media (max-width: 760px) {
+  .pmo-spatial-launcher { width: min(100% - 28px, 900px); padding-top: 2vh; }
+  .pmo-spatial-launcher h1 { font-size: clamp(38px, 12vw, 58px); }
+  .pmo-spatial-composer-footer { align-items: flex-end; flex-direction: column; }
+  .pmo-spatial-context-switcher { width: 100%; }
+  .pmo-spatial-home-footer { align-items: flex-start; flex-direction: column; }
+  .pmo-spatial-recents { display: none; }
 }

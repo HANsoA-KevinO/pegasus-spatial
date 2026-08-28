@@ -32,6 +32,9 @@ function pngFixture(): Buffer {
 async function main(): Promise<void> {
   const mongoose = (await import('mongoose')).default
   const { connectDB } = await import('../../db/mongodb')
+  const { QueuedMessage } = await import('../../db/queue-model')
+  const { AgentRun, ConversationRuntime } = await import('../../agent-runtime/models')
+  const { AGENT_TEAM_MODELS, agentTeamService } = await import('../../agent-team')
   const spatial = await import('..')
   const {
     FakeSpatialProviderAdapter,
@@ -43,13 +46,13 @@ async function main(): Promise<void> {
     SpatialPaidSlotModel,
     SpatialStagedBatchModel,
     SpatialIdempotencyConflictError,
-    SpatialProjectCapacityError,
     SpatialOutputPathConflictError,
     SpatialPaidCapacityError,
     acquireSpatialPaidSlot,
     bindSpatialPaidSlot,
     claimNextSpatialBuildJob,
     countActiveSpatialJobs,
+    deliverSpatialJobCompletion,
     createWorkspaceSpatialPublisher,
     failSpatialJob,
     getSpatialJobResult,
@@ -61,7 +64,6 @@ async function main(): Promise<void> {
     recordSpatialJobSubmitted,
     recoverAmbiguousSpatialSubmissions,
     registerPublishedSpatialArtifact,
-    releaseSpatialPaidSlot,
     spatialStageObjectId,
   } = spatial
 
@@ -74,6 +76,10 @@ async function main(): Promise<void> {
     SpatialArtifactNodeModel.syncIndexes(),
     SpatialPaidSlotModel.syncIndexes(),
     SpatialStagedBatchModel.syncIndexes(),
+    QueuedMessage.syncIndexes(),
+    AgentRun.syncIndexes(),
+    ConversationRuntime.syncIndexes(),
+    ...AGENT_TEAM_MODELS.map(model => model.syncIndexes()),
   ])
 
   const scope = { projectId: 'project_spatial', userId: 'user_spatial' }
@@ -197,6 +203,63 @@ async function main(): Promise<void> {
     })
     assert.equal(terminalResult.job.status, 'failed')
     assert.equal(terminalResult.job.provider_status, 'rejected', 'terminal provider status must replace stale running diagnostics')
+
+    // Terminal commit -> Root reminder is durable and idempotent. A retry
+    // with the stale pre-dispatch snapshot must reuse the same queue receipt.
+    const notificationConversation = 'conversation_spatial_notification'
+    const notificationUser = 'user_spatial_notification'
+    await agentTeamService.ensureTeam({
+      conversationId: notificationConversation,
+      userId: notificationUser,
+    })
+    const notificationSeed = await prepareSpatialBuild({
+      projectId: notificationConversation,
+      runId: 'run_notification_origin',
+      toolUseId: 'tool_notification_origin',
+      userId: notificationUser,
+      conversationId: notificationConversation,
+      kind: 'object',
+      provider: 'fake',
+      request: {
+        output_path_prefix: 'output/spatial/objects/notification-origin',
+        prompt: 'notification fixture',
+      },
+      notifyOnTerminal: true,
+    })
+    const notificationFinishedAt = new Date('2026-08-27T12:00:00.000Z')
+    const notificationTerminal = await SpatialBuildJobModel.findOneAndUpdate({
+      job_id: notificationSeed.job_id,
+    }, {
+      $set: {
+        status: 'published',
+        status_revision: 4,
+        published_artifact_ids: ['artifact_notification'],
+        published_workspace_paths: ['output/spatial/objects/notification-origin/model.glb'],
+        finished_at: notificationFinishedAt,
+        updated_at: notificationFinishedAt,
+      },
+    }, { returnDocument: 'after' }).lean()
+    assert.ok(notificationTerminal)
+    assert.equal(await deliverSpatialJobCompletion(notificationTerminal), true)
+    const notificationKey = `spatial-job-terminal:v1:${notificationTerminal.job_id}:4`
+    assert.equal(await QueuedMessage.countDocuments({
+      conversation_id: notificationConversation,
+      idempotency_key: notificationKey,
+    }), 1)
+    assert.equal(
+      (await SpatialBuildJobModel.findOne({ job_id: notificationTerminal.job_id }).lean())
+        ?.completion_notified_at instanceof Date,
+      true,
+    )
+    assert.equal(
+      await deliverSpatialJobCompletion(notificationTerminal),
+      false,
+      'stale terminal replay may rediscover the receipt but must not mark a second dispatch',
+    )
+    assert.equal(await QueuedMessage.countDocuments({
+      conversation_id: notificationConversation,
+      idempotency_key: notificationKey,
+    }), 1)
 
     const result = await getSpatialJobResult({ jobId: published.job.job_id, scope })
     assert.equal(result.status, 'published')
@@ -865,7 +928,10 @@ async function main(): Promise<void> {
     }])
 
     assert.equal(await SpatialBuildJobModel.countDocuments({ status: 'unknown' }), 1)
-    assert.equal(await SpatialBuildJobModel.countDocuments({ status: 'published' }), 8)
+    assert.equal(await SpatialBuildJobModel.countDocuments({
+      status: 'published',
+      project_id: { $ne: notificationConversation },
+    }), 8)
     assert.equal(await SpatialArtifactNodeModel.countDocuments({ state: 'published' }), 17)
 
     const prefixScope = { projectId: 'project_prefix_race', userId: 'user_prefix_race' }
@@ -910,23 +976,29 @@ async function main(): Promise<void> {
       },
     })
     await mixedPrepare('one')
-    await assert.rejects(mixedPrepare('two'), SpatialProjectCapacityError)
+    await mixedPrepare('two')
+    await mixedPrepare('three')
+    const secondImageSlot = await acquireSpatialPaidSlot({
+      projectId: mixedScope.projectId,
+      userId: mixedScope.userId,
+      holderType: 'image_generation',
+      holderKey: 'second-image',
+    })
+    await bindSpatialPaidSlot(secondImageSlot)
     await assert.rejects(
       acquireSpatialPaidSlot({
         projectId: mixedScope.projectId,
         userId: mixedScope.userId,
         holderType: 'image_generation',
-        holderKey: 'second-image',
+        holderKey: 'third-image',
       }),
       SpatialPaidCapacityError,
     )
-    await releaseSpatialPaidSlot({
-      projectId: mixedScope.projectId,
-      userId: mixedScope.userId,
-      holderType: 'image_generation',
-      holderKey: 'image-receipt',
-    })
-    await mixedPrepare('two')
+    assert.equal(
+      await SpatialPaidSlotModel.countDocuments({ project_id: mixedScope.projectId }),
+      2,
+      'product 3D jobs are durable but unthrottled; only explicit image test gates occupy slots',
+    )
 
     const capacityRace = await Promise.allSettled(
       Array.from({ length: 12 }, (_, index) => prepare(`tool_capacity_${index}`)),
@@ -935,19 +1007,20 @@ async function main(): Promise<void> {
       (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof prepare>>> => result.status === 'fulfilled',
     )
     const rejected = capacityRace.filter(result => result.status === 'rejected')
-    assert.equal(admitted.length, 2, 'atomic project slots must admit exactly two concurrent jobs')
-    assert.equal(rejected.length, 10)
-    assert.ok(rejected.every(result => (
-      result as PromiseRejectedResult
-    ).reason instanceof SpatialProjectCapacityError))
-    assert.equal(await countActiveSpatialJobs(scope), 2)
+    assert.equal(admitted.length, 12, 'product 3D preparation must not reject parallel Agent work')
+    assert.equal(rejected.length, 0)
+    assert.equal(await SpatialBuildJobModel.countDocuments({
+      tool_use_id: /^tool_capacity_/,
+      status: 'prepared',
+    }), 12)
     const replayAtCapacity = await prepare(admitted[0].value.tool_use_id)
-    assert.equal(replayAtCapacity.job_id, admitted[0].value.job_id, 'idempotent replay must not consume another slot')
+    assert.equal(replayAtCapacity.job_id, admitted[0].value.job_id, 'idempotent replay must not create another job')
 
     await SpatialBuildJobModel.updateMany(
       { project_id: { $ne: scope.projectId }, status: { $in: ['prepared', 'submitted', 'running', 'materializing'] } },
       { $set: { available_at: new Date('2999-01-01T00:00:00.000Z') } },
     )
+    const activeBeforeReplacement = await countActiveSpatialJobs(scope)
     const terminalClaim = await claimNextSpatialBuildJob('worker_capacity_release', 30_000)
     assert.ok(terminalClaim)
     await failSpatialJob(
@@ -955,8 +1028,12 @@ async function main(): Promise<void> {
       'fixture terminal release',
     )
     const replacement = await prepare('tool_capacity_replacement')
-    assert.ok(replacement.active_slot === 0 || replacement.active_slot === 1)
-    assert.equal(await countActiveSpatialJobs(scope), 2, 'terminal transition must release one reusable slot')
+    assert.equal(replacement.active_slot, undefined)
+    assert.equal(
+      await countActiveSpatialJobs(scope),
+      activeBeforeReplacement,
+      'one terminal job plus one replacement keeps the active durable queue size stable',
+    )
     console.log('✓ Spatial Mongo crash/recovery verification passed')
   } finally {
     await database.dropDatabase()

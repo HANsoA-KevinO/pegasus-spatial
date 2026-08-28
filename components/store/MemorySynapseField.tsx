@@ -6,7 +6,7 @@
  * 漂移节点星群,靠近时扯出突触连线,信号弧沿连线奔流;候选亮点被最近节点
  * 缓慢拉近(「保留到画像」隐喻)。network 偏右,配合左侧容量文字的渐隐 mask。
  *
- * 色板取自 design tokens(三色族:青蓝/石墨蓝/堇),暗色经 [data-theme="dark"] 变体;
+ * 色板取自 design tokens（鼠尾草 / 赤陶 / 赭石），与比赛版单一暖色主题一致；
  * MULTIPLY 混合在浅色底不糊;reduced-motion 渲染一帧静态。
  */
 import { useEffect, useRef } from 'react'
@@ -74,24 +74,17 @@ export function MemorySynapseField({ className = '' }: { className?: string }) {
       const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16)
       return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
     }
-    const dark = document.documentElement.classList.contains('dark')
-      || document.documentElement.dataset.theme === 'dark'
-    const fams: [number, number, number][] = dark
-      ? [hexToRgb('#8adfd9'), hexToRgb('#a0b4e0'), hexToRgb('#b3a6f0')]
-      : [
-        hexToRgb(read('--mem-fam-a', '#53aeae')),
-        hexToRgb(read('--mem-fam-b', read('--brand-primary', '#5d77ad'))),
-        hexToRgb(read('--mem-fam-c', '#8f80c8')),
-      ]
-    const linkRgb = hexToRgb(read('--mem-link', dark ? '#9db8ee' : '#7a8dbc'))
-    const bgRgb = hexToRgb(read('--paper', dark ? '#171a21' : '#ffffff'))
-    // 暗色底上用 ADD(屏幕式)混合发光;浅色底用 MULTIPLY 保持纸面干净
-    const fieldBlend: GlobalCompositeOperation = dark ? 'lighter' : 'multiply'
-    // 暗色下信号/节点需要更亮才能读出;浅色下 MULTIPLY 已足够
-    const boost = dark ? 1.9 : 1
-    const boostFill = dark ? 1.9 : 1
-    // 暗色 ADD 下拖尾覆盖太重会糊成一片,放轻;浅色 MULTIPLY 需要足够覆盖防残影
-    const trailCover = dark ? 0.12 : 56 / 255
+    const fams: [number, number, number][] = [
+      hexToRgb(read('--mem-fam-a', '#74806a')),
+      hexToRgb(read('--mem-fam-b', read('--brand-primary', '#d75a3b'))),
+      hexToRgb(read('--mem-fam-c', '#b58a57')),
+    ]
+    const linkRgb = hexToRgb(read('--mem-link', '#a66c58'))
+    const bgRgb = hexToRgb(read('--paper', '#fcfbf7'))
+    const fieldBlend: GlobalCompositeOperation = 'multiply'
+    const boost = 1
+    const boostFill = 1
+    const trailCover = 56 / 255
 
     let width = host.clientWidth
     let height = host.clientHeight

@@ -111,19 +111,24 @@ def main() -> None:
         )
         page.goto(
             f"{base_url}/spatial/{args.conversation_id}",
-            wait_until="networkidle",
+            # The Stage intentionally keeps a render-session heartbeat and
+            # adaptive command poll open. `networkidle` can therefore never
+            # be a stable readiness signal; wait for the product shell below.
+            wait_until="domcontentloaded",
         )
-        page.get_by_text("SCENE STAGE · 空间创作台", exact=True).wait_for(state="visible")
+        page.get_by_text("PEGASUS SPATIAL / SCENE STAGE", exact=True).wait_for(state="visible")
         page.get_by_text("可编辑客厅", exact=True).first.wait_for(state="visible")
-        page.get_by_text("Revision 历史（只读）", exact=True).wait_for(state="visible")
+        page.get_by_text("自动版本", exact=True).wait_for(state="visible")
         page.get_by_text("从这里提出修改", exact=True).wait_for(state="visible")
-        page.get_by_text("VERIFICATION BOUNDARY", exact=True).wait_for(state="visible")
-        page.get_by_role("link", name="返回 Agent").wait_for(state="visible")
+        page.get_by_text("把你看到的问题交给 Agent", exact=True).wait_for(state="visible")
+        page.get_by_text("能力边界", exact=True).wait_for(state="visible")
+        page.get_by_role("link", name="返回对话").wait_for(state="visible")
+        page.get_by_role("button", name="重置视角").wait_for(state="visible")
         page.get_by_label("Aholo 混合空间查看器").wait_for(state="visible")
         page.get_by_role("button", name="v1 初始版本").click()
-        page.get_by_text("SCENE v1 · 只读历史", exact=True).wait_for(state="visible")
-        page.get_by_role("button", name="返回当前 revision").click()
-        page.get_by_text("SCENE v2", exact=True).wait_for(state="visible")
+        page.get_by_text("历史 v1", exact=True).wait_for(state="visible")
+        page.get_by_role("button", name="返回当前版本").click()
+        page.get_by_text("当前 v2", exact=True).wait_for(state="visible")
 
         overflow = page.evaluate(
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"

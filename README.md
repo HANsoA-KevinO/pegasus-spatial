@@ -56,8 +56,8 @@ prepared → submitting → submitted → running → materializing → publishe
 - 幂等键由 `project_id + run_id + tool_use_id` 构成。
 - 获得供应商任务 ID 后先持久化，再继续等待与物化。
 - 服务重启只接管已知外部任务；无法确认是否已提交的任务进入 `unknown`，不自动重试。
-- 付费工具仅 Root Agent 可用，并且必须显式设置 `SPATIAL_PAID_CALLS_ENABLED=1`。
-- 项目同时最多运行两个昂贵任务。
+- 生成工具默认由 Root Agent 使用；Root 可以通过持久 `allowed_tools` 明确授权 Member，wildcard 不会自动开放昂贵工具。真实提交必须显式设置 `SPATIAL_PAID_CALLS_ENABLED=1`。
+- 产品不设置项目级图片或 3D 任务数量上限。3D 请求全部进入持久队列；`SPATIAL_WORKER_CONCURRENCY` 只限制本机瞬时提交、轮询与物化吞吐，不是 Agent 或项目额度。
 
 ## Workspace
 

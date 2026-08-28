@@ -199,7 +199,7 @@ class MemoryPaidCapacity {
     if (existing) return structuredClone(existing)
     const occupied = new Set(
       [...this.holders.values()]
-        .filter(value => value.projectId === input.projectId)
+        .filter(value => value.projectId === input.projectId && value.holderType === holderType)
         .map(value => value.slot),
     )
     const slot = ([0, 1] as const).find(candidate => !occupied.has(candidate))
@@ -1045,8 +1045,8 @@ function assertByteFree(value: unknown): void {
   assert.equal(capacity.size('project_1'), 0)
 }
 
-// Object/world and image holders use the same two records. One pre-existing
-// object plus one live image leaves no hidden third slot for another image.
+// Slow object/world builds and images have independent two-slot lanes. Two
+// Lux builds must not prevent Agents from producing the next reference image.
 {
   const workspace = createInMemoryWorkspace()
   const state = setup(new MemoryReceiptStore())
@@ -1058,37 +1058,42 @@ function assertByteFree(value: unknown): void {
     holderKey: 'spjob_object_live',
   })
   await capacity.bind(object)
-  let imageStarted = false
-  let releaseImage!: () => void
-  const imageGate = new Promise<void>(resolve => { releaseImage = resolve })
+  let imagesStarted = 0
+  let releaseImages!: () => void
+  const imageGate = new Promise<void>(resolve => { releaseImages = resolve })
   state.dependencies.provider = {
     ...TEST_IMAGE_PROVIDER_IDENTITY,
     async generate() {
-      imageStarted = true
+      imagesStarted += 1
       await imageGate
       return { buffer: Buffer.from('server-only-image-bytes'), mimeType: 'image/png' }
     },
   }
-  const image = executeGenerateImage({ ...input, output_path: 'output/spatial/images/mixed-one.png' }, workspace, {
+  const firstImage = executeGenerateImage({ ...input, output_path: 'output/spatial/images/mixed-one.png' }, workspace, {
     executionContext: { ...executionContext, runId: 'run_mixed_one' },
     invocation,
     dependencies: state.dependencies,
   })
-  while (!imageStarted) await new Promise(resolve => setTimeout(resolve, 0))
-  const rejected = await executeGenerateImage({ ...input, output_path: 'output/spatial/images/mixed-two.png' }, workspace, {
+  const secondImage = executeGenerateImage({ ...input, output_path: 'output/spatial/images/mixed-two.png' }, workspace, {
     executionContext: { ...executionContext, runId: 'run_mixed_two' },
     invocation,
     dependencies: state.dependencies,
   })
+  while (imagesStarted < 2) await new Promise(resolve => setTimeout(resolve, 0))
+  const rejected = await executeGenerateImage({ ...input, output_path: 'output/spatial/images/mixed-three.png' }, workspace, {
+    executionContext: { ...executionContext, runId: 'run_mixed_three' },
+    invocation,
+    dependencies: state.dependencies,
+  })
   assert.equal(rejected.is_error, true)
-  assert.equal(capacity.maxOccupied, 2)
+  assert.equal(capacity.maxOccupied, 3)
   await capacity.release('spatial_build', {
     projectId: object.projectId,
     userId: object.userId,
     holderKey: object.holderKey,
   })
-  releaseImage()
-  await image
+  releaseImages()
+  await Promise.all([firstImage, secondImage])
   assert.equal(capacity.size('project_1'), 0)
 }
 

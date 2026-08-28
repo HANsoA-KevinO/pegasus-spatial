@@ -211,7 +211,7 @@ export interface GenerateImageDependencies {
   registerPublishedArtifact?(
     input: RegisterPublishedSpatialArtifactInput,
   ): Promise<SpatialArtifactNodeRecord>
-  /** Atomic two-slot capacity shared with image, object and world builds. */
+  /** Optional Operator/test budget gate; normal product generation has no fixed project slot cap. */
   paidSlots?: {
     acquire(input: {
       projectId: string

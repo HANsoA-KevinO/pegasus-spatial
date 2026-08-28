@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { buildBrowserMediaUrl } from '../browser-url'
 import {
+  buildProviderRasterAliasObjectKey,
   buildRasterAssetObjectKey,
   DEFAULT_MEDIA_OBJECT_PREFIX,
   getMediaObjectPrefix,
@@ -29,6 +30,14 @@ assert.equal(
 process.env.NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX = 'pegasus-spatial-v2/media/raster'
 const expectedPath = `pegasus-spatial-v2/media/raster/${assetId}/thumbnail`
 assert.equal(buildRasterAssetObjectKey(assetId, 'thumbnail'), expectedPath)
+assert.equal(
+  buildProviderRasterAliasObjectKey(buildRasterAssetObjectKey(assetId, 'original'), 'image/png'),
+  `${buildRasterAssetObjectKey(assetId, 'original')}.png`,
+)
+assert.equal(
+  buildProviderRasterAliasObjectKey(buildRasterAssetObjectKey(assetId, 'original'), 'image/jpeg'),
+  `${buildRasterAssetObjectKey(assetId, 'original')}.jpg`,
+)
 assert.equal(
   buildMediaPublicUrl(assetId, 'thumbnail'),
   `https://media.example.test/${expectedPath}`,

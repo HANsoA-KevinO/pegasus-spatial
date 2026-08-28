@@ -397,6 +397,7 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
   const contract: SpatialHttpWireContract = {
     submitPath: () => '/fixture/jobs',
     pollPath: value => `/fixture/jobs/${value.external_job_id}`,
+    idempotencyHeaderName: 'Idempotency-Key',
     encodeSubmission: value => ({ prompt: value.request_snapshot.prompt }),
     decodeSubmission(payload) {
       return { externalJobId: (payload as { task_id: string }).task_id }
@@ -583,6 +584,8 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
   })
   const aholoSubmission = await officialAholo.submit(worldJob, { providerIdempotencyKey: 'aholo-idem' })
   assert.equal(officialAholoRequests[0].headers.get('Authorization'), 'aholo-raw-key')
+  assert.equal(officialAholoRequests[0].headers.get('x-source'), 'skills')
+  assert.equal(officialAholoRequests[0].headers.get('Idempotency-Key'), null)
   assert.deepEqual(await officialAholoRequests[0].json(), {
     resources: [{ url: 'https://media.example.test/authorized-room.png', type: 'image' }],
     prompt: 'quiet reading room',
@@ -605,6 +608,68 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
     () => createAholoOfficialWireContract().decodePoll({ status: 'completed', assets: {} }, fixtureJob),
     /unsupported status/,
   )
+
+  const uploadRequests: Request[] = []
+  const uploadAholo = new AholoAdapter({
+    token: 'aholo-raw-key',
+    allowPaidCalls: true,
+    sourceImageLoader: async assetId => {
+      assert.equal(assetId, 'asset_world_source')
+      return { buffer: Buffer.from('png-fixture'), mimeType: 'image/png', filename: 'world-source.png' }
+    },
+    fetchImpl: async (input, init) => {
+      const request = new Request(input, init)
+      uploadRequests.push(request)
+      if (request.url.endsWith('/asset/v1/token')) {
+        return Response.json({
+          ousToken: 'ous-token-fixture',
+          globalDomain: 'https://ous-cos.kujiale.com',
+          blockSize: 5 * 1024 * 1024,
+        })
+      }
+      if (request.url.endsWith('/ous/api/v2/single/upload')) {
+        assert.equal(request.headers.get('ous-token-v2'), 'ous-token-fixture')
+        return Response.json({ c: 0, m: 'ok', d: { taskId: 'upload-fixture' } })
+      }
+      if (request.url.endsWith('/ous/api/v2/upload/status')) {
+        return Response.json({
+          c: 0,
+          m: 'ok',
+          d: { status: 5, url: 'https://qhstaticssl.kujiale.com/assets/world-source.png' },
+        })
+      }
+      if (request.url.endsWith('/world/v1/generations')) {
+        assert.deepEqual(await request.json(), {
+          resources: [{
+            url: 'https://qhstaticssl.kujiale.com/assets/world-source.png',
+            type: 'image',
+          }],
+          prompt: 'quiet reading room',
+        })
+        return Response.json({ worldId: 'world-upload-fixture' })
+      }
+      throw new Error(`unexpected Aholo URL: ${request.url}`)
+    },
+  })
+  const uploadSubmission = await uploadAholo.submit(job({
+    kind: 'world',
+    provider: 'aholo',
+    request_snapshot: {
+      output_path_prefix: 'output/spatial/worlds/upload-aholo',
+      prompt: 'quiet reading room',
+      provider_options: {
+        source_asset_id: 'asset_world_source',
+        source_image_url: 'https://media.example.test/original.png',
+      },
+    },
+  }), { providerIdempotencyKey: 'internal-only' })
+  assert.equal(uploadSubmission.externalJobId, 'world-upload-fixture')
+  assert.deepEqual(uploadRequests.map(request => new URL(request.url).pathname), [
+    '/asset/v1/token',
+    '/ous/api/v2/single/upload',
+    '/ous/api/v2/upload/status',
+    '/world/v1/generations',
+  ])
 }
 
 async function verifyStableToolResult(): Promise<void> {

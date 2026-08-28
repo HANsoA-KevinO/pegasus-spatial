@@ -4,6 +4,7 @@ import { createElement, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import type { WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
 import { ProgressiveImage } from '@/components/media/ProgressiveImage'
+import { isInternalWorkspacePath, normalizeWorkspacePath } from '@/lib/workspace/path-policy'
 
 function fileUrl(conversationId: string, artifact: WorkspaceArtifact, extra = ''): string {
   const version = artifact.sha256 ? `&v=${encodeURIComponent(artifact.sha256)}` : ''
@@ -21,26 +22,26 @@ export function SpatialImageViewer({ artifact, conversationId }: {
   artifact: WorkspaceArtifact
   conversationId: string
 }) {
-  const src = fileUrl(conversationId, artifact, '&w=1600')
+  const src = fileUrl(conversationId, artifact, '&w=1600&inline=1')
   const aspectRatio = artifact.width && artifact.height
     ? `${artifact.width} / ${artifact.height}`
     : '16 / 10'
 
   return (
-    <section className="min-h-full bg-[#101319] px-5 py-6 text-[#eef2f8] sm:px-8 sm:py-8">
-      <header className="mx-auto mb-5 flex max-w-5xl flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-4">
+    <section className="min-h-full bg-[#f3f4f7] px-5 py-6 text-[#25293a] sm:px-8 sm:py-8">
+      <header className="mx-auto mb-5 flex max-w-5xl flex-wrap items-end justify-between gap-3 border-b border-black/10 pb-4">
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#8da8d8]">生成图像</p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">生成图像</p>
           <h2 className="mt-1 text-base font-semibold tracking-[-0.01em]">{artifact.label}</h2>
-          <p className="mt-1 text-[11px] text-white/45">
+          <p className="mt-1 text-[11px] text-[#777d8f]">
             {[artifact.mimeType, artifact.width && artifact.height ? `${artifact.width} × ${artifact.height}` : null, formatBytes(artifact.sizeBytes)].filter(Boolean).join(' · ')}
           </p>
         </div>
-        <a className="rounded-md border border-white/15 px-3 py-2 text-[11px] font-medium text-white/75 transition hover:border-[#8da8d8]/70 hover:text-white" href={fileUrl(conversationId, artifact, '&download=1')}>
+        <a className="rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-[11px] font-medium text-ink-secondary shadow-sm transition hover:border-primary/40 hover:text-primary-deep" href={fileUrl(conversationId, artifact, '&download=1')}>
           下载原图
         </a>
       </header>
-      <div className="mx-auto max-w-5xl overflow-hidden rounded-[4px] border border-white/10 bg-[linear-gradient(45deg,#171b22_25%,transparent_25%),linear-gradient(-45deg,#171b22_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#171b22_75%),linear-gradient(-45deg,transparent_75%,#171b22_75%)] bg-[length:24px_24px] shadow-[0_28px_90px_rgba(0,0,0,.38)]" style={{ aspectRatio }}>
+      <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl border border-black/[0.08] bg-[linear-gradient(45deg,#eef0f4_25%,transparent_25%),linear-gradient(-45deg,#eef0f4_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#eef0f4_75%),linear-gradient(-45deg,transparent_75%,#eef0f4_75%)] bg-[length:24px_24px] shadow-[0_24px_70px_rgba(45,50,75,.15)]" style={{ aspectRatio }}>
         <ProgressiveImage src={src} alt={artifact.label} frameClassName="h-full w-full" imageClassName="h-full w-full object-contain" />
       </div>
     </section>
@@ -64,15 +65,15 @@ export function SpatialModelViewer({ artifact, conversationId }: {
   }, [])
 
   return (
-    <section className="relative flex min-h-full flex-col overflow-hidden bg-[#0d1117] text-[#eff4fb]">
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-60 [background-image:linear-gradient(rgba(122,150,195,.08)_1px,transparent_1px),linear-gradient(90deg,rgba(122,150,195,.08)_1px,transparent_1px)] [background-size:44px_44px]" />
-      <header className="relative z-10 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 px-5 py-4 sm:px-7">
+    <section className="relative flex min-h-full flex-col overflow-hidden bg-[#eef0f5] text-[#25293a]">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-60 [background-image:linear-gradient(rgba(145,223,194,.06)_1px,transparent_1px),linear-gradient(90deg,rgba(145,223,194,.06)_1px,transparent_1px)] [background-size:44px_44px]" />
+      <header className="relative z-10 flex flex-wrap items-end justify-between gap-3 border-b border-black/10 bg-white/55 px-5 py-4 backdrop-blur-xl sm:px-7">
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#8da8d8]">3D 物体 · GLB</p>
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary">3D 物体 · GLB</p>
           <h2 className="mt-1 text-base font-semibold">{artifact.label}</h2>
-          <p className="mt-1 text-[11px] text-white/45">拖动旋转 · 滚轮缩放 · {formatBytes(artifact.sizeBytes)}</p>
+          <p className="mt-1 text-[11px] text-[#777d8f]">拖动旋转 · 滚轮缩放 · {formatBytes(artifact.sizeBytes)}</p>
         </div>
-        <a className="rounded-md border border-white/15 px-3 py-2 text-[11px] font-medium text-white/75 transition hover:border-[#8da8d8]/70 hover:text-white" href={`${src}&download=1`}>
+        <a className="rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-[11px] font-medium text-ink-secondary shadow-sm transition hover:border-primary/40 hover:text-primary-deep" href={`${src}&download=1`}>
           下载 GLB
         </a>
       </header>
@@ -90,8 +91,8 @@ export function SpatialModelViewer({ artifact, conversationId }: {
         }) : (
           <div className="flex h-full min-h-[520px] items-center justify-center text-center">
             <div>
-              <span className={`mx-auto block h-8 w-8 rounded-full border-2 ${failed ? 'border-red-400/70' : 'animate-spin border-white/15 border-t-[#8da8d8]'}`} />
-              <p className="mt-4 text-xs text-white/55">{failed ? '3D 查看器加载失败，请下载 GLB 查看' : '正在初始化 3D 查看器…'}</p>
+              <span className={`mx-auto block h-8 w-8 rounded-full border-2 ${failed ? 'border-red-400/70' : 'animate-spin border-black/10 border-t-primary'}`} />
+              <p className="mt-4 text-xs text-[#71778a]">{failed ? '3D 查看器加载失败，请下载 GLB 查看' : '正在初始化 3D 查看器…'}</p>
             </div>
           </div>
         )}
@@ -167,17 +168,49 @@ function worldRelationLabel(kind: string | undefined): string {
   }
 }
 
+const WORLD_COVER_EXTENSION = /\.(?:png|jpe?g|webp|gif)$/i
+
+function safeWorldCoverPath(value: string | undefined): string | null {
+  if (!value) return null
+  try {
+    const normalized = normalizeWorkspacePath(value)
+    return !isInternalWorkspacePath(normalized) && WORLD_COVER_EXTENSION.test(normalized)
+      ? normalized
+      : null
+  } catch {
+    return null
+  }
+}
+
+export function worldCoverPaths(manifest: WorldManifest | null): string[] {
+  if (!manifest) return []
+  const candidates = [
+    manifest.preview_path,
+    ...(manifest.assets ?? [])
+      .filter(asset => asset.kind === 'thumbnail' || asset.kind === 'image' || asset.mime_type?.startsWith('image/'))
+      .map(asset => asset.path),
+    manifest.source_image_path,
+  ]
+  return [...new Set(candidates.flatMap(candidate => {
+    const safe = safeWorldCoverPath(candidate)
+    return safe ? [safe] : []
+  }))]
+}
+
 export function SpatialWorldViewer({ artifact, conversationId, content }: {
   artifact: WorkspaceArtifact
   conversationId: string
   content: string
 }) {
   const manifest = useMemo(() => safeManifest(content), [content])
-  const viewerUrl = safeHttpUrl(manifest?.viewer_url)
-  const previewPath = manifest?.preview_path?.replace(/^\/+/, '')
-  const previewUrl = previewPath
-    ? `/api/conversations/${encodeURIComponent(conversationId)}/files/binary?path=${encodeURIComponent(previewPath)}&w=1600`
+  const coverPaths = useMemo(() => worldCoverPaths(manifest), [manifest])
+  const [coverIndex, setCoverIndex] = useState(0)
+  useEffect(() => { setCoverIndex(0) }, [content])
+  const coverPath = coverPaths[coverIndex] ?? null
+  const coverSrc = coverPath
+    ? `/api/conversations/${encodeURIComponent(conversationId)}/files/binary?path=${encodeURIComponent(coverPath)}&w=1920&inline=1`
     : null
+  const viewerUrl = safeHttpUrl(manifest?.viewer_url)
   const status = manifest?.status ?? 'published'
   const relations = Array.isArray(manifest?.relations)
     ? manifest.relations.filter(relation => relation?.kind && relation?.artifact_id).slice(0, 8)
@@ -185,90 +218,51 @@ export function SpatialWorldViewer({ artifact, conversationId, content }: {
   const assets = Array.isArray(manifest?.assets) ? manifest.assets : []
 
   return (
-    <section className="min-h-full bg-[#0d1117] p-5 text-[#eff4fb] sm:p-8">
-      <div className="mx-auto max-w-5xl">
-        <header className="flex flex-wrap items-start justify-between gap-5 border-b border-white/10 pb-5">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-[#7fb38c] shadow-[0_0_16px_rgba(127,179,140,.75)]" />
-              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#8da8d8]">空间世界 · {worldStatusLabel(status)}</p>
-            </div>
-            <h2 className="mt-2 text-xl font-semibold tracking-[-0.025em]">{manifest?.title ?? artifact.label}</h2>
-            <p className="mt-2 max-w-2xl text-xs leading-5 text-white/45">
-              {[manifest?.provider ?? 'Aholo', manifest?.world_id ? `世界 ${manifest.world_id}` : null, manifest?.up_axis ? `${manifest.up_axis}-up` : null].filter(Boolean).join(' · ')}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={`/spatial/${encodeURIComponent(conversationId)}?manifest=${encodeURIComponent(artifact.path)}`}
-              className="rounded-md bg-[#dce8ff] px-4 py-2.5 text-xs font-semibold text-[#172033] transition hover:bg-white"
-            >
-              进入空间舞台
-            </Link>
-            {viewerUrl && (
-              <a href={viewerUrl} target="_blank" rel="noreferrer" className="rounded-md border border-white/15 px-4 py-2.5 text-xs font-semibold text-white/70 transition hover:border-white/30 hover:text-white">
-                Aholo 原始页面 ↗
-              </a>
-            )}
-          </div>
-        </header>
+    <section className="relative h-full min-h-[420px] overflow-hidden bg-[#d8d3c8] text-[#f8f5ee] [container-type:inline-size]">
+      {coverSrc ? (
+        <ProgressiveImage
+          src={coverSrc}
+          alt={`${manifest?.title ?? artifact.label} 空间封面`}
+          fit="cover"
+          frameClassName="absolute inset-0 block h-full w-full"
+          imageClassName="h-full w-full object-cover"
+          onError={() => setCoverIndex(index => index + 1)}
+        />
+      ) : (
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_22%,rgba(215,90,59,.18),transparent_28%),linear-gradient(135deg,#6d7069,#333a36)]" />
+      )}
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(18,22,19,.48),transparent_30%,transparent_58%,rgba(18,22,19,.82))]" />
 
-        {previewUrl ? (
-          <div className="mt-6 overflow-hidden rounded-[4px] border border-white/10 bg-black/30 shadow-[0_28px_90px_rgba(0,0,0,.35)]">
-            <ProgressiveImage src={previewUrl} alt={manifest?.title ?? artifact.label} frameClassName="aspect-video w-full" imageClassName="h-full w-full object-cover" />
-          </div>
-        ) : (
-          <div className="mt-6 flex aspect-video items-center justify-center rounded-[4px] border border-dashed border-white/15 bg-white/[0.025]">
-            <div className="max-w-sm text-center">
-              <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-white/50">缩略图待同步</p>
-              <p className="mt-2 text-xs leading-5 text-white/35">世界清单已保存；可通过 Aholo 打开完整 3DGS，或等待缩略图同步。</p>
+      <div className="absolute left-5 top-5 flex items-center gap-2 rounded-md border border-white/20 bg-black/25 px-3 py-2 backdrop-blur-md">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#9ed1ac] shadow-[0_0_0_4px_rgba(158,209,172,.16)]" />
+        <span className="text-[10px] font-semibold tracking-[0.08em]">空间世界 · {worldStatusLabel(status)}</span>
+      </div>
+
+      <div className="absolute right-5 top-5 flex gap-2">
+        {viewerUrl && <a href={viewerUrl} target="_blank" rel="noreferrer" className="rounded-md border border-white/25 bg-black/25 px-3 py-2 text-[10px] font-semibold text-white backdrop-blur-md transition hover:bg-black/40">Aholo ↗</a>}
+        <Link href={`/spatial/${encodeURIComponent(conversationId)}?manifest=${encodeURIComponent(artifact.path)}`} className="rounded-md bg-[#d75a3b] px-4 py-2 text-[10px] font-bold text-white shadow-lg transition hover:bg-[#c94e31]">
+          进入空间舞台
+        </Link>
+      </div>
+
+      <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-6 p-5 sm:p-7">
+        <div className="min-w-0 max-w-2xl">
+          <p className="text-[10px] font-medium text-white/65">{coverPath === manifest?.source_image_path ? '创作参考图封面' : '空间封面'}</p>
+          <h2 className="mt-1 truncate font-serif text-2xl font-semibold tracking-[-0.025em] sm:text-3xl">{manifest?.title ?? artifact.label}</h2>
+          <p className="mt-2 truncate text-[10px] text-white/65">
+            {[manifest?.provider ?? 'Aholo', manifest?.world_id ? `世界 ${manifest.world_id}` : null, manifest?.up_axis ? `${manifest.up_axis}-up` : null, `${assets.length} 个发布资产`].filter(Boolean).join(' · ')}
+          </p>
+        </div>
+        {(assets.length > 0 || relations.length > 0) && <details className="group relative shrink-0 text-right">
+          <summary className="cursor-pointer list-none rounded-md border border-white/20 bg-black/25 px-3 py-2 text-[10px] font-semibold backdrop-blur-md">构建信息</summary>
+          <div className="absolute bottom-11 right-0 w-72 rounded-lg border border-white/20 bg-[#252a26]/95 p-3 text-left shadow-2xl backdrop-blur-xl">
+            <p className="text-[9px] font-semibold text-white/55">{assets.length} 个资产 · {relations.length} 条来源关系</p>
+            <div className="mt-2 max-h-40 space-y-1 overflow-auto">
+              {assets.slice(0, 5).map((item, index) => <p key={`${item.path}:${index}`} className="truncate text-[9px] text-white/75" title={item.path}>{item.path ?? item.key ?? `资产 ${index + 1}`}</p>)}
+              {relations.slice(0, 3).map((relation, index) => <p key={`${relation.kind}:${index}`} className="truncate text-[9px] text-[#ef9b82]">{worldRelationLabel(relation.kind)} · {relation.artifact_id}</p>)}
             </div>
           </div>
-        )}
-
-        <dl className="mt-6 grid gap-px overflow-hidden rounded-[4px] border border-white/10 bg-white/10 sm:grid-cols-3">
-          {[
-            ['供应商任务', manifest?.provider_task_id ?? '—'],
-            ['源图', manifest?.source_image_path ?? '直接文本生成'],
-            ['更新时间', manifest?.updated_at ?? manifest?.created_at ?? '—'],
-          ].map(([label, value]) => (
-            <div key={label} className="bg-[#121720] px-4 py-3">
-              <dt className="font-mono text-[9px] uppercase tracking-[0.16em] text-white/30">{label}</dt>
-              <dd className="mt-1 truncate text-[11px] text-white/65" title={value}>{value}</dd>
-            </div>
-          ))}
-        </dl>
-
-        {(assets.length > 0 || relations.length > 0) && (
-          <div className="mt-6 grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
-            {assets.length > 0 && (
-              <section className="border-t border-white/10 pt-4">
-                <h3 className="font-mono text-[9px] uppercase tracking-[0.18em] text-white/35">已发布资产</h3>
-                <div className="mt-2 space-y-1.5">
-                  {assets.slice(0, 8).map((item, index) => (
-                    <div key={`${item.key ?? item.path ?? 'asset'}:${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-b border-white/[0.06] py-2 text-[10px]">
-                      <span className="truncate text-white/65" title={item.path}>{item.path ?? item.key ?? `资产 ${index + 1}`}</span>
-                      <span className="font-mono text-white/30">{item.size_bytes ? formatBytes(item.size_bytes) : item.kind ?? 'asset'}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-            {relations.length > 0 && (
-              <section className="border-t border-white/10 pt-4">
-                <h3 className="font-mono text-[9px] uppercase tracking-[0.18em] text-white/35">来源关系</h3>
-                <div className="mt-2 space-y-1.5">
-                  {relations.map((relation, index) => (
-                    <div key={`${relation.kind}:${relation.artifact_id}:${index}`} className="rounded-[3px] border border-white/[0.08] bg-white/[0.025] px-3 py-2">
-                      <p className="text-[9px] text-[#9eb7df]">{worldRelationLabel(relation.kind)}</p>
-                      <p className="mt-1 truncate font-mono text-[9px] text-white/40" title={relation.artifact_id}>{relation.artifact_id}</p>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        )}
+        </details>}
       </div>
     </section>
   )

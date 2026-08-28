@@ -74,6 +74,7 @@ export function ProgressiveImage({
     >
       <span
         className="pmo-progressive-image-loader"
+        style={{ opacity: phase === 'ready' || phase === 'error' ? 0 : 1 }}
         role={phase === 'loading' || phase === 'decoding' ? 'status' : undefined}
         aria-label={phase === 'decoding' ? '正在解码高清图像' : '正在获取高清图像'}
         aria-hidden={phase === 'ready' || phase === 'error'}
@@ -99,6 +100,7 @@ export function ProgressiveImage({
         alt={alt}
         decoding={imageProps.decoding ?? 'async'}
         className={`pmo-progressive-image-final ${imageClassName}`}
+        style={{ ...imageProps.style, opacity: phase === 'ready' ? 1 : 0 }}
         onLoad={event => {
           void reveal(event.currentTarget)
           onLoad?.(event)

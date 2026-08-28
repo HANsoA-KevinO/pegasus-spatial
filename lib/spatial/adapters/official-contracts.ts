@@ -67,6 +67,7 @@ export function createAholoOfficialWireContract(): SpatialHttpWireContract {
   return {
     submitPath: () => '/world/v1/generations',
     pollPath: job => `/world/v1/${encodeURIComponent(job.external_job_id || '')}`,
+    submissionHeaders: () => ({ 'x-source': 'skills' }),
     encodeSubmission(job) {
       const options = providerOptions(job)
       const images = frozenSourceImages(job)

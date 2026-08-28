@@ -3,7 +3,7 @@ import sharp from 'sharp'
 import { getConversation } from '@/lib/db/repository'
 import { getGridFSFileInfo, readFileFromGridFSAsBuffer } from '@/lib/db/gridfs'
 import { resolveLocalOwner } from '@/lib/local-owner'
-import { getOwnedImageAsset } from '@/lib/media/storage'
+import { getOwnedImageAsset, readImageAsset } from '@/lib/media/storage'
 import { toRasterAssetRef } from '@/lib/media/reference'
 import { isInternalWorkspacePath } from '@/lib/workspace/path-policy'
 import {
@@ -129,6 +129,21 @@ export async function GET(
       const asset = await getOwnedImageAsset(entry.asset_id, userId, id)
       if (!asset) return NextResponse.json({ error: `Asset not found: ${path}` }, { status: 404 })
       const variant = width == null ? 'original' : width <= 256 ? 'thumbnail' : 'model'
+      if (req.nextUrl.searchParams.get('inline') === '1') {
+        const found = await readImageAsset(entry.asset_id, variant)
+        if (!found) return NextResponse.json({ error: `Asset bytes not found: ${path}` }, { status: 404 })
+        const selected = found.asset.variants[variant]
+        return new NextResponse(new Uint8Array(found.buffer), {
+          headers: {
+            'Content-Type': selected.mimeType,
+            'Content-Length': String(found.buffer.length),
+            'Content-Disposition': contentDisposition(path.split('/').at(-1) || 'image', req.nextUrl.searchParams.get('download') === '1'),
+            'Cache-Control': 'private, max-age=3600',
+            'Cross-Origin-Resource-Policy': 'same-origin',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
+      }
       return NextResponse.redirect(toRasterAssetRef(asset).urls[variant], 307)
     }
 

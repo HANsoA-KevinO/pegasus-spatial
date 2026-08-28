@@ -72,10 +72,10 @@ function statusLabel(status: string | undefined): string {
 }
 
 function statusTone(status: string | undefined): string {
-  if (status === 'published') return 'border-emerald-300/20 bg-emerald-300/10 text-emerald-100'
-  if (status === 'failed' || status === 'unknown') return 'border-amber-300/20 bg-amber-300/10 text-amber-100'
-  if (status === 'cancelled') return 'border-white/10 bg-white/5 text-white/45'
-  return 'border-blue-300/20 bg-blue-300/10 text-blue-100'
+  if (status === 'published') return 'border-success/20 bg-success/10 text-success'
+  if (status === 'failed' || status === 'unknown') return 'border-warning/20 bg-warning/10 text-warning'
+  if (status === 'cancelled') return 'border-outline-variant/20 bg-surface-low text-ink-faint'
+  return 'border-primary/20 bg-primary/10 text-primary'
 }
 
 function elapsed(value: number | undefined): string | null {
@@ -160,7 +160,7 @@ export function SpatialJobCard({ tool, content, pending, isError }: {
   if (!job) {
     if (!pending && !isError) return null
     return (
-      <div className="mx-3 mb-3 rounded-md border border-white/10 bg-[#111722] px-3 py-3 text-[11px] text-white/55">
+      <div className="mx-3 mb-3 rounded-md border border-ghost-border/20 bg-surface-lowest px-3 py-3 text-[11px] text-ink-muted shadow-sm">
         {isError ? '空间任务未能建立持久记录。' : '正在建立持久空间任务…'}
       </div>
     )
@@ -180,34 +180,34 @@ export function SpatialJobCard({ tool, content, pending, isError }: {
     : []
 
   return (
-    <section className="mx-3 mb-3 overflow-hidden rounded-md border border-white/10 bg-[#101620] text-[#edf3fc] shadow-[0_14px_40px_rgba(0,0,0,.16)]">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 px-3.5 py-3">
+    <section className="mx-3 mb-3 overflow-hidden rounded-md border border-ghost-border/20 bg-surface-lowest text-ink shadow-[0_14px_40px_rgba(59,47,40,.10)]">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ghost-border/20 px-3.5 py-3">
         <div className="min-w-0">
-          <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-[#89a5d5]">{kindLabel(job.kind, tool)}</p>
-          <p className="mt-1 truncate font-mono text-[10px] text-white/45" title={job.job_id}>JOB {job.job_id ?? '—'}</p>
+          <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-primary">{kindLabel(job.kind, tool)}</p>
+          <p className="mt-1 truncate font-mono text-[10px] text-ink-faint" title={job.job_id}>JOB {job.job_id ?? '—'}</p>
         </div>
         <span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold ${statusTone(job.status)}`}>
           {statusLabel(job.status)}
         </span>
       </div>
-      <div className="grid gap-px bg-white/10 sm:grid-cols-3">
-        <div className="bg-[#101620] px-3.5 py-2.5">
-          <p className="font-mono text-[8px] uppercase tracking-[0.16em] text-white/30">供应商</p>
-          <p className="mt-1 text-[10px] text-white/65">{job.provider || '—'}</p>
+      <div className="grid gap-px bg-ghost-border/20 sm:grid-cols-3">
+        <div className="bg-surface-lowest px-3.5 py-2.5">
+          <p className="font-mono text-[8px] uppercase tracking-[0.16em] text-ink-faint">供应商</p>
+          <p className="mt-1 text-[10px] text-ink-secondary">{job.provider || '—'}</p>
         </div>
-        <div className="bg-[#101620] px-3.5 py-2.5">
-          <p className="font-mono text-[8px] uppercase tracking-[0.16em] text-white/30">资产</p>
-          <p className="mt-1 truncate font-mono text-[10px] text-white/65" title={job.artifact_id}>{job.artifact_id || '待生成'}</p>
+        <div className="bg-surface-lowest px-3.5 py-2.5">
+          <p className="font-mono text-[8px] uppercase tracking-[0.16em] text-ink-faint">资产</p>
+          <p className="mt-1 truncate font-mono text-[10px] text-ink-secondary" title={job.artifact_id}>{job.artifact_id || '待生成'}</p>
         </div>
-        <div className="bg-[#101620] px-3.5 py-2.5">
-          <p className="font-mono text-[8px] uppercase tracking-[0.16em] text-white/30">耗时</p>
-          <p className="mt-1 text-[10px] text-white/65">{duration || '—'}</p>
+        <div className="bg-surface-lowest px-3.5 py-2.5">
+          <p className="font-mono text-[8px] uppercase tracking-[0.16em] text-ink-faint">耗时</p>
+          <p className="mt-1 text-[10px] text-ink-secondary">{duration || '—'}</p>
         </div>
       </div>
       {(job.message || job.error || workspacePaths.length > 0 || relations.length > 0) && (
         <div className="px-3.5 py-3">
           {(job.error || job.message) && (
-            <p className={`text-[10px] leading-5 ${job.error ? 'text-amber-100/75' : 'text-white/50'}`}>
+            <p className={`text-[10px] leading-5 ${job.error ? 'text-warning' : 'text-ink-muted'}`}>
               {(job.error || job.message)?.slice(0, 320)}
             </p>
           )}
@@ -222,7 +222,7 @@ export function SpatialJobCard({ tool, content, pending, isError }: {
                     setSidebarView('files')
                     setSidebarCollapsed(false)
                   }}
-                  className="max-w-full truncate rounded border border-white/10 bg-white/[0.04] px-2 py-1.5 font-mono text-[9px] text-white/55 transition hover:border-[#89a5d5]/50 hover:text-white"
+                  className="max-w-full truncate rounded border border-ghost-border/20 bg-surface-low px-2 py-1.5 font-mono text-[9px] text-ink-muted transition hover:border-primary/40 hover:text-ink"
                   title={path}
                 >
                   {path.split('/').at(-1)}
@@ -231,13 +231,13 @@ export function SpatialJobCard({ tool, content, pending, isError }: {
             </div>
           )}
           {relations.length > 0 && (
-            <div className="mt-2.5 border-t border-white/10 pt-2.5">
-              <p className="mb-1.5 font-mono text-[8px] uppercase tracking-[0.16em] text-white/30">来源关系</p>
+            <div className="mt-2.5 border-t border-ghost-border/20 pt-2.5">
+              <p className="mb-1.5 font-mono text-[8px] uppercase tracking-[0.16em] text-ink-faint">来源关系</p>
               <div className="flex flex-wrap gap-1.5">
                 {relations.map(relation => (
                   <span
                     key={`${relation.kind}:${relation.artifact_id}`}
-                    className="max-w-full truncate rounded border border-[#89a5d5]/15 bg-[#89a5d5]/[0.06] px-2 py-1 font-mono text-[9px] text-[#b5c8e8]/70"
+                    className="max-w-full truncate rounded border border-primary/15 bg-primary/[0.06] px-2 py-1 font-mono text-[9px] text-primary/70"
                     title={`${relationLabel(relation.kind)} ${relation.artifact_id}`}
                   >
                     {relationLabel(relation.kind)} · {relation.artifact_id}

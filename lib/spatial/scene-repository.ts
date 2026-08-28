@@ -169,6 +169,9 @@ export async function resolvePublishedObjectSource(
   const glb = artifacts.find(artifact => artifact.workspace_path.toLowerCase().endsWith('.glb'))
   if (!glb) throw new SpatialSceneAssetRejectedError('Object Job 没有已发布的 standalone GLB。')
   const ply = artifacts.find(artifact => artifact.workspace_path.toLowerCase().endsWith('.ply'))
+  if (ply && job.provider !== 'lux3d') {
+    throw new SpatialSceneAssetRejectedError('该 PLY 没有已知的本地坐标基契约，拒绝猜测姿态。')
+  }
   const bounds = glb.metadata.bounds
   const parsedBounds = bounds && typeof bounds === 'object' && !Array.isArray(bounds)
     ? clone(bounds) as SceneObjectInstance['normalization']['bounds']
@@ -178,9 +181,15 @@ export async function resolvePublishedObjectSource(
     glb_artifact: glb,
     ...(ply ? { optional_ply_artifact: ply } : {}),
     normalization: {
+      ...(job.provider === 'lux3d' ? { basis_contract_version: 'lux3d_g1_paired_v1' as const } : {}),
       source_up_axis: 'Y',
       scene_up_axis: 'Z',
       pivot: 'bottom_center',
+      glb_basis_correction: 'gltf_y_up_to_scene_z_up',
+      ...(ply ? {
+        ply_source_up_axis: '-Y' as const,
+        ply_basis_correction: 'lux_ply_negative_y_up_to_scene_z_up' as const,
+      } : {}),
       ...(parsedBounds ? { bounds: parsedBounds } : {}),
     },
   }

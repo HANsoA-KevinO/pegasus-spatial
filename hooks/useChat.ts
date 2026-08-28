@@ -1025,8 +1025,11 @@ export function useChat(options: UseChatOptions) {
 
     // Check if target has a cached state (e.g., a background-running conversation)
     const cached = cacheRef.current.get(targetKey)
-    const hasCachedMessages = Boolean(cached && cached.messages.length > 0)
-    if (cached && hasCachedMessages) {
+    const hasCachedState = Boolean(cached && (
+      cached.messages.length > 0
+      || cached.dbArtifactFields !== null
+    ))
+    if (cached && hasCachedState) {
       setMessages([...cached.messages])
       setDbArtifactFields(cached.dbArtifactFields)
       setContextUsage(cached.contextUsage ?? null)
@@ -1054,7 +1057,7 @@ export function useChat(options: UseChatOptions) {
       if (abortsRef.current.has(targetKey)) return
     }
 
-    if (!hasCachedMessages) {
+    if (!hasCachedState) {
       // No cache — fetch from DB. Flip loading flag BEFORE clearing messages so
       // the page renders skeleton instead of TaskWorkbench (hero) during the
       // fetch window (page.tsx checks isLoadingConversation before falling
@@ -1084,7 +1087,7 @@ export function useChat(options: UseChatOptions) {
       // live reconnect began while this cache-hit refresh was in flight. Do
       // not let an older DB snapshot overwrite newer streamed deltas.
       if (hydrationEpochRef.current.get(targetKey) !== hydrationEpoch) return
-      if (hasCachedMessages && abortsRef.current.has(targetKey)) return
+      if (hasCachedState && abortsRef.current.has(targetKey)) return
 
       // Reconstruct chat messages from DB conversation messages
       const chatMessages: ChatMessage[] = []

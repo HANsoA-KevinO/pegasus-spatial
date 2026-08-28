@@ -23,6 +23,7 @@ import {
 } from './worker'
 import { createWorkspaceSpatialPublisher } from './workspace-publisher'
 import { resolveSpatialArtifactHostnameWithGoogleDoh } from './artifact-mirror'
+import { deliverSpatialJobCompletion } from './notifications'
 
 const OFFICIAL_API_BASE_URL = 'https://api.aholo3d.cn'
 const DENY_ALL_ARTIFACT_HOST = 'spatial-artifacts-not-configured.invalid'
@@ -151,7 +152,9 @@ export function readSpatialRuntimeConfig(
   return {
     workerEnabled: env.SPATIAL_WORKER_ENABLED?.trim() !== '0',
     paidCallsEnabled,
-    concurrency: boundedInteger(env.SPATIAL_WORKER_CONCURRENCY, 2, 1, 8),
+    // This bounds local network/lease work only. It is not a product-level
+    // limit on how many durable image or 3D jobs a project may create.
+    concurrency: boundedInteger(env.SPATIAL_WORKER_CONCURRENCY, 8, 1, 32),
     pollIntervalMs: boundedInteger(env.SPATIAL_WORKER_POLL_MS, 2_000, 250, 60_000),
     leaseMs: boundedInteger(env.SPATIAL_WORKER_LEASE_MS, 90_000, 5_000, 15 * 60_000),
     aholo,
@@ -347,7 +350,7 @@ export function createProductionSpatialDependencies(
 
 export function startProductionSpatialBuildWorker(
   env: NodeJS.ProcessEnv = process.env,
-  options: Pick<SpatialBuildWorkerOptions, 'onError'> = {},
+  options: Pick<SpatialBuildWorkerOptions, 'onError' | 'onTerminalJob'> = {},
 ): SpatialBuildWorker | null {
   const config = readSpatialRuntimeConfig(env)
   if (!config.workerEnabled) return null
@@ -358,6 +361,7 @@ export function startProductionSpatialBuildWorker(
       pollIntervalMs: config.pollIntervalMs,
       leaseMs: config.leaseMs,
       onError: options.onError,
+      onTerminalJob: options.onTerminalJob ?? (job => deliverSpatialJobCompletion(job).then(() => undefined)),
     },
   )
 }

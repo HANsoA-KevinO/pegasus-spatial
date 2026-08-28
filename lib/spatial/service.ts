@@ -39,7 +39,13 @@ function jobEnvelope(job: SpatialBuildJobRecord, message?: string): SpatialToolR
     ...(job.published_workspace_paths.length
       ? { workspace_paths: [...job.published_workspace_paths] }
       : {}),
-    ...(message ? { message } : {}),
+    ...(message
+      ? { message }
+      : job.status === 'prepared' && job.completion_notification_requested
+        ? {
+            message: '空间任务已加入持久生成队列；后台会负责提交与发布。请继续其他可执行工作，完成后系统会自动通知 Root Agent。',
+          }
+        : {}),
     created_at: job.created_at.toISOString(),
     elapsed_ms: Math.max(0, elapsedEnd.getTime() - job.created_at.getTime()),
     ...(relations.size ? { relations: [...relations.values()] } : {}),

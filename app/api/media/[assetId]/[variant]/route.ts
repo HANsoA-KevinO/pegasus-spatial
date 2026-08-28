@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { RASTER_ASSET_VARIANTS, type RasterAssetVariantName } from '@/lib/media/model'
+import { providerRasterExtension } from '@/lib/media/object-prefix'
 import { buildOSSObjectPublicUrl, MEDIA_ASSET_ID_PATTERN } from '@/lib/media/public-url'
 import { getImageAsset, readImageAsset } from '@/lib/media/storage'
 
@@ -13,14 +14,20 @@ export async function GET(
   { params }: { params: Promise<{ assetId: string; variant: string }> },
 ) {
   const { assetId, variant: rawVariant } = await params
-  if (!MEDIA_ASSET_ID_PATTERN.test(assetId) || !VARIANTS.has(rawVariant)) {
+  const providerMatch = /^provider\.(png|jpg|webp)$/.exec(rawVariant)
+  if (!MEDIA_ASSET_ID_PATTERN.test(assetId) || (!VARIANTS.has(rawVariant) && !providerMatch)) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
-  const variant = rawVariant as RasterAssetVariantName
+  const variant: RasterAssetVariantName = providerMatch
+    ? 'original'
+    : rawVariant as RasterAssetVariantName
 
   try {
     const asset = await getImageAsset(assetId)
     if (!asset || asset.state === 'deleted') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+    if (providerMatch && providerMatch[1] !== providerRasterExtension(asset.variants.original.mimeType)) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
     if (asset.storageDriver === 'oss') {

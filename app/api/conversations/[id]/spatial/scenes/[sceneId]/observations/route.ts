@@ -19,7 +19,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const selected = typeof body.selected_instance_id === 'string' ? body.selected_instance_id : null
     const visible = Array.isArray(body.visible_instance_ids) ? body.visible_instance_ids.filter((value): value is string => typeof value === 'string').slice(0, 500) : []
     const observationId = `observation_${createHash('sha256').update(`${scene.scene_id}\0${scene.current_revision_id}\0${body.asset_id}\0${body.comment}`).digest('hex').slice(0, 32)}`
-    const asset = await getOwnedImageAsset(body.asset_id, id)
+    const asset = await getOwnedImageAsset(body.asset_id, userId, id)
     if (!asset) return NextResponse.json({ error: 'screenshot asset not found' }, { status: 404 })
     const workspacePath = `output/spatial/reviews/${observationId}/view.png`
     const workspace = await createScenePublicationWorkspace({ conversationId: id, userId })

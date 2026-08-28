@@ -52,6 +52,7 @@ import {
 } from './lib/image-generation'
 import {
   recoverAmbiguousSpatialSubmissions,
+  deliverPendingSpatialJobNotifications,
   readSpatialRuntimeConfig,
   sanitizeSpatialRuntimeError,
   SPATIAL_MODELS,
@@ -176,6 +177,13 @@ export function registerNode(): void {
         )
       }
       await runAgentTeamMaintenanceSweep()
+      const spatialNotifications = await deliverPendingSpatialJobNotifications()
+      if (spatialNotifications.dispatched > 0 || spatialNotifications.failed > 0) {
+        console.info(
+          `[spatial] terminal notifications: ${spatialNotifications.dispatched} dispatched, `
+          + `${spatialNotifications.failed} pending retry`,
+        )
+      }
       if (!durableCompactionWorker) {
         durableCompactionWorker = startDurableCompactionWorker(
           createProductionDurableCompactionProcessor(),

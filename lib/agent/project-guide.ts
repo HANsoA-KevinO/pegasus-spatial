@@ -46,17 +46,22 @@ const SPATIAL_CREATION_V1: Readonly<ProjectGuideTemplate> = Object.freeze({
 
 ## 意图与工具选择
 
-- 独立物体、道具、家具或产品资产优先使用 \`CreateObject3D\`；完整环境、房间或可进入场景优先使用 \`CreateWorld3D\`；现实场地的多图/视频捕捉只在对应重建工具真实可用时执行。
-- World 3DGS 是整体视觉背景，GLB 是可编辑物体真值。使用 \`CreateSpatialScene\`、\`AddSceneObject\` 和变换工具把已发布资产组织成自动 revision 的 Scene；不得暗示可以局部语义修改 3DGS。
+- 需要编辑的空间优先拆成 Lux 环境模块与独立物件：地台、道路、庭院、建筑外壳和景观单元也可以使用 \`CreateObject3D\` 生成 GLB；需要单独移动、复用或删除的内容应拆成独立资产。
+- 需要远景、天空、包围式环境和整体光色氛围时使用 \`CreateWorld3D\`；World 3DGS 中央尽量保持干净、平整、开阔。GLB 是建筑、道路、地表模块与物件的可编辑真值。使用 \`CreateSpatialScene\`、\`AddSceneObject\` 和变换工具把已发布资产组织成自动 revision 的 Scene；不得暗示可以局部语义修改 3DGS。
 - \`GenerateImage\` 同时承担文生图与单图修订。参考图能显著改善创作意图、构图或风格时可先生成；直接文本造物/生成世界已足够时可直接调用 3D 工具。
+- 实际生成或修订图片前加载 \`imagegen\` Skill，由它负责提示词结构、输入图角色、不变量和输出检查；\`spatial-creation\` 只负责决定图片如何服务于 World、Lux 和 Scene。
+- 简单 Lux 资产可以使用一张参考图；大型环境模块、背面可见、结构不对称或会从多个方向观察的核心资产，优先从已确认主视图派生 2–4 张一致视图。多图调用 \`CreateObject3D\` 时只传 \`reference_image_paths\`，省略 \`prompt\`；发现比例、材质、部件或轮廓冲突时先修订参考图。
 - 只从当前 Workspace 中选择已授权图像作为工具输入，不把任意远程 URL 或其他项目的路径传给生成服务。
 - 物体还是世界会实质改变结果且无法从请求判断时，使用 \`AskUserQuestion\` 做一次精确澄清。
 
 ## 成本授权与恢复
 
-- 一次明确创作请求默认授权每种用户明确要求的目标产物各提交一次，并允许为每个目标选择性生成一张参考图。一个项目同时最多运行两个昂贵任务。
+- 一次明确创作请求默认授权每种用户明确要求的目标产物各提交一次，并允许为每个目标选择性生成一张参考图。产品不设置项目级图片或 3D 任务数量上限；后台 Worker 的可配置并发只控制瞬时处理吞吐，所有已建立的 3D 任务都会留在持久队列中。
 - Agent 可以根据创作判断追加必要的视觉候选，不因“已有候选”本身强制询问；主动增加用户没要求的另一类目标，或对可能已被供应商接受的任务重新提交前，必须用 \`AskUserQuestion\` 取得确认。
-- 创建工具返回任务已提交，不等于资产已完成。使用 \`GetSpatialJob\` 或 \`WaitSpatialJob\` 观察已知任务，不因对话结束、刷新、超时或服务恢复而原样重放付费提交。
+- 创建工具返回 \`prepared\` 时只表示任务已进入本地持久队列，不等于供应商已接受，更不等于资产已完成。记住 \`job_id\` 后继续其他独立工作；正常创作不调用 \`WaitSpatialJob\` 或循环轮询，终态会作为持久后台事件自动通知 Root。
+- \`GetSpatialJob\` 只用于用户主动查询或恢复诊断；普通创作依赖完成通知，不用它轮询。
+- 不因对话结束、页面刷新、等待超时或服务恢复而原样重放付费提交。
+- 多个独立资产优先按资产拆分并行委派给多个 Asset Maker；每个成员完成参考图检查并提交 3D 后继续下一项。所有 Scene revision 由 Root 或唯一 Scene Assembler 串行修改。
 - 任务状态是 \`unknown\` 时，明确说明可能已产生外部副作用，由用户确认后才能建立新的重试任务。
 - Root 默认拥有全部空间工具。Member wildcard 不获得生成、Scene 修改或截图能力；Root 可通过 \`allowed_tools\` 逐项显式授权，执行层按持久授权校验。
 
@@ -66,6 +71,7 @@ const SPATIAL_CREATION_V1: Readonly<ProjectGuideTemplate> = Object.freeze({
 - 局部调整优先移动、新增或删除 GLB。只有整体结构、光照或氛围必须改变时才重新生成或替换 World。
 - 用户相机与 Agent 相机独立。使用 \`SetSceneViewpoint\` 或 \`FocusSceneObject\` 后，通过 \`CaptureSceneView\` 读取活动舞台的真实渲染像素；没有舞台时诚实报告 \`viewer_unavailable\`。
 - 带 \`observation_id\` 的修改必须匹配截图对应的 current revision。PLY 只作为一次一个的高质量视觉替身，GLB 始终是 Scene 结构与选择真值。
+- 不用 Scene rotation 补偿 GLB/PLY 的本地坐标基错误。评审承重物体姿态时检查重力方向、支撑点和承载面；单张遮挡视图或包围盒不足以得出 \`verified\`，应补同相机格式对照或正面/侧面/俯视截图。
 
 ## Workspace 与资产关系
 

@@ -75,3 +75,26 @@ export function getMediaObjectPrefix(): string {
 export function buildRasterAssetObjectKey(assetId: string, variant: string): string {
   return `${getMediaObjectPrefix()}/${assetId}/${variant}`
 }
+
+/**
+ * Aholo validates the filename extension in remote image URLs before it
+ * fetches the bytes. Workspace assets deliberately use extension-less,
+ * immutable variant keys, so expose an equally immutable delivery alias whose
+ * suffix is derived from the sniffed MIME type rather than user input.
+ */
+export function providerRasterExtension(mimeType: string): 'png' | 'jpg' | 'webp' {
+  if (mimeType === 'image/png') return 'png'
+  if (mimeType === 'image/jpeg') return 'jpg'
+  if (mimeType === 'image/webp') return 'webp'
+  throw new Error(`Unsupported provider raster MIME type: ${mimeType}`)
+}
+
+export function buildProviderRasterAliasObjectKey(
+  originalStorageKey: string,
+  mimeType: string,
+): string {
+  if (!originalStorageKey || originalStorageKey.startsWith('/') || originalStorageKey.includes('..')) {
+    throw new Error('Invalid original raster storage key')
+  }
+  return `${originalStorageKey}.${providerRasterExtension(mimeType)}`
+}

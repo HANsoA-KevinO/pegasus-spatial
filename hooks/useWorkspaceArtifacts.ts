@@ -163,9 +163,10 @@ export function buildArtifactsFromDB(doc: ConversationArtifactFields): Workspace
         return [{
           path,
           label: entry.filename || labelFor(path),
-          type: type === 'model3d' ? 'model3d' : 'document',
+          type: type === 'model3d' || type === 'world' ? type : 'document',
           content: '',
           mimeType: entry.mime_type,
+          gridfsPending: type === 'world' ? true : undefined,
           filename: entry.filename,
           sizeBytes: entry.size_bytes,
           sha256: entry.sha256,

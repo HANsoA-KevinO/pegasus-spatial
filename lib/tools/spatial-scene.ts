@@ -261,8 +261,21 @@ export async function executeSpatialSceneTool(
         const distance = radius * ({ close: 1.8, medium: 3, wide: 5 }[framing] ?? 3)
         const target = instance.transform.position
         const up: Vec3 = revision.world?.up_axis === 'Y' ? [0, 1, 0] : [0, 0, 1]
-        const position: Vec3 = revision.world?.up_axis === 'Y'
-          ? [target[0] + distance, target[1] + radius * 0.35, target[2] + distance]
+        // Aholo generated Worlds are capture-centred 3DGS rather than a free
+        // navigable metric mesh. Moving the camera several scene units away
+        // can leave the valid splat view volume and produce a black review.
+        // Keep World reviews at the capture origin; object-only scenes retain
+        // an ordinary orbit-style framing position.
+        const worldCaptureOrigin: Vec3 = [0, 0, 0]
+        const originDistance = Math.hypot(
+          target[0] - worldCaptureOrigin[0],
+          target[1] - worldCaptureOrigin[1],
+          target[2] - worldCaptureOrigin[2],
+        )
+        const position: Vec3 = revision.world
+          ? originDistance > 0.05
+            ? worldCaptureOrigin
+            : revision.world.up_axis === 'Y' ? [0, radius, 0] : [0, 0, radius]
           : [target[0] + distance, target[1] - distance, target[2] + radius * 0.35]
         const viewpoint = normalizeViewpoint({ position, target, up, fov_deg: 52 })
         await setSpatialSceneViewpoint({ scope: durable.scope, sceneId: scene.scene_id, viewpoint })
@@ -284,7 +297,11 @@ export async function executeSpatialSceneTool(
         if (current.status !== 'completed' || !current.screenshot_asset_id) {
           return result({ kind: 'scene_capture', status: current.status === 'failed' ? 'failed' : 'pending', command_id: current.command_id, observation_id: current.observation_id }, current.status === 'failed')
         }
-        const asset = await getOwnedImageAsset(current.screenshot_asset_id, durable.context.conversationId)
+        const asset = await getOwnedImageAsset(
+          current.screenshot_asset_id,
+          durable.context.userId,
+          durable.context.conversationId,
+        )
         if (!asset) throw new Error('截图已经完成，但媒体资产不可读取。')
         if (!current.screenshot_workspace_path) throw new Error('截图已经完成，但 Workspace 发布记录缺失。')
         await createSpatialObservation({

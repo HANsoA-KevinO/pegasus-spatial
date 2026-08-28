@@ -12,7 +12,12 @@ import sharp from 'sharp'
 import { processImageForContext } from '../agent/image-resizer'
 import { connectDB } from '../db/mongodb'
 import { getMediaStorageDriver, getOSSMediaConfig, type MediaStorageDriver } from './config'
-import { buildRasterAssetObjectKey } from './object-prefix'
+import {
+  buildProviderRasterAliasObjectKey,
+  buildRasterAssetObjectKey,
+  providerRasterExtension,
+} from './object-prefix'
+import { buildOSSObjectPublicUrl, getMediaPublicBaseUrl } from './public-url'
 import {
   ImageAsset,
   type AssetVariantDocument,
@@ -307,6 +312,12 @@ async function deleteStoredObject(driver: MediaStorageDriver, storageKey: string
 
 async function deleteAssetObjects(asset: StoredImageAsset): Promise<void> {
   const keys = new Set(Object.values(asset.variants).map(variant => variant.storageKey).filter(Boolean))
+  if (asset.storageDriver === 'oss') {
+    keys.add(buildProviderRasterAliasObjectKey(
+      asset.variants.original.storageKey,
+      asset.variants.original.mimeType,
+    ))
+  }
   for (const key of keys) {
     await deleteStoredObject(asset.storageDriver, key)
   }
@@ -539,6 +550,76 @@ export async function getImageAsset(assetId: string): Promise<StoredImageAsset |
   await connectDB()
   const doc = await ImageAsset.findOne({ asset_id: assetId })
   return doc ? documentToAsset(doc) : null
+}
+
+function isMissingOSSObject(error: unknown): boolean {
+  const value = error as { status?: number; statusCode?: number; code?: string }
+  return value.status === 404 || value.statusCode === 404 || value.code === 'NoSuchKey'
+}
+
+async function providerAliasMatches(
+  storageKey: string,
+  asset: StoredImageAsset,
+): Promise<boolean> {
+  try {
+    const head = await getOSSClient().head(storageKey) as {
+      status?: number
+      meta?: Record<string, string> | null
+      res?: { headers?: Record<string, string | number | undefined> }
+    }
+    const headers = head.res?.headers ?? {}
+    return head.status === 200
+      && head.meta?.sha256 === asset.sha256
+      && Number(headers['content-length']) === asset.variants.original.sizeBytes
+      && String(headers['content-type'] ?? '').split(';', 1)[0].trim().toLowerCase()
+        === asset.variants.original.mimeType
+  } catch (error) {
+    if (isMissingOSSObject(error)) return false
+    throw error
+  }
+}
+
+/**
+ * Materialize an immutable, extension-bearing URL for spatial providers.
+ * This does not create a paid provider job. Existing aliases are verified by
+ * checksum and size, making retries and process takeover idempotent.
+ */
+export async function ensureProviderImageDeliveryUrl(assetId: string): Promise<string> {
+  const asset = await getImageAsset(assetId)
+  if (!asset || asset.state === 'deleted') throw new Error('Provider image asset is unavailable')
+  const original = asset.variants.original
+  const extension = providerRasterExtension(original.mimeType)
+
+  if (asset.storageDriver === 'gridfs') {
+    return new URL(
+      `/api/media/${encodeURIComponent(asset.assetId)}/provider.${extension}`,
+      getMediaPublicBaseUrl(),
+    ).toString()
+  }
+
+  const aliasKey = buildProviderRasterAliasObjectKey(original.storageKey, original.mimeType)
+  if (!await providerAliasMatches(aliasKey, asset)) {
+    const found = await readImageAsset(asset.assetId, 'original')
+    if (!found) throw new Error('Provider image bytes are unavailable')
+    try {
+      await getOSSClient().put(aliasKey, found.buffer, {
+        headers: {
+          'Content-Type': original.mimeType,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'x-oss-forbid-overwrite': 'true',
+          'x-oss-meta-sha256': asset.sha256,
+        },
+      })
+    } catch (error) {
+      // A concurrent resolver may have won the immutable alias. Only accept
+      // that race after reading and validating the exact stored metadata.
+      if (!await providerAliasMatches(aliasKey, asset)) throw error
+    }
+    if (!await providerAliasMatches(aliasKey, asset)) {
+      throw new Error('Provider image alias failed immutable verification')
+    }
+  }
+  return buildOSSObjectPublicUrl(aliasKey)
 }
 
 export async function getOwnedImageAsset(

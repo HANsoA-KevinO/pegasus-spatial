@@ -195,42 +195,29 @@ export async function prepareSpatialBuild(
   }).lean<SpatialBuildJobRecord>()
   if (existing) {
     assertSameFrozenRequest(existing, { ...input, projectId, runId, toolUseId }, requestHash)
-    const quarantinedOperatorPreparation = existing.status === 'prepared'
-      && existing.execution_gate === 'operator'
-      && existing.active_slot === undefined
-    if (!isSpatialTerminalStatus(existing.status) && !quarantinedOperatorPreparation) {
-      let paid
-      try {
-        paid = await acquireSpatialPaidSlot({
-          projectId,
-          userId,
-          holderType: 'spatial_build',
-          holderKey: existing.job_id,
-        })
-      } catch (error) {
-        if (error instanceof SpatialPaidCapacityError) throw new SpatialProjectCapacityError(projectId)
-        throw error
-      }
-      await bindSpatialPaidSlot(paid)
+    const shouldNotify = input.notifyOnTerminal
+      ?? ((input.executionGate ?? existing.execution_gate ?? 'worker') === 'worker')
+    if (
+      shouldNotify
+      && !existing.completion_notification_requested
+      && !isSpatialTerminalStatus(existing.status)
+    ) {
+      const enabled = await SpatialBuildJobModel.findOneAndUpdate({
+        job_id: existing.job_id,
+        status_revision: existing.status_revision,
+        completion_notification_requested: { $ne: true },
+      }, {
+        $set: {
+          completion_notification_requested: true,
+          completion_notification_last_error: null,
+        },
+      }, { returnDocument: 'after' }).lean<SpatialBuildJobRecord>()
+      if (enabled) Object.assign(existing, enabled)
     }
     return existing
   }
 
-  let paidSlot: Awaited<ReturnType<typeof acquireSpatialPaidSlot>> | undefined
-  if ((input.executionGate ?? 'worker') === 'worker') {
-    try {
-      paidSlot = await acquireSpatialPaidSlot({
-        projectId,
-        userId,
-        holderType: 'spatial_build',
-        holderKey: jobId,
-      })
-    } catch (error) {
-      if (error instanceof SpatialPaidCapacityError) throw new SpatialProjectCapacityError(projectId)
-      throw error
-    }
-  }
-  const createInSlot = async () => SpatialBuildJobModel.create({
+  const createJob = async () => SpatialBuildJobModel.create({
       job_id: jobId,
       idempotency_key: idempotencyKey,
       project_id: projectId,
@@ -246,7 +233,6 @@ export async function prepareSpatialBuild(
       output_path_prefix: request.output_path_prefix,
       status: 'prepared',
       execution_gate: input.executionGate ?? 'worker',
-      ...(paidSlot ? { active_slot: paidSlot.slot } : {}),
       status_revision: 0,
       execution_attempts: 0,
       consecutive_failures: 0,
@@ -262,11 +248,17 @@ export async function prepareSpatialBuild(
       last_error: null,
       unknown_reason: null,
       configuration_blocked_hosts: [],
+      // Deliberately do not backfill old Jobs: enabling the feature must not
+      // wake Root once for every historical terminal build.
+      completion_notification_requested:
+        input.notifyOnTerminal ?? ((input.executionGate ?? 'worker') === 'worker'),
+      completion_notified_at: null,
+      completion_notification_last_error: null,
       finished_at: null,
     })
   let created
   try {
-    created = await createInSlot()
+    created = await createJob()
   } catch (error) {
     if (duplicateKey(error)) {
       const winner = await SpatialBuildJobModel.findOne({
@@ -276,18 +268,6 @@ export async function prepareSpatialBuild(
       }).lean<SpatialBuildJobRecord>()
       if (winner) {
         assertSameFrozenRequest(winner, { ...input, projectId, runId, toolUseId }, requestHash)
-        if (!isSpatialTerminalStatus(winner.status)) {
-          // The durable Job now owns the reservation. A bind fault must fail
-          // closed and leave it for startup reconciliation, never free capacity
-          // while an active paid Job exists.
-          if (paidSlot) await bindSpatialPaidSlot(paidSlot)
-        } else if (paidSlot) await releaseSpatialPaidSlot({
-            projectId,
-            userId,
-            holderType: 'spatial_build',
-            holderKey: jobId,
-            reservationToken: paidSlot.reservationToken,
-          })
         return winner
       }
       const prefixOwner = await SpatialBuildJobModel.findOne({
@@ -295,33 +275,11 @@ export async function prepareSpatialBuild(
         output_path_prefix: request.output_path_prefix,
       }).select('job_id').lean<{ job_id: string }>()
       if (prefixOwner) {
-        if (paidSlot) {
-          await releaseSpatialPaidSlot({
-            projectId,
-            userId,
-            holderType: 'spatial_build',
-            holderKey: jobId,
-            reservationToken: paidSlot.reservationToken,
-          }).catch(() => false)
-        }
         throw new SpatialOutputPathConflictError(projectId, request.output_path_prefix)
       }
     }
-    if (paidSlot) {
-      await releaseSpatialPaidSlot({
-        projectId,
-        userId,
-        holderType: 'spatial_build',
-        holderKey: jobId,
-        reservationToken: paidSlot.reservationToken,
-      }).catch(() => false)
-    }
     throw error
   }
-  // Keep this outside the create catch. If Mongo accepted the Job but this
-  // bind fails, the reservation deliberately remains fail-closed until
-  // reconcileSpatialBuildPaidSlots observes the active Job.
-  if (paidSlot) await bindSpatialPaidSlot(paidSlot)
   return created.toObject() as SpatialBuildJobRecord
 }
 

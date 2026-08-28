@@ -24,7 +24,7 @@ export function TopProgressBar() {
           style={{
             width: '30%',
             background:
-              'linear-gradient(90deg, rgba(93,119,173,0) 0%, var(--primary, #5d77ad) 50%, rgba(93,119,173,0) 100%)',
+              'linear-gradient(90deg, transparent 0%, var(--primary, #d75a3b) 50%, transparent 100%)',
             animation: 'pmo-prog-slide 1.6s ease-in-out infinite',
           }}
         />

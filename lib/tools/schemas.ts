@@ -144,9 +144,9 @@ Use this when a requested spatial outcome benefits from a visual reference, or w
   },
   {
     name: 'CreateObject3D',
-    description: `Submit one durable Lux3D object build and return immediately with its persistent Job identity.
+    description: `Queue one durable Lux3D object build and return immediately with its persistent Job identity.
 
-Provide text, one or more authorized Workspace reference images, or both. The build publishes a standalone editable GLB, optional high-quality PLY and manifest. The external task continues after the chat turn ends. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
+Provide text, one or more authorized Workspace reference images, or both. The build publishes a standalone editable GLB, optional high-quality PLY and manifest. A prepared result means the local durable queue accepted the request, not that Lux3D has accepted it yet. Continue independent work; a terminal completion reminder is delivered automatically. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -175,9 +175,9 @@ Provide text, one or more authorized Workspace reference images, or both. The bu
   },
   {
     name: 'CreateWorld3D',
-    description: `Submit one durable Aholo World generation and return immediately with its persistent Job identity.
+    description: `Queue one durable Aholo World generation and return immediately with its persistent Job identity.
 
-Provide a world brief, one authorized Workspace scene image, or both. The external build continues after the chat turn ends and publishes a manifest, preview when available, and an Aholo opening link. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
+Provide a world brief, one authorized Workspace scene image, or both. A prepared result means the local durable queue accepted the request, not that Aholo has accepted it yet. Continue independent work; a terminal completion reminder is delivered automatically. The build publishes a manifest, preview when available, and an Aholo opening link. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -291,7 +291,7 @@ Provide a world brief, one authorized Workspace scene image, or both. The extern
   },
   {
     name: 'WaitSpatialJob',
-    description: 'Wait a bounded time for one already-submitted spatial Job to reach a terminal or publishable state. The durable worker continues independently when this wait ends.',
+    description: 'Diagnostic-only bounded wait for one known spatial Job. Normal creation must continue other work and rely on the automatic terminal reminder instead of polling with this tool.',
     input_schema: {
       type: 'object',
       additionalProperties: false,

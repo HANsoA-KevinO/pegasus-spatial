@@ -163,6 +163,9 @@ function setupDependencies(input?: {
         updated_at: '2026-08-25T01:02:03.000Z',
       }
     },
+    async resolveProviderRasterUrl(asset) {
+      return asset.urls.original
+    },
     now: () => new Date('2026-08-25T01:02:03.000Z'),
   }
   return { dependencies, prepared, scopes }
@@ -197,6 +200,7 @@ await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureR
   assert.equal(result.is_error, undefined)
   assert.equal(parsed(result.content).status, 'prepared')
   assert.equal(state.prepared.length, 1)
+  assert.equal(state.prepared[0].notifyOnTerminal, true)
   assert.deepEqual(state.prepared[0].request.input_image_paths, ['output/spatial/images/chair.png'])
   assert.deepEqual(state.prepared[0].request.provider_options, {
     version: 'G1',
@@ -271,16 +275,17 @@ await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureR
   assert.doesNotMatch(direct.content, /Root Agent/)
 }
 
-// The project-level two-job gate does not block an idempotent replay.
+// Product creation never rejects because other project jobs are active; each
+// accepted call becomes a durable job and idempotent replay remains stable.
 {
-  const blocked = setupDependencies({ active: 2 })
+  const unbounded = setupDependencies({ active: 200 })
   const result = await executeCreateObject3D({
     prompt: 'A chair',
     output_path_prefix: 'output/spatial/objects/third-build',
-  }, workspace, { executionContext: rootContext, invocation, dependencies: blocked.dependencies })
-  assert.equal(result.is_error, true)
-  assert.match(parsed(result.content).error ?? '', /最多允许同时运行 2 个/)
-  assert.equal(blocked.prepared.length, 0)
+  }, workspace, { executionContext: rootContext, invocation, dependencies: unbounded.dependencies })
+  assert.equal(result.is_error, undefined)
+  assert.equal(parsed(result.content).status, 'prepared')
+  assert.equal(unbounded.prepared.length, 1)
 
   const existingInput: PrepareSpatialBuildInput = {
     projectId: 'project_spatial',

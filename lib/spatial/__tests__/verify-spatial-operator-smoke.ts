@@ -112,7 +112,22 @@ assert.throws(
     LLM_BASE_URL: 'http://newapi.example.test/v1',
     LLM_API_KEY_TOOLS: 'not-printed',
   })),
-  /HTTPS/,
+  /显式设置 PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP=1/,
+)
+const insecureImageChecks = validateOperatorSmokeConfiguration('image', environment({
+  LLM_BASE_URL: 'http://newapi.example.test/v1',
+  LLM_API_KEY_TOOLS: 'not-printed',
+  PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP: '1',
+}))
+assert.match(insecureImageChecks[1].detail, /HTTP 开发例外[^]*明文传输/)
+assert.throws(
+  () => validateOperatorSmokeConfiguration('image', environment({
+    NODE_ENV: 'production',
+    LLM_BASE_URL: 'http://newapi.example.test/v1',
+    LLM_API_KEY_TOOLS: 'not-printed',
+    PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP: '1',
+  })),
+  /非 production/,
 )
 assert.throws(
   () => validateOperatorSmokeConfiguration('lux3d', environment({

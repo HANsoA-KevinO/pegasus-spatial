@@ -20,6 +20,10 @@ export type SubmitFailureCertainty = 'not_accepted' | 'unknown'
 export interface SpatialHttpWireContract {
   submitPath(job: SpatialBuildJobRecord): string
   pollPath(job: SpatialBuildJobRecord): string
+  /** Provider-specific, non-secret headers required by the official create contract. */
+  submissionHeaders?(job: SpatialBuildJobRecord): Readonly<Record<string, string>>
+  /** Only set when the provider officially documents a request idempotency header. */
+  idempotencyHeaderName?: string
   encodeSubmission(job: SpatialBuildJobRecord): unknown
   decodeSubmission(payload: unknown): SpatialProviderSubmission
   decodePoll(payload: unknown, job: SpatialBuildJobRecord): SpatialProviderPollResult
@@ -76,6 +80,29 @@ async function responsePayload(response: Response): Promise<unknown> {
   } catch {
     return { raw_text: text.slice(0, 4_000) }
   }
+}
+
+function providerErrorDetail(payload: unknown, token: string): string {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return ''
+  const root = payload as Record<string, unknown>
+  const details = root.details && typeof root.details === 'object' && !Array.isArray(root.details)
+    ? root.details as Record<string, unknown>
+    : null
+  const safe = (value: unknown): string | null => {
+    if (typeof value !== 'string' && typeof value !== 'number') return null
+    return String(value)
+      .split(token).join('[redacted]')
+      .replace(/https?:\/\/\S+/gi, '[url]')
+      .replace(/[\r\n\t]+/g, ' ')
+      .slice(0, 500)
+  }
+  const fields = [
+    ['code', safe(root.code)],
+    ['status', safe(root.status)],
+    ['reason', safe(details?.reason)],
+    ['message', safe(root.message) ?? safe(details?.message)],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]))
+  return fields.length > 0 ? ` (${fields.map(([key, value]) => `${key}=${value}`).join('; ')})` : ''
 }
 
 export abstract class ContractDrivenSpatialHttpAdapter {
@@ -159,9 +186,12 @@ export abstract class ContractDrivenSpatialHttpAdapter {
       response = await this.fetchImpl(url, {
         method: 'POST',
         headers: {
+          ...(contract.submissionHeaders?.(job) ?? {}),
           Authorization: this.authorizationHeader(token),
           'Content-Type': 'application/json',
-          'Idempotency-Key': context.providerIdempotencyKey,
+          ...(contract.idempotencyHeaderName
+            ? { [contract.idempotencyHeaderName]: context.providerIdempotencyKey }
+            : {}),
         },
         body,
         signal: context.signal,
@@ -176,7 +206,7 @@ export abstract class ContractDrivenSpatialHttpAdapter {
     const payload = await responsePayload(response)
     if (!response.ok) {
       const certainty = contract.classifySubmissionFailure?.({ response, payload }) ?? 'unknown'
-      const message = `${this.provider} submission returned HTTP ${response.status}.`
+      const message = `${this.provider} submission returned HTTP ${response.status}${providerErrorDetail(payload, token)}.`
       if (certainty === 'not_accepted') throw new ProviderDefinitelyNotAcceptedError(message)
       throw new ProviderSubmissionUnknownError(message)
     }

@@ -1,7 +1,6 @@
 import type { AgentExecutionContext, ToolExecutionInvocation } from '../agent/execution-context'
 import {
   countActiveSpatialJobs,
-  deterministicSpatialJobId,
   getSpatialBuildJob,
   getSpatialJobResult,
   inspectSpatialArtifactResult,
@@ -14,6 +13,7 @@ import {
   type SpatialCommandScope,
   type SpatialToolResultEnvelope,
 } from '../spatial'
+import { ensureProviderImageDeliveryUrl } from '../media/storage'
 import type { RasterAssetRef, ToolResult } from '../types'
 import { normalizeWorkspacePath } from '../workspace/path-policy'
 import type { WorkspaceInstance } from '../workspace/types'
@@ -28,7 +28,6 @@ export const SPATIAL_TOOL_NAMES = [
 
 export type SpatialToolName = typeof SPATIAL_TOOL_NAMES[number]
 
-const ACTIVE_BUILD_LIMIT = 2
 const OBJECT_OUTPUT_ROOT = 'output/spatial/objects/'
 const WORLD_OUTPUT_ROOT = 'output/spatial/worlds/'
 
@@ -62,6 +61,7 @@ export interface SpatialToolDependencies {
     jobId: string,
     scope: SpatialCommandScope,
   ): Promise<SpatialBuildJobRecord | null>
+  /** Operator/test diagnostics only; normal product creation is not gated by this count. */
   countActiveSpatialJobs(scope: SpatialCommandScope): Promise<number>
   getSpatialJobResult(input: {
     jobId: string
@@ -77,6 +77,7 @@ export interface SpatialToolDependencies {
     artifactId: string
     scope: SpatialCommandScope
   }): Promise<SpatialToolResultEnvelope>
+  resolveProviderRasterUrl(asset: RasterAssetRef): Promise<string>
   now(): Date
 }
 
@@ -94,6 +95,7 @@ const defaultDependencies: SpatialToolDependencies = {
   getSpatialJobResult,
   waitSpatialJobResult,
   inspectSpatialArtifactResult,
+  resolveProviderRasterUrl: asset => ensureProviderImageDeliveryUrl(asset.assetId),
   now: () => new Date(),
 }
 
@@ -222,6 +224,7 @@ function providerUrlFromAsset(asset: RasterAssetRef): string {
 async function resolveAuthorizedRaster(
   workspace: WorkspaceInstance,
   rawPath: string,
+  dependencies: SpatialToolDependencies,
 ): Promise<{ path: string; assetId: string; url: string }> {
   let path: string
   try {
@@ -231,7 +234,8 @@ async function resolveAuthorizedRaster(
   }
   const first = await workspace.readRaster(path)
   if (!first) throw new Error(`Workspace 中不存在可用图片：${path}`)
-  const url = providerUrlFromAsset(first)
+  const providerAsset = { ...first, urls: { ...first.urls, original: await dependencies.resolveProviderRasterUrl(first) } }
+  const url = providerUrlFromAsset(providerAsset)
   // Guard against a path being revised while this invocation is resolving its
   // provider input. The frozen asset identity must match the frozen URL.
   const current = await workspace.readRaster(path)
@@ -251,29 +255,6 @@ async function preparePaidBuild(input: {
   dependencies: SpatialToolDependencies
 }): Promise<ToolResult> {
   const scope = scopeFor(input.context)
-  const identity = {
-    projectId: scope.projectId,
-    runId: input.context.runId,
-    toolUseId: input.invocation.toolUseId,
-  }
-  // An idempotent replay is always allowed through the concurrency gate: it
-  // returns the existing receipt and cannot submit an additional paid build.
-  const existing = await input.dependencies.getSpatialBuildJob(
-    deterministicSpatialJobId(identity),
-    scope,
-  )
-  if (!existing) {
-    const active = await input.dependencies.countActiveSpatialJobs(scope)
-    if (active >= ACTIVE_BUILD_LIMIT) {
-      return failed(
-        input.kind,
-        input.provider,
-        `当前项目已有 ${active} 个昂贵空间任务在运行；最多允许同时运行 ${ACTIVE_BUILD_LIMIT} 个。`,
-        input.dependencies,
-      )
-    }
-  }
-
   const job = await input.dependencies.prepareSpatialBuild({
     projectId: scope.projectId,
     runId: input.context.runId,
@@ -284,6 +265,7 @@ async function preparePaidBuild(input: {
     provider: input.provider,
     modelSnapshot: input.modelSnapshot,
     request: input.request,
+    notifyOnTerminal: true,
   })
   return resultFromEnvelope(await input.dependencies.getSpatialJobResult({
     jobId: job.job_id,
@@ -324,7 +306,7 @@ export async function executeCreateObject3D(
       throw new TypeError('CreateObject3D 至少需要 prompt 或 reference_image_paths。')
     }
     const references = await Promise.all(
-      referencePaths.map(path => resolveAuthorizedRaster(workspace, path)),
+      referencePaths.map(path => resolveAuthorizedRaster(workspace, path, dependencies)),
     )
     return await preparePaidBuild({
       context: durable.context,
@@ -377,7 +359,7 @@ export async function executeCreateWorld3D(
       if (typeof rawInput.source_image_path !== 'string' || !rawInput.source_image_path.trim()) {
         throw new TypeError('source_image_path 必须是非空 Workspace 图片路径。')
       }
-      source = await resolveAuthorizedRaster(workspace, rawInput.source_image_path)
+      source = await resolveAuthorizedRaster(workspace, rawInput.source_image_path, dependencies)
     }
     if (!prompt && !source) {
       throw new TypeError('CreateWorld3D 至少需要 prompt 或 source_image_path。')

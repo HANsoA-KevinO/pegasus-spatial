@@ -383,7 +383,7 @@ function AskUserPartView({
                   style={{
                     textAlign: 'left',
                     borderColor: checked ? 'var(--primary)' : undefined,
-                    background: checked ? 'rgba(93, 119, 173, 0.09)' : undefined,
+                    background: checked ? 'color-mix(in srgb, var(--primary) 9%, transparent)' : undefined,
                   }}
                 >
                   <span style={{ fontWeight: 600 }}>{option.label}</span>
@@ -411,7 +411,7 @@ function AskUserPartView({
                 borderRadius: 5,
                 background: 'var(--surface-container-lowest)',
                 color: 'var(--on-surface)',
-                border: '1px solid rgba(93, 119, 173, 0.18)',
+                border: '1px solid color-mix(in srgb, var(--primary) 18%, transparent)',
                 outline: 'none',
               }}
             />

@@ -13,7 +13,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const body = await request.json() as { session_id?: unknown; command_lease_token?: unknown; asset_id?: unknown; visible_instance_ids?: unknown }
     if ([body.session_id, body.command_lease_token, body.asset_id].some(value => typeof value !== 'string')) return NextResponse.json({ error: 'invalid completion' }, { status: 400 })
-    const asset = await getOwnedImageAsset(body.asset_id as string, id)
+    const asset = await getOwnedImageAsset(body.asset_id as string, userId, id)
     if (!asset) return NextResponse.json({ error: 'screenshot asset not found' }, { status: 404 })
     const existing = await getSpatialRenderCommand(commandId, { projectId: id, userId })
     if (!existing || existing.scene_id !== sceneId) return NextResponse.json({ error: 'render command not found' }, { status: 404 })

@@ -47,6 +47,10 @@ class ManualClock {
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
+    // Terminal notification adds one promise boundary before capacity refill.
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
   }
 }
 
@@ -214,11 +218,42 @@ async function verifyCompletionGetsOneImmediateCapacityRefill(): Promise<void> {
   await worker.stop()
 }
 
+async function verifyTerminalJobTriggersOneNotificationFastPath(): Promise<void> {
+  const clock = new ManualClock()
+  const initial = claim('job_terminal_notification')
+  const terminal: ClaimedSpatialBuildJob = {
+    ...initial,
+    job: {
+      ...initial.job,
+      status: 'published',
+      status_revision: 4,
+      completion_notification_requested: true,
+      finished_at: new Date('2026-08-25T00:05:00.000Z'),
+    },
+  }
+  let notifications = 0
+  const worker = startSpatialBuildWorker(processDependencies, {
+    concurrency: 1,
+    onTerminalJob(job) {
+      assert.equal(job.job_id, 'job_terminal_notification')
+      notifications += 1
+    },
+  }, runtime({
+    clock,
+    claim: async () => initial,
+    process: async () => terminal,
+  }))
+  await clock.runNext()
+  await worker.stop()
+  assert.equal(notifications, 1)
+}
+
 async function main(): Promise<void> {
   await verifyEmptyQueueDoesNotHotPoll()
   await verifyDelayedClaimIsReleasedDuringStop()
   await verifyClaimFaultBacksOff()
   await verifyCompletionGetsOneImmediateCapacityRefill()
+  await verifyTerminalJobTriggersOneNotificationFastPath()
   console.log('✓ Spatial worker scheduler verification passed')
 }
 

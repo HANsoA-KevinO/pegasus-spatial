@@ -37,8 +37,14 @@ function toClaim(record: SpatialPaidSlotRecord): SpatialPaidSlotClaim {
 export class SpatialPaidCapacityError extends Error {
   readonly code = 'SPATIAL_PAID_CAPACITY_EXCEEDED'
 
-  constructor(public readonly projectId: string) {
-    super(`Spatial project ${projectId} already has two active or reserved paid operations.`)
+  constructor(
+    public readonly projectId: string,
+    public readonly holderType?: SpatialPaidHolderType,
+  ) {
+    super(
+      `Spatial project ${projectId} already has two active or reserved `
+      + `${holderType === 'image_generation' ? 'image generation' : holderType === 'spatial_build' ? '3D build' : 'paid'} operations.`,
+    )
     this.name = 'SpatialPaidCapacityError'
   }
 }
@@ -102,7 +108,7 @@ export async function acquireSpatialPaidSlot(input: {
       }
     }
   }
-  throw new SpatialPaidCapacityError(projectId)
+  throw new SpatialPaidCapacityError(projectId, input.holderType)
 }
 
 export async function bindSpatialPaidSlot(
@@ -167,6 +173,7 @@ export async function reconcileSpatialPaidSlots(input: {
           {
             project_id: record.project_id,
             slot: record.slot,
+            holder_type: record.holder_type,
             reservation_token: record.reservation_token,
             state: 'reserved',
           },
@@ -179,6 +186,7 @@ export async function reconcileSpatialPaidSlots(input: {
     const result = await SpatialPaidSlotModel.deleteOne({
       project_id: record.project_id,
       slot: record.slot,
+      holder_type: record.holder_type,
       reservation_token: record.reservation_token,
     })
     released += result.deletedCount

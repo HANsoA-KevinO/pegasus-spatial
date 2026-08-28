@@ -53,6 +53,9 @@ const SpatialBuildJobSchema = new Schema<SpatialBuildJobRecord>({
   last_error: { type: String, default: null },
   unknown_reason: { type: String, default: null },
   configuration_blocked_hosts: { type: [String], default: [] },
+  completion_notification_requested: { type: Boolean, default: false, index: true },
+  completion_notified_at: { type: Date, default: null, index: true },
+  completion_notification_last_error: { type: String, default: null },
   finished_at: { type: Date, default: null },
 }, {
   timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
@@ -81,6 +84,12 @@ SpatialBuildJobSchema.index({
   created_at: 1,
 })
 SpatialBuildJobSchema.index({ user_id: 1, project_id: 1, created_at: -1 })
+SpatialBuildJobSchema.index({
+  completion_notification_requested: 1,
+  completion_notified_at: 1,
+  status: 1,
+  finished_at: 1,
+})
 
 const SpatialArtifactRelationSchema = new Schema({
   kind: { type: String, enum: SPATIAL_ARTIFACT_RELATIONS, required: true },
@@ -124,7 +133,10 @@ const SpatialPaidSlotSchema = new Schema<SpatialPaidSlotRecord>({
   collection: 'spatial_paid_slots',
 })
 
-SpatialPaidSlotSchema.index({ project_id: 1, slot: 1 }, { unique: true })
+// Image generation and slow 3D builds have independent concurrency lanes.
+// Two running Lux jobs must not prevent an Agent from producing the next
+// reference image while those jobs continue in the background.
+SpatialPaidSlotSchema.index({ project_id: 1, holder_type: 1, slot: 1 }, { unique: true })
 SpatialPaidSlotSchema.index(
   { project_id: 1, holder_type: 1, holder_key: 1 },
   { unique: true },

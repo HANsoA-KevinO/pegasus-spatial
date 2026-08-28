@@ -8,8 +8,8 @@ export function BrandMark(props: SVGProps<SVGSVGElement>) {
       <path d="M20 14.3v16M14 18.1h2.8M23.2 18.1H26M14 22h3.6M22.4 22H26" stroke="white" strokeWidth="1.4" strokeLinecap="round" opacity=".9" />
       <defs>
         <linearGradient id="brand-bg" x1="5" y1="4" x2="35" y2="38" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#315F72" />
-          <stop offset="1" stopColor="#6D4C78" />
+          <stop stopColor="#2C3530" />
+          <stop offset="1" stopColor="#D75A3B" />
         </linearGradient>
       </defs>
     </svg>

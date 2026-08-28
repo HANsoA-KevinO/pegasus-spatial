@@ -32,9 +32,14 @@ export interface SceneWorldSource {
 }
 
 export interface SceneObjectNormalization {
+  basis_contract_version?: 'lux3d_g1_paired_v1'
   source_up_axis: 'Y'
   scene_up_axis: 'Y' | 'Z'
   pivot: 'bottom_center'
+  glb_basis_correction?: 'gltf_y_up_to_scene_z_up'
+  ply_source_up_axis?: 'Z' | '-Y'
+  ply_yaw_correction_deg?: number
+  ply_basis_correction?: 'lux_ply_negative_y_up_to_scene_z_up'
   bounds?: { min: Vec3; max: Vec3; size: Vec3 }
 }
 

@@ -28,7 +28,7 @@ export default function WorkspacePage() {
     return <div className="h-full min-w-0 flex-1 overflow-hidden"><Skeleton variant="workspace" /></div>
   }
 
-  if (messages.length === 0 && !isLoading) {
+  if (messages.length === 0 && !isLoading && !showWorkspace) {
     return (
       <TaskWorkbench
         onSubmit={(message, domain) => {

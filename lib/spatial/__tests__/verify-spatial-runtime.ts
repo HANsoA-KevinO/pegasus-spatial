@@ -78,9 +78,16 @@ async function verifyFailClosedConfiguration(): Promise<void> {
     SPATIAL_WORKER_ENABLED: '1',
   }))
   assert.equal(disabled.workerEnabled, true)
+  assert.equal(disabled.concurrency, 8, 'default worker throughput should support parallel Agent fan-out')
   assert.equal(disabled.aholo.submissionEnabled, false)
   assert.equal(disabled.lux3d.submissionEnabled, false)
   assert.deepEqual(disabled.configurationWarnings, [])
+
+  const boundedConcurrency = readSpatialRuntimeConfig(env({
+    SPATIAL_PAID_CALLS_ENABLED: '0',
+    SPATIAL_WORKER_CONCURRENCY: '999',
+  }))
+  assert.equal(boundedConcurrency.concurrency, 32, 'local worker safety cap is not a project backlog limit')
 
   const missingAllowlist = readSpatialRuntimeConfig(env({
     SPATIAL_PAID_CALLS_ENABLED: '1',

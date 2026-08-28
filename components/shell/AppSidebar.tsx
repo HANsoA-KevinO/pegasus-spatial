@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { useTheme } from 'next-themes'
 import { useChatContext } from '@/contexts/ChatContext'
 import { useConversationTitle } from '@/hooks/useConversation'
 import { useLiteraturePaperSummaries } from '@/hooks/useLiteraturePaperSummaries'
@@ -10,12 +9,6 @@ import { parsePaperSummaryFile } from '@/lib/literature/paper-summaries'
 import { WorkspaceFileExplorer } from '@/components/workspace/WorkspaceFileExplorer'
 import { ConversationList } from './ConversationList'
 import { FeedbackDialog } from './FeedbackDialog'
-
-const THEME_OPTIONS = [
-  { value: 'system', label: '跟随系统' },
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
-] as const
 
 function SidebarModeTab({ selected, disabled = false, label, count, onClick }: {
   selected: boolean
@@ -31,7 +24,7 @@ function SidebarModeTab({ selected, disabled = false, label, count, onClick }: {
       aria-selected={selected}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-8 items-center justify-center gap-1.5 rounded-ctrl text-[11px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-35 ${selected ? 'bg-surface-lowest text-primary shadow-sm' : 'text-ink-muted hover:bg-white/35 hover:text-ink dark:hover:bg-white/[0.04]'}`}
+      className={`flex h-8 items-center justify-center gap-1.5 rounded-ctrl text-[11px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-35 ${selected ? 'bg-surface-lowest text-primary shadow-sm' : 'text-ink-muted hover:bg-white/35 hover:text-ink'}`}
     >
       {label}
       {count !== undefined && <span className={`font-mono text-[8.5px] tabular-nums ${selected ? 'text-primary/70' : 'text-ink-faint'}`}>{count}</span>}
@@ -54,7 +47,7 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`relative flex h-10 w-10 items-center justify-center rounded-card transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-30 ${active ? 'bg-primary/10 text-primary' : 'text-ink-muted hover:bg-white/45 hover:text-ink dark:hover:bg-white/[0.05]'}`}
+      className={`relative flex h-10 w-10 items-center justify-center rounded-card transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-30 ${active ? 'bg-primary/10 text-primary' : 'text-ink-muted hover:bg-white/45 hover:text-ink'}`}
     >
       {icon === 'projects' ? (
         <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25A2.25 2.25 0 0 1 6 3h3.19c.6 0 1.17.24 1.59.66l.56.56c.42.42.99.66 1.59.66H18A2.25 2.25 0 0 1 20.25 7.1v10.65A2.25 2.25 0 0 1 18 20H6a2.25 2.25 0 0 1-2.25-2.25V5.25Z" /></svg>
@@ -69,7 +62,6 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
 export function AppSidebar({ className = '' }: { className?: string }) {
   const router = useRouter()
   const pathname = usePathname()
-  const { theme, setTheme } = useTheme()
   const {
     conversationId,
     artifacts,
@@ -89,7 +81,6 @@ export function AppSidebar({ className = '' }: { className?: string }) {
 
   const collapsed = sidebarCollapsed
   const [showMenu, setShowMenu] = useState(false)
-  const [showThemeSub, setShowThemeSub] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [shimmering, setShimmering] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -140,7 +131,6 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     const handler = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setShowMenu(false)
-        setShowThemeSub(false)
       }
     }
     document.addEventListener('mousedown', handler)
@@ -163,7 +153,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
           <button
             type="button"
             onClick={() => setSidebarCollapsed(!collapsed)}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card text-ink-muted transition hover:bg-white/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:hover:bg-white/[0.07]"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card text-ink-muted transition hover:bg-white/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             title={collapsed ? '展开导航' : '收起导航'}
             aria-label={collapsed ? '展开导航' : '收起导航'}
           >
@@ -235,7 +225,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                   type="button"
                   onClick={handleCreate}
                   className="pmo-btn-primary relative mb-5 mt-1 flex h-10 w-full items-center justify-center rounded-ctrl px-3 text-[12px]"
-                  style={{ boxShadow: '0 4px 16px -5px rgba(93,119,173,.32)' }}
+                  style={{ boxShadow: '0 4px 16px -5px color-mix(in srgb, var(--primary) 32%, transparent)' }}
                 >
                   <span className="relative z-10 inline-flex items-center gap-2">
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -254,7 +244,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               </div>
             ) : (
               <div role="tabpanel" aria-label="文件" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                <div className="mx-4 mb-2 mt-1 rounded-card border border-outline-variant/10 bg-white/35 px-3 py-2.5 dark:bg-white/[0.025]">
+                <div className="mx-4 mb-2 mt-1 rounded-card border border-outline-variant/10 bg-white/35 px-3 py-2.5">
                   <p className="truncate text-[11.5px] font-semibold text-ink" title={activeProjectTitle ?? '当前研究项目'}>{activeProjectTitle ?? '当前研究项目'}</p>
                   <div className="mt-1 flex items-center justify-between gap-2">
                     <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-faint">Workspace</span>
@@ -281,8 +271,8 @@ export function AppSidebar({ className = '' }: { className?: string }) {
           {/* Settings & Help button + popover */}
           <div className="relative" ref={menuRef}>
             <button
-              onClick={() => { setShowMenu(!showMenu); setShowThemeSub(false) }}
-              className={`flex items-center gap-3 rounded-card text-ink-muted hover:text-on-surface hover:bg-white/50 dark:hover:bg-white/[0.07] transition-all h-9 ${
+              onClick={() => setShowMenu(!showMenu)}
+              className={`flex items-center gap-3 rounded-card text-ink-muted hover:text-on-surface hover:bg-white/50 transition-all h-9 ${
                 collapsed ? 'justify-center px-0 w-full' : 'px-2 w-full'
               }`}
               title="设置与帮助"
@@ -296,40 +286,6 @@ export function AppSidebar({ className = '' }: { className?: string }) {
 
             {showMenu && (
               <div className="absolute bottom-full left-0 mb-2 w-56 rounded-card bg-[var(--glass-panel-bg)] backdrop-blur-[20px] backdrop-saturate-150 shadow-[var(--shadow-glass)] border border-[var(--glass-panel-border)] py-2 z-50 animate-fade-in">
-                {/* Theme */}
-                <div>
-                  <button
-                    onClick={() => setShowThemeSub(!showThemeSub)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-ink-secondary hover:text-ink hover:bg-surface-low transition-colors"
-                  >
-                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-                    </svg>
-                    <span className="flex-1 text-left">主题</span>
-                    <svg className={`w-3.5 h-3.5 transition-transform ${showThemeSub ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                    </svg>
-                  </button>
-                  {showThemeSub && (
-                    <div className="mx-2 mb-1 rounded-ctrl bg-surface-low/60 py-1">
-                      {THEME_OPTIONS.map(opt => (
-                        <button
-                          key={opt.value}
-                          onClick={() => { setTheme(opt.value); setShowThemeSub(false) }}
-                          className="w-full flex items-center gap-3 px-4 py-2 text-sm text-ink-secondary hover:text-ink hover:bg-surface-lowest rounded-ctrl transition-colors"
-                        >
-                          <span className="flex-1 text-left">{opt.label}</span>
-                          {theme === opt.value && (
-                            <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                            </svg>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
                 {/* Feedback */}
                 <button
                   onClick={() => { setShowMenu(false); setShowFeedback(true) }}

@@ -22,10 +22,7 @@ import {
 import { toRasterAssetRef } from '../media/reference'
 import { claimImageAsset, writeImageAsset } from '../media/storage'
 import {
-  acquireSpatialPaidSlot,
-  bindSpatialPaidSlot,
   registerPublishedSpatialArtifact,
-  releaseSpatialPaidSlot,
   SpatialPaidCapacityError,
   type SpatialPaidSlotClaim,
 } from '../spatial'
@@ -77,17 +74,9 @@ export function createDefaultGenerateImageDependencies(): GenerateImageDependenc
       return { asset: toRasterAssetRef(claimed), sha256: claimed.sha256 }
     },
     registerPublishedArtifact: registerPublishedSpatialArtifact,
-    paidSlots: {
-      acquire: input => acquireSpatialPaidSlot({
-        ...input,
-        holderType: 'image_generation',
-      }),
-      bind: bindSpatialPaidSlot,
-      release: input => releaseSpatialPaidSlot({
-        ...input,
-        holderType: 'image_generation',
-      }),
-    },
+    // Product GenerateImage calls are not globally throttled. Durable receipt
+    // identity still prevents duplicate submission; tests and Operator smoke
+    // may inject a paidSlots coordinator when an explicit budget gate is needed.
   }
 }
 
@@ -641,7 +630,7 @@ export async function executeGenerateImage(
         })
       } catch (error) {
         if (error instanceof SpatialPaidCapacityError) {
-          return invalid('当前项目已有 2 个昂贵空间任务在运行；最多允许同时运行 2 个。')
+          return invalid('当前项目已有 2 个图片生成任务在运行；图片生成最多允许同时运行 2 个。后台 3D 任务使用独立并发额度。')
         }
         throw error
       }
