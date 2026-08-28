@@ -8,6 +8,7 @@
     "demo:up": "jiti scripts/demo-local.ts up",
     "demo:status": "jiti scripts/demo-local.ts status",
     "demo:down": "jiti scripts/demo-local.ts down",
+    "demo:config:verify": "jiti scripts/__tests__/verify-demo-local-config.ts",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3200",
     "lint": "eslint",

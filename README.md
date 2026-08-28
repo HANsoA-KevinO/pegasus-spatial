@@ -27,6 +27,17 @@ npm run demo:status   # 只报告配置、Web 和本地存储是否就绪，不�
 npm run demo:down     # 安全停止，不删除容器或数据卷
 ```
 
+开发机已经通过 Homebrew 等方式运行 MongoDB 时，也可以把
+`MONGODB_URI` 指向 `mongodb://127.0.0.1:27017/pegasus_spatial`。启动器只在
+Docker 隔离端口 `27019` 和本机标准端口 `27017` 之间选择，仍会拒绝远程主机与其他数据库。
+需要和已有的 `3200` 服务并行预览分支时，可使用独立端口；PID 与日志也会按端口隔离：
+
+```bash
+PEGASUS_DEMO_PORT=3201 npm run demo:up
+PEGASUS_DEMO_PORT=3201 npm run demo:status
+PEGASUS_DEMO_PORT=3201 npm run demo:down
+```
+
 `demo:up` 强制要求 `SPATIAL_PAID_CALLS_ENABLED=0`，因此禁止**新的空间付费提交**；配置缺失、连接远程数据库或 3200 端口已有任何服务时都会拒绝启动或接管。已经持久化了外部任务 ID 的旧任务仍可恢复查询与发布；普通聊天仍可能使用已配置的 NewAPI，所以零外部调用审阅时不应发送新聊天请求。
 
 无账号模式只适用于现场单机 Demo：服务默认只监听 `127.0.0.1`，浏览器请求统一映射到一个固定的本地内部身份。如需对局域网或公网开放，必须在前置网关重新加入访问控制。

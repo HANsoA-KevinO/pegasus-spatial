@@ -10,19 +10,35 @@ import {
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import mongoose from 'mongoose'
 import { runStartupChecks } from '../lib/startup-checks'
 import { loadProjectEnv } from './load-project-env'
 
 const PROJECT_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const APP_PORT = 3200
+const DEFAULT_APP_PORT = 3200
+const DOCKER_MONGO_PORT = '27019'
+const LOCAL_MONGO_PORT = '27017'
+const ALLOWED_LOCAL_MONGO_PORTS = new Set([DOCKER_MONGO_PORT, LOCAL_MONGO_PORT])
+
+export function resolveDemoAppPort(value: string | undefined): number {
+  if (!value?.trim()) return DEFAULT_APP_PORT
+  const port = Number(value)
+  if (!Number.isSafeInteger(port) || port < 1024 || port > 65_535) {
+    throw new Error('PEGASUS_DEMO_PORT 必须是 1024 到 65535 之间的整数。')
+  }
+  return port
+}
+
+const APP_PORT = resolveDemoAppPort(process.env.PEGASUS_DEMO_PORT ?? process.env.PORT)
 const APP_URL = `http://127.0.0.1:${APP_PORT}`
-const PID_FILE = join(tmpdir(), 'pegasus-spatial-demo.pid')
-const LOG_FILE = join(tmpdir(), 'pegasus-spatial-demo.log')
+const PID_FILE = join(tmpdir(), APP_PORT === DEFAULT_APP_PORT ? 'pegasus-spatial-demo.pid' : `pegasus-spatial-demo-${APP_PORT}.pid`)
+const LOG_FILE = join(tmpdir(), APP_PORT === DEFAULT_APP_PORT ? 'pegasus-spatial-demo.log' : `pegasus-spatial-demo-${APP_PORT}.log`)
 const NEXT_BIN = join(PROJECT_ROOT, 'node_modules', 'next', 'dist', 'bin', 'next')
 const JITI_BIN = join(PROJECT_ROOT, 'node_modules', 'jiti', 'lib', 'jiti-cli.mjs')
 const EXPECTED_MONGO_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 
 type AppProbe = 'offline' | 'pegasus-spatial' | 'occupied'
+type DemoMongoRuntime = 'docker' | 'local'
 
 interface ManagedPid {
   pid: number
@@ -77,6 +93,29 @@ function mongoDatabaseName(uri: string): string {
   return parsed.pathname.replace(/^\//, '').split('?')[0] ?? ''
 }
 
+export function demoMongoRuntime(uri: string): DemoMongoRuntime {
+  const parsed = new URL(uri)
+  return (parsed.port || LOCAL_MONGO_PORT) === DOCKER_MONGO_PORT ? 'docker' : 'local'
+}
+
+async function mongoIsReachable(uri: string): Promise<boolean> {
+  const connection = mongoose.createConnection(uri, {
+    serverSelectionTimeoutMS: 2_000,
+    connectTimeoutMS: 2_000,
+    maxPoolSize: 1,
+    minPoolSize: 0,
+  })
+  try {
+    await connection.asPromise()
+    const result = await connection.db?.admin().command({ ping: 1 })
+    return result?.ok === 1
+  } catch {
+    return false
+  } finally {
+    await connection.close().catch(() => undefined)
+  }
+}
+
 /**
  * Local demo safety boundary. It deliberately refuses remote Mongo and paid
  * provider mode before Docker or Next.js is started.
@@ -103,11 +142,11 @@ export function assertSafeDemoEnvironment(options: { allowE2eDatabase?: boolean 
   if (
     parsed.protocol !== 'mongodb:'
     || !EXPECTED_MONGO_HOSTS.has(parsed.hostname)
-    || (parsed.port || '27017') !== '27019'
+    || !ALLOWED_LOCAL_MONGO_PORTS.has(parsed.port || LOCAL_MONGO_PORT)
     || !validDatabase
   ) {
     throw new Error(
-      '本地演示只允许 127.0.0.1:27019 上的 pegasus_spatial 隔离数据库；拒绝连接远程或其他数据库。',
+      '本地演示只允许回环地址 27019（Docker 隔离实例）或 27017（本机 MongoDB）上的 pegasus_spatial 数据库；拒绝连接远程或其他数据库。',
     )
   }
 
@@ -116,7 +155,17 @@ export function assertSafeDemoEnvironment(options: { allowE2eDatabase?: boolean 
   runStartupChecks()
 }
 
-export async function ensureDemoMongo(): Promise<void> {
+export async function ensureDemoMongo(): Promise<DemoMongoRuntime> {
+  const mongoUri = process.env.MONGODB_URI?.trim()
+  if (!mongoUri) throw new Error('缺少 MONGODB_URI；请先完成 .env.local。')
+  const runtime = demoMongoRuntime(mongoUri)
+  if (runtime === 'local') {
+    if (!await mongoIsReachable(mongoUri)) {
+      throw new Error('无法连接本机 MongoDB；请确认 127.0.0.1:27017 的 mongod 已启动。')
+    }
+    return runtime
+  }
+
   assertDockerAvailable()
   docker(['compose', 'up', '-d', 'mongo'])
   const deadline = Date.now() + 70_000
@@ -127,7 +176,7 @@ export async function ensureDemoMongo(): Promise<void> {
         ['inspect', '--format', '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}', containerId],
         { quiet: true },
       )
-      if (health === 'healthy') return
+      if (health === 'healthy') return runtime
       if (health === 'unhealthy' || health === 'exited' || health === 'dead') {
         throw new Error(`Mongo 容器状态异常：${health}`)
       }
@@ -230,6 +279,7 @@ export async function startManagedDemoApp(
       PORT: String(APP_PORT),
       APP_PUBLIC_URL: `http://localhost:${APP_PORT}`,
       AGENT_RUNTIME_INTERNAL_BASE_URL: `http://127.0.0.1:${APP_PORT}`,
+      MEDIA_PUBLIC_BASE_URL: `http://localhost:${APP_PORT}`,
       SPATIAL_PAID_CALLS_ENABLED: '0',
     },
     stdio: ['ignore', logFd, logFd],
@@ -304,15 +354,26 @@ async function demoStatus(): Promise<number> {
     : 'blocked · 运行 npm run demo:up 查看缺失或无效配置'
 
   let mongo = 'unavailable'
+  let mongoHealthy = false
   try {
-    assertDockerAvailable()
-    const containerId = docker(['compose', 'ps', '-q', 'mongo'], { quiet: true })
-    mongo = containerId
-      ? docker(
-          ['inspect', '--format', '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}', containerId],
-          { quiet: true },
-        )
-      : 'stopped'
+    const mongoUri = process.env.MONGODB_URI?.trim()
+    if (!mongoUri) throw new Error('missing mongo uri')
+    const runtime = demoMongoRuntime(mongoUri)
+    if (runtime === 'local') {
+      mongoHealthy = await mongoIsReachable(mongoUri)
+      mongo = mongoHealthy ? 'healthy · local 27017' : 'unreachable · local 27017'
+    } else {
+      assertDockerAvailable()
+      const containerId = docker(['compose', 'ps', '-q', 'mongo'], { quiet: true })
+      const state = containerId
+        ? docker(
+            ['inspect', '--format', '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}', containerId],
+            { quiet: true },
+          )
+        : 'stopped'
+      mongoHealthy = state === 'healthy'
+      mongo = `${state} · docker 27019`
+    }
   } catch {
     mongo = 'docker unavailable'
   }
@@ -321,9 +382,13 @@ async function demoStatus(): Promise<number> {
   console.log(`mongo: ${mongo}`)
   console.log('access: direct · fixed local Demo identity · loopback only')
   console.log(`web: ${app === 'pegasus-spatial' ? `ready · ${APP_URL}` : app}`)
-  console.log('data: local Docker volume preserved')
+  const mongoUri = process.env.MONGODB_URI?.trim()
+  const dataDescription = mongoUri && demoMongoRuntime(mongoUri) === 'local'
+    ? 'local MongoDB data preserved'
+    : 'local Docker volume preserved'
+  console.log(`data: ${dataDescription}`)
   return configuration.startsWith('ready')
-    && mongo === 'healthy'
+    && mongoHealthy
     && app === 'pegasus-spatial'
     ? 0
     : 1
@@ -334,6 +399,7 @@ async function main(): Promise<void> {
   if (!['up', 'status', 'down'].includes(action ?? '')) {
     throw new Error('Usage: npm run demo:up | npm run demo:status | npm run demo:down')
   }
+  loadProjectEnv()
 
   if (action === 'up') {
     assertSafeDemoEnvironment()
@@ -357,9 +423,13 @@ async function main(): Promise<void> {
     throw new Error('检测到非本脚本管理的 Pegasus Spatial 进程；请先手动停止它，Mongo 保持运行。')
   }
   const stopped = await stopManagedDemoApp()
-  docker(['compose', 'stop', 'mongo'])
+  const mongoUri = process.env.MONGODB_URI?.trim()
+  const mongoRuntime = mongoUri ? demoMongoRuntime(mongoUri) : 'docker'
+  if (mongoRuntime === 'docker') docker(['compose', 'stop', 'mongo'])
   console.log(`Web：${stopped ? '已停止' : '未运行'}`)
-  console.log('Mongo：已停止；容器与 pegasus-spatial 数据卷完整保留。')
+  console.log(mongoRuntime === 'docker'
+    ? 'Mongo：已停止；容器与 pegasus-spatial 数据卷完整保留。'
+    : 'Mongo：本机服务保持运行；只停止 Pegasus Spatial Web。')
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
