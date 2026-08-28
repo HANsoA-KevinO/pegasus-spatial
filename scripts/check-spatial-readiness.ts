@@ -161,19 +161,17 @@ const checks: Check[] = [
   hostsCheck('LUX3D_ASSET_HOST_ALLOWLIST', process.env.LUX3D_ASSET_HOST_ALLOWLIST),
 ]
 
-const paidEnabled = process.env.SPATIAL_PAID_CALLS_ENABLED === '1'
 const report = {
   product: 'Pegasus Spatial',
   checked_at: new Date().toISOString(),
   image_route: 'NewAPI Chat Completions / GPT-image-2',
-  paid_calls_enabled: paidEnabled,
   live_submission_performed: false,
   checks,
   ready_for_paid_smoke: checks.every(check => check.ok),
 }
 
 console.log(JSON.stringify(report, null, 2))
-if (paidEnabled && !report.ready_for_paid_smoke) {
-  console.error('付费开关已开启，但 H0 门禁未满足；拒绝将此环境视为可提交。')
+if (!report.ready_for_paid_smoke) {
+  console.error('供应商预检未满足；请修复具体凭证、媒体地址或资产域名配置。')
   process.exitCode = 1
 }

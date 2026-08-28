@@ -1100,7 +1100,7 @@ async function main(): Promise<void> {
     const cursorAfterAcknowledgement = await agentTeamService.getTeam({ teamId: team.team_id, userId })
     assert.ok(cursorAfterAcknowledgement.supervision_cursor > cursorBeforeClaimRace)
 
-    const observerFullBody = 'Root must receive this complete peer message body, not only its preview.'
+    const observerFullBody = 'Root must not receive this complete peer body in its automatic observer preview.'
     const summarizedPeerMessage = await agentTeamService.sendMessage({
       team_id: team.team_id,
       user_id: userId,
@@ -1124,9 +1124,10 @@ async function main(): Promise<void> {
     assert.match(observerQueueReceipt!.content, /summary: Peer observer preview/)
     assert.equal(
       observerQueueReceipt!.content.split(observerFullBody).length - 1,
-      1,
-      'a summarized peer message must inject its full content to Root exactly once',
+      0,
+      'a peer observer notification must not duplicate its authoritative durable body into Root context',
     )
+    assert.match(observerQueueReceipt!.content, new RegExp(summarizedPeerMessage.message.message_id))
 
     const exactRootDelivery = await agentTeamService.sendMessage({
       team_id: team.team_id,

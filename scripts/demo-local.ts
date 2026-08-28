@@ -78,17 +78,12 @@ function mongoDatabaseName(uri: string): string {
 }
 
 /**
- * Local demo safety boundary. It deliberately refuses remote Mongo and paid
- * provider mode before Docker or Next.js is started.
+ * Local demo safety boundary. It deliberately refuses remote Mongo before
+ * Docker or Next.js is started. Provider submission is controlled by the
+ * configured credentials and durable task contracts, not a global flag.
  */
 export function assertSafeDemoEnvironment(options: { allowE2eDatabase?: boolean } = {}): void {
   loadProjectEnv()
-  if (process.env.SPATIAL_PAID_CALLS_ENABLED !== '0') {
-    throw new Error(
-      '评委安全审阅模式要求 SPATIAL_PAID_CALLS_ENABLED=0；必须禁止新的空间付费提交。',
-    )
-  }
-
   const mongoUri = process.env.MONGODB_URI?.trim()
   if (!mongoUri) throw new Error('缺少 MONGODB_URI；请先完成 .env.local。')
   let parsed: URL
@@ -230,7 +225,6 @@ export async function startManagedDemoApp(
       PORT: String(APP_PORT),
       APP_PUBLIC_URL: `http://localhost:${APP_PORT}`,
       AGENT_RUNTIME_INTERNAL_BASE_URL: `http://127.0.0.1:${APP_PORT}`,
-      SPATIAL_PAID_CALLS_ENABLED: '0',
     },
     stdio: ['ignore', logFd, logFd],
   })

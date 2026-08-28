@@ -277,6 +277,34 @@
 .transformGrid dd { margin: 4px 0 0; overflow: hidden; color: var(--ink-soft); font-family: "JetBrains Mono", monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .qualityNotice { margin: 0; border-left: 2px solid rgba(215, 90, 59, 0.42); padding: 7px 0 7px 9px; color: var(--ink-soft); font-size: 9px; line-height: 1.55; }
 
+.editState { display: flex; align-items: center; justify-content: space-between; margin-top: 13px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 7px 1px; color: var(--ink-soft); font-family: "JetBrains Mono", monospace; font-size: 8px; }
+.editState em { color: var(--ink-faint); font-style: normal; }
+.editState[data-state="saving"] span { color: #a86a21; }
+.editState[data-state="saved"] span { color: var(--green); }
+.editState[data-state="error"] span { color: #a23d2c; }
+.positionPad { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 10px; margin-top: 12px; }
+.padGrid { display: grid; grid-template: repeat(2, 38px) / repeat(3, 34px); gap: 3px; }
+.padGrid button { display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font-size: 15px; background: rgba(255,255,255,.66); cursor: pointer; }
+.padGrid button:nth-child(1) { grid-column: 2; }
+.padGrid button:nth-child(2) { grid-row: 2; grid-column: 1; }
+.padGrid button:nth-child(3) { grid-row: 2; grid-column: 2; }
+.padGrid button:nth-child(4) { grid-row: 2; grid-column: 3; }
+.padGrid button:hover,
+.heightControls button:hover { border-color: rgba(215,90,59,.38); color: var(--signal); background: var(--signal-soft); }
+.heightControls { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.heightControls button { border: 1px solid var(--line); border-radius: 6px; color: var(--ink-soft); font-size: 9px; background: rgba(255,255,255,.58); cursor: pointer; }
+.heightControls button:last-child { grid-column: 1 / -1; color: var(--signal); }
+.stepControl { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 8px; color: var(--ink-faint); font-size: 9px; }
+.stepControl select { width: 74px; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; color: var(--ink); font-family: "JetBrains Mono", monospace; font-size: 9px; background: rgba(255,255,255,.72); }
+.transformEditor { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.transformEditor fieldset { margin: 0; border: 1px solid var(--line); border-radius: 7px; padding: 8px; background: rgba(251,249,243,.68); }
+.transformEditor legend { padding: 0 5px; color: var(--ink-faint); font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.transformEditor fieldset > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.transformEditor label { display: grid; grid-template-columns: 18px minmax(0,1fr); align-items: center; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; background: rgba(255,255,255,.72); }
+.transformEditor label span { display: grid; height: 100%; place-items: center; border-right: 1px solid var(--line); color: var(--signal); font-family: "JetBrains Mono", monospace; font-size: 8px; }
+.transformEditor input { width: 100%; min-width: 0; border: 0; padding: 7px 5px; color: var(--ink); font-family: "JetBrains Mono", monospace; font-size: 9px; background: transparent; outline: 0; }
+.transformEditor label:focus-within { border-color: rgba(215,90,59,.45); box-shadow: 0 0 0 2px var(--signal-soft); }
+
 .observationComposer { margin-top: 0; }
 .composerHeading b { flex: none; border: 1px solid rgba(57, 113, 92, 0.22); border-radius: 99px; padding: 4px 7px; color: var(--green); font-size: 8px; background: rgba(57, 113, 92, 0.07); }
 .observationComposer label { display: block; margin-top: 15px; color: var(--ink-soft); font-size: 10px; font-weight: 650; }

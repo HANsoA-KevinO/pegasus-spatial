@@ -666,6 +666,7 @@ export async function executeAgentTeamTool(
               kind: message.kind,
               summary: (message as typeof message & { summary?: string }).summary
                 || message.content.slice(0, 120),
+              content: message.content,
               created_at: message.created_at,
             })),
         })

@@ -7,6 +7,7 @@ import { recoverCompactionCheckpoint } from '../compaction-recovery'
 import {
   classifyCompactionBarrierJob,
   compactionBarrierOwnerKeyForRun,
+  isReloadableCompactionPrepareConflict,
 } from '../compaction-barrier'
 import {
   filterFreshRunMessages,
@@ -1016,6 +1017,12 @@ function testDurableCompactionBarrierPolicy(): void {
     classifyCompactionBarrierJob('conversation:conv_barrier_root', null, now).kind,
     'open',
   )
+  assert.equal(isReloadableCompactionPrepareConflict({
+    code: 'COMPACTION_PREFIX_CONFLICT',
+  }), true, 'a stale frozen prefix must reload the canonical context')
+  assert.equal(isReloadableCompactionPrepareConflict({
+    code: 'COMPACTION_OWNER_NOT_FOUND',
+  }), false, 'unrelated prepare failures must still fail closed')
 }
 
 async function main(): Promise<void> {

@@ -45,9 +45,11 @@ import type { ToolExecutionInvocation } from './execution-context'
 import {
   enforceToolInputBoundary,
   enforceVisibleToolInputBoundary,
+  isRejectedToolInput,
   rejectedToolInputResultMessage,
   type ToolInputRejection,
 } from './tool-input-boundary'
+import { isPromptTooLongLLMError } from './llm-api'
 
 // ==================== Interfaces ====================
 
@@ -1263,10 +1265,20 @@ export async function agentLoop(
           return false
         })
       }
-      // Layer 4: Reactive compact — handle 413 Prompt Too Long
+      // Layer 4: Reactive compact — only handle a structured prompt-size
+      // failure. Never infer HTTP 413 from arbitrary digits in an opaque
+      // provider request id.
       const errMsg = (err as Error).message || ''
-      if (errMsg.includes('413') || errMsg.toLowerCase().includes('prompt too long') || errMsg.toLowerCase().includes('too large')) {
+      if (isPromptTooLongLLMError(err)) {
         if (options?.workspace) {
+          const hasCompactableHistory = messages.length > 1 && messages.some(message => (
+            message.role === 'assistant'
+            || message.content.some(block => block.type === 'tool_result')
+          ))
+          if (!hasCompactableHistory) {
+            console.error('[agent-loop] Prompt-size failure has no compactable history; preserving the first user request.')
+            throw err
+          }
           console.log('[agent-loop] 413 error detected, triggering reactive compact...')
           if (activeCompaction?.preparedJobId) {
             await pauseForPreparedCompaction()
@@ -2041,6 +2053,29 @@ function guardHistoricalToolInputs(
   const messages = [...initialMessages]
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]
+    // A rejection marker is already the durable, JSON-safe audit form of a
+    // model-produced input that failed the execution boundary. Re-guarding it
+    // would replace its original rejection (for example `invalid_schema`) with
+    // a new `rejected_marker` rejection. Besides losing audit fidelity, that
+    // silently changes the in-memory history after Mongo persistence, so a
+    // later durable compaction cannot prove that its frozen prefix matches the
+    // active context. Preserve completed rejection records byte-for-byte.
+    if (message.content.some(block => (
+      block.type === 'tool_use' && isRejectedToolInput(block.input)
+    ))) {
+      const guardedContent = message.content.map(block => {
+        if (block.type !== 'tool_use' || isRejectedToolInput(block.input)) return block
+        const guarded = guardToolUseInputs([block], undefined, {
+          source: 'history',
+          messageIndex: index,
+        })
+        return guarded.content[0] ?? block
+      })
+      if (guardedContent.some((block, blockIndex) => block !== message.content[blockIndex])) {
+        messages[index] = { ...message, content: guardedContent }
+      }
+      continue
+    }
     const guarded = guardToolUseInputs(message.content, undefined, {
       source: 'history',
       messageIndex: index,

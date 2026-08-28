@@ -59,7 +59,7 @@ interface RowMenuProps {
   isPinned: boolean
   onPin: () => void
   onRename: () => void
-  onDelete: () => void
+  onDelete: () => Promise<void>
 }
 
 function RowMenu({ isPinned, onPin, onRename, onDelete }: RowMenuProps) {
@@ -144,7 +144,7 @@ function RowMenu({ isPinned, onPin, onRename, onDelete }: RowMenuProps) {
           </button>
           <div className="my-1 border-t border-outline-variant/15" />
           <button
-            onClick={() => { onDelete(); setOpen(false) }}
+            onClick={() => { void onDelete(); setOpen(false) }}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-[12.5px] text-error hover:bg-error/8 transition-colors"
           >
             <IconTrash />
@@ -168,6 +168,8 @@ export function ConversationList({
 
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
 
   const prevConvIdRef = useRef<string | null>(null)
@@ -204,6 +206,12 @@ export function ConversationList({
 
   return (
     <div className="pmo-stagger flex flex-col gap-[1px]">
+      {deleteError && (
+        <div role="alert" className="mx-2 mb-2 flex items-start gap-2 rounded-ctrl border border-error/20 bg-error/8 px-2.5 py-2 text-[11px] leading-relaxed text-error">
+          <span className="min-w-0 flex-1">{deleteError}</span>
+          <button type="button" aria-label="关闭删除错误" onClick={() => setDeleteError(null)} className="shrink-0 opacity-60 hover:opacity-100">×</button>
+        </div>
+      )}
       {conversations.map((conv, i) => {
         const isActive = currentConversationId === conv.conversation_id
         const isWaiting = waitingForUserIds.has(conv.conversation_id) || conv._waiting_for_user
@@ -213,8 +221,10 @@ export function ConversationList({
         return (
           <div
             key={conv.conversation_id}
+            data-conversation-id={conv.conversation_id}
+            aria-busy={deletingId === conv.conversation_id}
             style={{ '--i': i } as React.CSSProperties}
-            className={`pmo-project group ${isActive ? 'current' : ''}`}
+            className={`pmo-project group ${isActive ? 'current' : ''} ${deletingId === conv.conversation_id ? 'pointer-events-none opacity-50' : ''}`}
             onClick={() => !isRenaming && onSelectConversation(conv.conversation_id)}
           >
             <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -267,8 +277,12 @@ export function ConversationList({
                     onPin={() => pinConversation(conv.conversation_id, !conv.pinned)}
                     onRename={() => startRename(conv.conversation_id, conv.title)}
                     onDelete={async () => {
-                      const ok = await deleteConversation(conv.conversation_id)
-                      if (ok) onDeleteConversation(conv.conversation_id)
+                      setDeleteError(null)
+                      setDeletingId(conv.conversation_id)
+                      const result = await deleteConversation(conv.conversation_id)
+                      setDeletingId(null)
+                      if (result.ok) onDeleteConversation(conv.conversation_id)
+                      else setDeleteError(result.error ?? '删除失败，请重试。')
                     }}
                   />
                 </span>

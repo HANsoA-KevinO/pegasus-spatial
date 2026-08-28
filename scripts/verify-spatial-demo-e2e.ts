@@ -59,7 +59,6 @@ async function main(): Promise<void> {
   const database = `pegasus_spatial_e2e_${suffix}`
   const mongoUri = e2eMongoUri(sourceMongoUri, database)
   process.env.MONGODB_URI = mongoUri
-  process.env.SPATIAL_PAID_CALLS_ENABLED = '0'
   assertSafeDemoEnvironment({ allowE2eDatabase: true })
   await ensureDemoMongo()
 

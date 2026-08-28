@@ -135,14 +135,21 @@ export function runStartupChecks(): void {
     }
   }
 
-  // Paid creation is an explicit deployment boundary. A partial provider
-  // configuration must stop the process before it can create durable jobs
-  // that no worker can safely submit or materialize.
-  if (process.env.SPATIAL_PAID_CALLS_ENABLED === '1') {
+  // When a 3D provider is configured, validate the concrete prerequisites
+  // needed to materialize its durable jobs. There is intentionally no
+  // separate paid-call feature flag in the Agent path.
+  const configuredSpatialProviders = [
+    ['Aholo', 'AHOLO_API_KEY', 'AHOLO_API_TOKEN', 'AHOLO_ASSET_HOST_ALLOWLIST'],
+    ['Lux3D', 'LUX3D_API_KEY', 'LUX3D_API_TOKEN', 'LUX3D_ASSET_HOST_ALLOWLIST'],
+  ] as const
+  const hasConfiguredSpatialProvider = configuredSpatialProviders.some(([, key, token]) => (
+    Boolean((process.env[key] || process.env[token])?.trim())
+  ))
+  if (hasConfiguredSpatialProvider) {
     if (process.env.SPATIAL_WORKER_ENABLED === '0') {
       failures.push({
         variable: 'SPATIAL_WORKER_ENABLED',
-        reason: 'must not be 0 when paid spatial calls are enabled',
+        reason: 'must not be 0 when a spatial provider is configured',
       })
     }
     const providerMediaVariable = mediaDriver === 'oss'
@@ -157,13 +164,8 @@ export function runStartupChecks(): void {
         reason: 'must be a credential-free public HTTPS origin reachable by Aholo/Lux3D',
       })
     }
-    for (const [provider, key, token, hosts] of [
-      ['Aholo', 'AHOLO_API_KEY', 'AHOLO_API_TOKEN', 'AHOLO_ASSET_HOST_ALLOWLIST'],
-      ['Lux3D', 'LUX3D_API_KEY', 'LUX3D_API_TOKEN', 'LUX3D_ASSET_HOST_ALLOWLIST'],
-    ] as const) {
-      if (!(process.env[key] || process.env[token])?.trim()) {
-        failures.push({ variable: key, reason: `not set (required for paid ${provider} calls)` })
-      }
+    for (const [, key, token, hosts] of configuredSpatialProviders) {
+      if (!(process.env[key] || process.env[token])?.trim()) continue
       if (!hasValidHostAllowlist(process.env[hosts])) {
         failures.push({
           variable: hosts,

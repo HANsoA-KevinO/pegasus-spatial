@@ -34,9 +34,11 @@ import { agentTeamRepository } from './repository'
 import { agentTeamService } from './service'
 import type {
   AgentTaskRecord,
+  AgentMailboxMessageRecord,
   AgentMessageKind,
   AgentTeamRecord,
   AgentWakeEvaluation,
+  MailboxDeliveryKind,
   TeamAgentRecord,
   TeamEventRecord,
   WorkspaceProposalRecord,
@@ -667,6 +669,50 @@ export function rootCanAcceptTeamUpdate(status: TeamAgentRecord['status']): bool
   return status === 'idle' || status === 'running'
 }
 
+const ROOT_MAILBOX_OBSERVER_PREVIEW_CHARS = 1_000
+const ROOT_MAILBOX_PRIMARY_INLINE_CHARS = 8_000
+
+function compactMailboxPreview(content: string, maxChars: number): string {
+  const normalized = content.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxChars) return normalized
+  return `${normalized.slice(0, maxChars).trimEnd()}…`
+}
+
+/**
+ * The mailbox document is the authoritative body. Root's automatically
+ * appended context is only a notification surface: observer copies must not
+ * duplicate peer-to-peer bodies, and unusually large task handoffs should be
+ * loaded deliberately through TaskGet instead of arriving as an unbounded
+ * burst. Taskless direct messages stay inline because they have no TaskGet
+ * recovery path.
+ */
+export function rootMailboxModelBody(
+  message: Pick<AgentMailboxMessageRecord,
+    'message_id' | 'task_id' | 'summary' | 'content'>,
+  deliveryKind: MailboxDeliveryKind | undefined,
+): string {
+  const durableReference = message.task_id
+    ? `Full durable message retained as id=${message.message_id}; call TaskGet for task=${message.task_id} to read it.`
+    : `Full durable observer message retained as id=${message.message_id}.`
+
+  if (deliveryKind === 'root_observer') {
+    const preview = message.summary?.trim()
+      || compactMailboxPreview(message.content, ROOT_MAILBOX_OBSERVER_PREVIEW_CHARS)
+    return `summary: ${preview}\n[${durableReference}]`
+  }
+
+  if (
+    message.task_id
+    && message.content.length > ROOT_MAILBOX_PRIMARY_INLINE_CHARS
+  ) {
+    const preview = message.summary?.trim()
+      || compactMailboxPreview(message.content, ROOT_MAILBOX_OBSERVER_PREVIEW_CHARS)
+    return `summary: ${preview}\n[${durableReference}]`
+  }
+
+  return message.content
+}
+
 /** Claim, durably inject, then acknowledge Root's observer/primary mailbox. */
 export async function deliverRootMailbox(team: AgentTeamRecord): Promise<{
   delivered: number
@@ -688,13 +734,11 @@ export async function deliverRootMailbox(team: AgentTeamRecord): Promise<{
       const rootDelivery = message.deliveries.find(delivery => (
         delivery.agent_id === team.root_agent_id
       ))
-      const observerPreview = rootDelivery?.kind === 'root_observer' && message.summary
-        ? `summary: ${message.summary}\ncontent: ${message.content}`
-        : message.content
+      const modelBody = rootMailboxModelBody(message, rootDelivery?.kind)
       const content = `${message.created_at.toISOString()} ${message.kind} `
         + `${message.sender_name ?? message.sender_agent_id} → ${message.recipient_name ?? message.recipient_agent_id}`
         + `${message.task_id ? ` task=${message.task_id}` : ''} id=${message.message_id}\n`
-        + `${observerPreview}${attachments}`
+        + `${modelBody}${attachments}`
       runId = await wakeRootWithUpdate({
         team,
         content: `Durable Agent mailbox message:\n${content}`,

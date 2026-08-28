@@ -56,7 +56,9 @@ const ChatContext = createContext<ChatContextValue | null>(null)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [model, setModel] = useState<ModelProvider>('main_standard')
-  const [researchDomain, setResearchDomain] = useState('开放空间创作')
+  // Legacy metadata remains readable for existing projects, but new Spatial
+  // conversations no longer invent a user-facing "creation context" choice.
+  const [researchDomain, setResearchDomain] = useState('')
   const [quotedSelection, setQuotedSelection] = useState<QuotedSelection | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarView, setSidebarView] = useState<SidebarView>('projects')

@@ -207,23 +207,41 @@ function testVisibleSchemaBoundary(): void {
   }, visible)
   assert.equal(referencedWorld.ok, true, 'image-conditioned world creation must remain available')
 
+  const positiveSceneScale = enforceVisibleToolInputBoundary('AddSceneObject', {
+    scene_id: 'scene_scale_boundary',
+    object_job_id: 'spjob_scale_boundary',
+    scale: [0.5, 1, 2],
+  }, visible)
+  assert.equal(positiveSceneScale.ok, true, 'positive Scene scale must satisfy exclusiveMinimum')
+
+  const zeroSceneScale = enforceVisibleToolInputBoundary('AddSceneObject', {
+    scene_id: 'scene_scale_boundary',
+    object_job_id: 'spjob_scale_boundary',
+    scale: [0, 1, 1],
+  }, visible)
+  assert.equal(zeroSceneScale.ok, false, 'zero Scene scale must remain invalid')
+  if (!zeroSceneScale.ok) {
+    assert.equal(zeroSceneScale.rejection.code, 'schema_constraint')
+    assert.equal(zeroSceneScale.rejection.path, '$.scale[0]')
+  }
+
   const missingObjectIntent = enforceVisibleToolInputBoundary('CreateObject3D', {
     output_path_prefix: 'output/spatial/objects/missing-intent',
   }, visible)
-  assert.equal(missingObjectIntent.ok, false, 'object creation must require prompt or references')
-  if (!missingObjectIntent.ok) {
-    assert.equal(missingObjectIntent.rejection.code, 'schema_constraint')
-    assert.equal(missingObjectIntent.rejection.path, '$')
-  }
+  assert.equal(
+    missingObjectIntent.ok,
+    true,
+    'relay-compatible schema leaves the prompt/reference cross-field rule to the runtime validator',
+  )
 
   const missingWorldIntent = enforceVisibleToolInputBoundary('CreateWorld3D', {
     output_path_prefix: 'output/spatial/worlds/missing-intent',
   }, visible)
-  assert.equal(missingWorldIntent.ok, false, 'world creation must require prompt or a source image')
-  if (!missingWorldIntent.ok) {
-    assert.equal(missingWorldIntent.rejection.code, 'schema_constraint')
-    assert.equal(missingWorldIntent.rejection.path, '$')
-  }
+  assert.equal(
+    missingWorldIntent.ok,
+    true,
+    'relay-compatible schema leaves the prompt/source-image cross-field rule to the runtime validator',
+  )
 }
 
 async function testInvalidNewToolUseProducesRepairResult(): Promise<void> {
@@ -483,6 +501,50 @@ async function testInvalidHistoricalToolUseIsSafeBeforeProviderBuild(): Promise<
   }
 }
 
+async function testPersistedRejectionMarkerRemainsByteStable(): Promise<void> {
+  const persistedInput = {
+    _sci_pegasus_rejected_tool_input: {
+      code: 'invalid_schema',
+      path: '$.scale[0]',
+      message: 'unsupported tool-schema keyword exclusiveMinimum',
+    },
+  }
+  const history: ConversationMessage[] = [
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool_use',
+        id: 'persisted_rejection',
+        name: 'AddSceneObject',
+        input: persistedInput,
+      }],
+    },
+    {
+      role: 'user',
+      content: [{
+        type: 'tool_result',
+        tool_use_id: 'persisted_rejection',
+        content: 'Tool input rejected before execution.',
+        is_error: true,
+      }],
+    },
+  ]
+  const before = JSON.stringify(history)
+  const provider = new ScriptedProvider([
+    response([{ type: 'text', text: 'history preserved' }]),
+  ])
+
+  const result = await agentLoop(provider, history, { maxTurns: 1 })
+
+  assert.equal(result.text, 'history preserved')
+  assert.equal(JSON.stringify(provider.requests[0].slice(0, history.length)), before)
+  const replayed = provider.requests[0][0].content[0]
+  assert.equal(replayed.type, 'tool_use')
+  if (replayed.type === 'tool_use') {
+    assert.deepEqual(replayed.input, persistedInput)
+  }
+}
+
 async function main(): Promise<void> {
   testPureBoundary()
   testVisibleSchemaBoundary()
@@ -492,6 +554,7 @@ async function main(): Promise<void> {
   await testMixedAskUserBatchFailsClosedWithCompleteAudit()
   await testCrashAfterModelCheckpointRepairsEveryOrphanWithoutReplay()
   await testInvalidHistoricalToolUseIsSafeBeforeProviderBuild()
+  await testPersistedRejectionMarkerRemainsByteStable()
   console.log('tool-input-boundary:verify passed')
 }
 

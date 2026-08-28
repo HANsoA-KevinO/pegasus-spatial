@@ -9,6 +9,7 @@ import {
   exhaustedBudgetScope,
   instrumentAgentProviderForBudget,
   MongoAgentExecutionBudgetLedger,
+  normalizedExecutionUsage,
   totalExecutionTokens,
   type AgentExecutionBudgetContext,
   type AgentExecutionBudgetGate,
@@ -180,6 +181,19 @@ function testCurrencyAndBudgetDimensions(): void {
     download_bytes: 1_024,
   }
   assert.equal(totalExecutionTokens(usage), 10)
+  assert.deepEqual(
+    normalizedExecutionUsage(undefined),
+    {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      cost_usd: 0,
+      tool_calls: 0,
+      download_bytes: 0,
+    },
+    'a newly created member has no agent_usage bucket yet and must start from zero',
+  )
   assert.deepEqual(exhaustedBudget({
     budget: { max_tokens: 10 },
     usage,

@@ -66,7 +66,7 @@ function adapter(
   return value
 }
 
-async function verifyFailClosedConfiguration(): Promise<void> {
+async function verifyProviderConfiguration(): Promise<void> {
   const parsed = parseSpatialAssetHostAllowlist(
     'cdn.example.test, CDN.EXAMPLE.TEST., https://bad.example.test, *.invalid',
   )
@@ -74,23 +74,20 @@ async function verifyFailClosedConfiguration(): Promise<void> {
   assert.deepEqual(parsed.invalid, ['https://bad.example.test', '*.invalid'])
 
   const disabled = readSpatialRuntimeConfig(env({
-    SPATIAL_PAID_CALLS_ENABLED: '0',
     SPATIAL_WORKER_ENABLED: '1',
   }))
   assert.equal(disabled.workerEnabled, true)
   assert.equal(disabled.concurrency, 8, 'default worker throughput should support parallel Agent fan-out')
   assert.equal(disabled.aholo.submissionEnabled, false)
   assert.equal(disabled.lux3d.submissionEnabled, false)
-  assert.deepEqual(disabled.configurationWarnings, [])
+  assert.equal(disabled.configurationWarnings.length, 4)
 
   const boundedConcurrency = readSpatialRuntimeConfig(env({
-    SPATIAL_PAID_CALLS_ENABLED: '0',
     SPATIAL_WORKER_CONCURRENCY: '999',
   }))
   assert.equal(boundedConcurrency.concurrency, 32, 'local worker safety cap is not a project backlog limit')
 
   const missingAllowlist = readSpatialRuntimeConfig(env({
-    SPATIAL_PAID_CALLS_ENABLED: '1',
     AHOLO_API_KEY: 'aholo-secret',
     LUX3D_API_KEY: 'lux-secret',
   }))
@@ -99,7 +96,6 @@ async function verifyFailClosedConfiguration(): Promise<void> {
   assert.equal(missingAllowlist.configurationWarnings.length, 2)
 
   const configured = readSpatialRuntimeConfig(env({
-    SPATIAL_PAID_CALLS_ENABLED: '1',
     AHOLO_API_KEY: 'aholo-secret',
     AHOLO_ASSET_HOST_ALLOWLIST: 'world-cdn.example.test',
     LUX3D_API_KEY: 'lux-secret',
@@ -108,12 +104,20 @@ async function verifyFailClosedConfiguration(): Promise<void> {
   assert.equal(configured.aholo.submissionEnabled, true)
   assert.equal(configured.lux3d.submissionEnabled, true)
   assert.deepEqual(configured.configurationWarnings, [])
+
+  const configuredWithoutGlobalSwitch = readSpatialRuntimeConfig(env({
+    AHOLO_API_KEY: 'aholo-secret',
+    AHOLO_ASSET_HOST_ALLOWLIST: 'world-cdn.example.test',
+    LUX3D_API_KEY: 'lux-secret',
+    LUX3D_ASSET_HOST_ALLOWLIST: 'lux-cdn.example.test',
+  }))
+  assert.equal(configuredWithoutGlobalSwitch.aholo.submissionEnabled, true)
+  assert.equal(configuredWithoutGlobalSwitch.lux3d.submissionEnabled, true)
 }
 
 async function verifyDisabledWorkerAdapterDoesNotCallNetwork(): Promise<void> {
   let calls = 0
   const config = readSpatialRuntimeConfig(env({
-    SPATIAL_PAID_CALLS_ENABLED: '0',
     LUX3D_API_KEY: 'must-not-be-used',
   }))
   const dependencies = createProductionSpatialDependencies(config, {
@@ -172,7 +176,7 @@ function verifySourceContract(): void {
 }
 
 async function main(): Promise<void> {
-  await verifyFailClosedConfiguration()
+await verifyProviderConfiguration()
   await verifyDisabledWorkerAdapterDoesNotCallNetwork()
   verifyStableWriterAndSanitization()
   verifySourceContract()

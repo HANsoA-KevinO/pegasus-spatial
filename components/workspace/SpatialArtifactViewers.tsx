@@ -240,7 +240,7 @@ export function SpatialWorldViewer({ artifact, conversationId, content }: {
 
       <div className="absolute right-5 top-5 flex gap-2">
         {viewerUrl && <a href={viewerUrl} target="_blank" rel="noreferrer" className="rounded-md border border-white/25 bg-black/25 px-3 py-2 text-[10px] font-semibold text-white backdrop-blur-md transition hover:bg-black/40">Aholo ↗</a>}
-        <Link href={`/spatial/${encodeURIComponent(conversationId)}?manifest=${encodeURIComponent(artifact.path)}`} className="rounded-md bg-[#d75a3b] px-4 py-2 text-[10px] font-bold text-white shadow-lg transition hover:bg-[#c94e31]">
+        <Link href={`/spatial/${encodeURIComponent(conversationId)}`} target="_blank" rel="noreferrer" className="rounded-md bg-[#d75a3b] px-4 py-2 text-[10px] font-bold text-white shadow-lg transition hover:bg-[#c94e31]">
           进入空间舞台
         </Link>
       </div>

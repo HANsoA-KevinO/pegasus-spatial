@@ -10,7 +10,7 @@
 
 - 已安装并启动 Docker Desktop 或 Docker Engine，当前用户可访问 daemon。
 - 已安装 Docker Compose v2，并能拉取或已缓存官方 `mongo:7` 镜像。
-- 已运行 `npm install`，并完成 `.env.local`（其中 `SPATIAL_PAID_CALLS_ENABLED=0`）。
+- 已运行 `npm install`，并完成 `.env.local` 的 NewAPI、Aholo、Lux3D 与媒体配置。
 
 前置完成后，现场启动只有一个命令：
 
@@ -27,7 +27,7 @@ npm run demo:status   # 只报告配置、Web 和本地存储是否就绪，不�
 npm run demo:down     # 安全停止，不删除容器或数据卷
 ```
 
-`demo:up` 强制要求 `SPATIAL_PAID_CALLS_ENABLED=0`，因此禁止**新的空间付费提交**；配置缺失、连接远程数据库或 3200 端口已有任何服务时都会拒绝启动或接管。已经持久化了外部任务 ID 的旧任务仍可恢复查询与发布；普通聊天仍可能使用已配置的 NewAPI，所以零外部调用审阅时不应发送新聊天请求。
+`demo:up` 会拒绝配置缺失、远程数据库或 3200 端口已有未知服务。正常 Agent 不再经过额外的“付费调用总开关”；真实提交由具体供应商凭证、资产域名白名单、持久 receipt 与 `unknown` 防重放契约保护。若只想静态审阅预生成结果，不要发送新的生成请求。
 
 无账号模式只适用于现场单机 Demo：服务默认只监听 `127.0.0.1`，浏览器请求统一映射到一个固定的本地内部身份。如需对局域网或公网开放，必须在前置网关重新加入访问控制。
 
@@ -56,7 +56,7 @@ prepared → submitting → submitted → running → materializing → publishe
 - 幂等键由 `project_id + run_id + tool_use_id` 构成。
 - 获得供应商任务 ID 后先持久化，再继续等待与物化。
 - 服务重启只接管已知外部任务；无法确认是否已提交的任务进入 `unknown`，不自动重试。
-- 生成工具默认由 Root Agent 使用；Root 可以通过持久 `allowed_tools` 明确授权 Member，wildcard 不会自动开放昂贵工具。真实提交必须显式设置 `SPATIAL_PAID_CALLS_ENABLED=1`。
+- 生成工具默认由 Root Agent 使用；Root 可以通过持久 `allowed_tools` 明确授权 Member，wildcard 不会自动开放生成工具。配置有效后即可真实提交，不需要额外总开关。
 - 产品不设置项目级图片或 3D 任务数量上限。3D 请求全部进入持久队列；`SPATIAL_WORKER_CONCURRENCY` 只限制本机瞬时提交、轮询与物化吞吐，不是 Agent 或项目额度。
 
 ## Workspace
@@ -96,7 +96,7 @@ docker compose up -d mongo
 npm run dev
 ```
 
-打开 `http://localhost:3200`。默认 `SPATIAL_PAID_CALLS_ENABLED=0`；只有在完成真实 API smoke test 后才将其改为 `1`。
+打开 `http://localhost:3200`。供应商凭证和精确产物域名配置通过后，Agent 可以直接建立持久生成任务。
 
 日常比赛演示请使用上方 `npm run demo:up`，以下分步命令仅用于开发和故障排查。
 

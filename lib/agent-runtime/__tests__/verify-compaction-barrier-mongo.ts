@@ -22,6 +22,7 @@ async function main(): Promise<void> {
   const {
     enforceExecutorCompactionBarrier,
     ExecutorCompactionBarrierStoppedError,
+    failClosedExecutorCompactionPrepare,
     inspectRunCompactionBarrier,
   } = await import('../compaction-barrier')
 
@@ -235,6 +236,43 @@ async function main(): Promise<void> {
       terminationReason: 'model_finished',
       leaseOwnerId: 'runner_barrier_root_resume',
     }), true)
+
+    // A mailbox/context append can win the race after the executor froze its
+    // prefix but before it creates the delayed shadow. That stale snapshot is
+    // recoverable without a Job: requeue the same Run and rebuild its context.
+    const prefixRaceRun = await repository.createAgentRun({
+      runId: 'run_barrier_prefix_race',
+      conversationId: 'conv_barrier_prefix_race',
+      userId,
+      request: { message: 'reload after a stale compaction prefix' },
+      startedMessageId: 'msg_barrier_prefix_race',
+    })
+    const prefixRaceOwner = 'runner_barrier_prefix_race'
+    const leasedPrefixRace = await repository.leaseNextAgentRun(prefixRaceOwner, 30_000)
+    assert.equal(leasedPrefixRace?.run_id, prefixRaceRun.run_id)
+    await assert.rejects(
+      failClosedExecutorCompactionPrepare(
+        leasedPrefixRace!,
+        prefixRaceOwner,
+        { code: 'COMPACTION_PREFIX_CONFLICT' },
+      ),
+      error => (
+        error instanceof ExecutorCompactionBarrierStoppedError
+        && error.stop.kind === 'deferred'
+        && error.stop.jobId.includes('prefix-conflict')
+      ),
+    )
+    const deferredPrefixRace = await repository.getAgentRun(prefixRaceRun.run_id, userId)
+    assert.equal(deferredPrefixRace?.status, 'queued')
+    assert.equal(deferredPrefixRace?.lease, null)
+    assert.equal(deferredPrefixRace?.dispatch_attempts, 0)
+    assert.equal(await DurableCompactionJobModel.countDocuments({
+      conversation_id: 'conv_barrier_prefix_race',
+    }), 0, 'prefix-race recovery must not invent a fake durable compaction Job')
+    await AgentRun.updateOne(
+      { run_id: prefixRaceRun.run_id },
+      { $set: { status: 'completed', available_at: null } },
+    )
 
     // Member + merge race: the first read is open; a newly handed-off Job is
     // observed by the pre-dispatch second read, so no model request may start.

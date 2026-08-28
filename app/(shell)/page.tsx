@@ -9,7 +9,6 @@ import { AgentTeamPanel } from '@/components/team/AgentTeamPanel'
 
 export default function WorkspacePage() {
   const {
-    setResearchDomain,
     messages,
     isLoading,
     isLoadingConversation,
@@ -31,9 +30,8 @@ export default function WorkspacePage() {
   if (messages.length === 0 && !isLoading && !showWorkspace) {
     return (
       <TaskWorkbench
-        onSubmit={(message, domain) => {
-          setResearchDomain(domain)
-          sendMessage(message, undefined, undefined, domain)
+        onSubmit={(message, images) => {
+          sendMessage(message, images)
         }}
       />
     )

@@ -653,7 +653,7 @@ export function useChat(options: UseChatOptions) {
       // load just set — most visibly: memory toggle flipping back to ON.
       cached.settings = {
         orchestrator_model: options.model,
-        research_domain: effectiveResearchDomain,
+        ...(effectiveResearchDomain ? { research_domain: effectiveResearchDomain } : {}),
         memory_enabled: false,
       }
       syncToReact(myKey)
@@ -686,7 +686,7 @@ export function useChat(options: UseChatOptions) {
             interaction_id: responseInteractionId,
             settings: {
               orchestrator_model: options.model,
-              research_domain: effectiveResearchDomain,
+              ...(effectiveResearchDomain ? { research_domain: effectiveResearchDomain } : {}),
               memory_enabled: false,
             },
           }),

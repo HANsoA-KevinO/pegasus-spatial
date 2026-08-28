@@ -1,5 +1,5 @@
 import type { SpatialHttpAdapterOptions } from './http-contract'
-import { ContractDrivenSpatialHttpAdapter, paidSpatialCallsEnabled } from './http-contract'
+import { ContractDrivenSpatialHttpAdapter } from './http-contract'
 import { createLux3DOfficialG1WireContract } from './official-contracts'
 
 const OFFICIAL_CN_BASE_URL = 'https://api.aholo3d.cn'
@@ -26,6 +26,6 @@ export function createLux3DAdapterFromEnv(
     ...options,
     baseUrl: env.LUX3D_API_BASE_URL || OFFICIAL_CN_BASE_URL,
     token: env.LUX3D_API_KEY || env.LUX3D_API_TOKEN,
-    allowPaidCalls: paidSpatialCallsEnabled(env),
+    allowPaidCalls: true,
   })
 }

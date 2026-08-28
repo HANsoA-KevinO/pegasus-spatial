@@ -308,18 +308,26 @@ export async function executeCreateObject3D(
     const references = await Promise.all(
       referencePaths.map(path => resolveAuthorizedRaster(workspace, path, dependencies)),
     )
+    // Lux exposes two distinct public contracts: text-to-3D accepts at most
+    // one optional image, while img-to-3D accepts an ordered `imgs` array.
+    // Multiple views are therefore authoritative geometry input. Preserve a
+    // caller-supplied prompt in the durable receipt for audit/lineage, but do
+    // not let it accidentally route the paid request to text-to-3D.
+    const isMultiView = references.length > 1
+    const luxVersion = isMultiView ? 'G1-Turbo' : 'G1'
     return await preparePaidBuild({
       context: durable.context,
       invocation: durable.invocation,
       kind: 'object',
       provider: 'lux3d',
-      modelSnapshot: 'G1',
+      modelSnapshot: luxVersion,
       request: {
         output_path_prefix: prefix,
-        ...(prompt ? { prompt } : {}),
+        ...(prompt && !isMultiView ? { prompt } : {}),
         ...(references.length ? { input_image_paths: references.map(reference => reference.path) } : {}),
         provider_options: {
-          version: 'G1',
+          version: luxVersion,
+          ...(prompt && isMultiView ? { reference_guidance: prompt } : {}),
           // Freeze both representations in one supplier task. The GLB mesh is
           // useful for transforms/collision proxies, while the Gaussian PLY
           // lets the product compare Lux3D's native 3DGS appearance without a

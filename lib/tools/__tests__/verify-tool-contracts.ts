@@ -26,15 +26,19 @@ const CORE_TOOLS = [
   'CreateObject3D',
   'CreateWorld3D',
   'CreateSpatialScene',
+  'SetSceneEnvironment',
   'SetSceneWorld',
   'AddSceneObject',
+  'AddSceneTerrain',
   'TransformSceneObject',
   'RemoveSceneObject',
+  'ApplySceneSpec',
   'InspectSpatialScene',
   'RestoreSpatialScene',
   'SetSceneViewpoint',
   'FocusSceneObject',
   'CaptureSceneView',
+  'QuerySceneSurface',
   'GetSpatialJob',
   'WaitSpatialJob',
   'InspectSpatialArtifact',
@@ -69,6 +73,7 @@ function schema(name: string) {
   return item.input_schema as {
     properties?: Record<string, Record<string, unknown>>
     required?: string[]
+    anyOf?: unknown
   }
 }
 
@@ -112,9 +117,9 @@ function verifySchemas(): void {
     isRoot: false,
   }).map(item => item.name)
   for (const expensive of [
-    'GenerateImage', 'CreateObject3D', 'CreateWorld3D', 'CreateSpatialScene', 'SetSceneWorld',
-    'AddSceneObject', 'TransformSceneObject', 'RemoveSceneObject', 'RestoreSpatialScene',
-    'SetSceneViewpoint', 'FocusSceneObject', 'CaptureSceneView',
+    'GenerateImage', 'CreateObject3D', 'CreateWorld3D', 'CreateSpatialScene', 'SetSceneEnvironment', 'SetSceneWorld',
+    'AddSceneObject', 'AddSceneTerrain', 'TransformSceneObject', 'RemoveSceneObject', 'ApplySceneSpec', 'RestoreSpatialScene',
+    'SetSceneViewpoint', 'FocusSceneObject', 'CaptureSceneView', 'QuerySceneSurface',
   ]) {
     assert.ok(!memberNames.includes(expensive), `Member wildcard surface must exclude ${expensive}`)
   }
@@ -149,9 +154,23 @@ function verifySchemas(): void {
   assert.deepEqual(schema('Read').required, ['file_path'])
   assert.deepEqual(schema('GenerateImage').required, ['prompt', 'output_path'])
   assert.match(String(schema('GenerateImage').properties?.output_path.pattern), /^\^output\/spatial\/images/)
+  assert.equal(schema('GenerateImage').properties?.aspect_ratio.enum, undefined)
+  const aspectRatioPattern = new RegExp(String(schema('GenerateImage').properties?.aspect_ratio.pattern))
+  assert.match('2:1', aspectRatioPattern)
+  assert.match('2.39:1', aspectRatioPattern)
   assert.deepEqual(schema('CreateObject3D').required, ['output_path_prefix'])
   assert.equal(schema('CreateObject3D').properties?.reference_image_paths.maxItems, 4)
   assert.deepEqual(schema('CreateWorld3D').required, ['output_path_prefix'])
+  // Runtime validation enforces these cross-field requirements. Keeping
+  // top-level combinators out of the public schema preserves relay support.
+  assert.equal(schema('CreateObject3D').anyOf, undefined)
+  assert.equal(schema('CreateWorld3D').anyOf, undefined)
+  assert.equal(schema('TransformSceneObject').anyOf, undefined)
+  assert.deepEqual(schema('SetSceneEnvironment').required, ['scene_id', 'image_path'])
+  assert.deepEqual(schema('ApplySceneSpec').required, ['scene_id', 'spec_path'])
+  assert.match(String(schema('ApplySceneSpec').properties?.spec_path.pattern), /^\^output\/spatial\/scenes/)
+  assert.deepEqual(schema('AddSceneTerrain').required, ['scene_id', 'object_job_id'])
+  assert.deepEqual(schema('QuerySceneSurface').required, ['scene_id', 'terrain_instance_id', 'horizontal'])
   assert.deepEqual(schema('GetSpatialJob').required, ['job_id'])
   assert.equal(schema('WaitSpatialJob').properties?.timeout_ms.maximum, 120000)
   assert.deepEqual(schema('InspectSpatialArtifact').required, ['artifact_id'])

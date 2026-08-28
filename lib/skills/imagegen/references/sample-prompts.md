@@ -2,19 +2,19 @@
 
 这些是可改写的完整示例，不代表每次都要加入同样多的细节。只保留用户实际需要的要求。
 
-## 空间环境主图
+## World 专用 2:1 全景环境图
 
 ```text
-Use case: stylized-concept
-Asset type: Aholo World 视觉参考与 Scene 设计锚点
-Primary request: 一座未来主义滨水展览庭院，远景是低矮城市天际线
-Scene/backdrop: 包围式环境；中央为干净、平整、开阔的可编辑区域；入口和水岸方向清晰
-Style/medium: 写实建筑概念图，正常透视
-Composition/framing: 16:9，站立视高的广角建立镜头，但不要鱼眼畸变
+Use case: photorealistic-natural
+Asset type: Aholo World 专用环境全景，不是概念美术或普通透视照片
+Primary request: 一个为未来 Lux 场景搭建准备的滨水环境背景，只表达天空、远岸、遥远城市天际线和整体光色
+Scene/backdrop: 相机位于未来 Scene 中心；近景和中景是连续、近似水平、开阔的简单地表；所有建筑、道路模块、树、家具和装饰都留给 Lux GLB
+Style/medium: 写实自然环境，稳定清晰，无景深虚化
+Composition/framing: 严格 2:1 等距柱状全景（equirectangular latitude-longitude panorama），水平 360°、垂直 180°；相机水平，地平线位于画面中线；左右边缘在天空、地形、颜色和光照上无缝衔接
 Lighting/mood: 日落前柔和侧光，冷暖平衡
-Materials/textures: 浅色石材、拉丝金属、少量水面反射
-Constraints: 中央不放大型固定物体；入口无遮挡；无文字、Logo、水印
-Avoid: 俯视鸟瞰；密集家具；极端广角；不可读的空间结构
+Materials/textures: 只用均匀、连续的简单地表材质承接远景
+Constraints: 天顶与地底连续自然；整圈地平线高度一致；近中景完全无明确主体；无文字、Logo、水印
+Avoid: 普通透视照片；鱼眼；little planet；柱面裁切；左右接缝不连续；暗角；近中景建筑、道路、墙、树干、车辆或家具；镜像地面；模糊和重复物
 ```
 
 ## Lux 独立物体主图

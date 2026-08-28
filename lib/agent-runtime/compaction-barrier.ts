@@ -25,6 +25,7 @@ const OPEN_TERMINAL_STATUS_SET = new Set<string>([
 
 const DEFAULT_BARRIER_RECHECK_MS = 2_000
 const MAX_BARRIER_RECHECK_MS = 5_000
+const COMPACTION_PREFIX_CONFLICT_CODE = 'COMPACTION_PREFIX_CONFLICT'
 
 interface CompactionBarrierJobSnapshot {
   job_id: string
@@ -315,6 +316,21 @@ export async function deferExecutorForCompactionReload(
       })
 }
 
+/**
+ * Preparing a delayed compaction shadow races with ordinary durable context
+ * appends (for example, Root mailbox delivery). A prefix conflict means the
+ * in-memory snapshot is stale, not that the Conversation is corrupt. Requeue
+ * the same Run so the executor rebuilds from the canonical persisted context.
+ */
+export function isReloadableCompactionPrepareConflict(cause: unknown): boolean {
+  return Boolean(
+    cause
+    && typeof cause === 'object'
+    && 'code' in cause
+    && cause.code === COMPACTION_PREFIX_CONFLICT_CODE,
+  )
+}
+
 /** Fail closed when delayed-shadow preparation cannot prove exact ownership. */
 export async function failClosedExecutorCompactionPrepare(
   run: AgentRunDocument,
@@ -341,7 +357,14 @@ export async function failClosedExecutorCompactionPrepare(
           kind: 'detached',
           jobId: decision.jobId,
           error: `Run lease changed while failing closed for compaction Job ${decision.jobId}.`,
-        })
+      })
+  }
+  if (isReloadableCompactionPrepareConflict(cause)) {
+    return deferExecutorForCompactionReload(
+      run,
+      ownerId,
+      `context-reload:${run.run_id}:prefix-conflict`,
+    )
   }
   throw cause
 }

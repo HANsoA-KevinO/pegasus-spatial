@@ -179,6 +179,7 @@ function parsed(content: string): SpatialToolResultEnvelope {
 
 const workspace = createInMemoryWorkspace()
 await workspace.writeRaster('output/spatial/images/chair.png', raster('asset_chair'))
+await workspace.writeRaster('output/spatial/images/chair-back.png', raster('asset_chair_back'))
 await workspace.writeRaster('output/spatial/images/room.png', raster('asset_room'))
 const insecureRaster = raster('asset_insecure_http')
 insecureRaster.urls = {
@@ -187,6 +188,25 @@ insecureRaster.urls = {
   thumbnail: 'http://media.example.test/raster-assets/asset_insecure_http/thumbnail',
 }
 await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureRaster)
+
+// The public schemas intentionally avoid top-level JSON Schema combinators
+// for Anthropic-compatible relay support. Runtime validation remains the
+// authoritative guard for their cross-field input requirements.
+{
+  const state = setupDependencies()
+  const missingObjectSource = await executeCreateObject3D({
+    output_path_prefix: 'output/spatial/objects/missing-source',
+  }, workspace, { executionContext: rootContext, invocation, dependencies: state.dependencies })
+  assert.equal(missingObjectSource.is_error, true)
+  assert.match(parsed(missingObjectSource.content).error ?? '', /至少需要 prompt 或 reference_image_paths/)
+
+  const missingWorldSource = await executeCreateWorld3D({
+    output_path_prefix: 'output/spatial/worlds/missing-source',
+  }, workspace, { executionContext: rootContext, invocation, dependencies: state.dependencies })
+  assert.equal(missingWorldSource.is_error, true)
+  assert.match(parsed(missingWorldSource.content).error ?? '', /至少需要 prompt 或 source_image_path/)
+  assert.equal(state.prepared.length, 0, 'invalid cross-field inputs must fail before preparing paid jobs')
+}
 
 // Workspace paths are resolved to project-owned media locators. The caller
 // cannot inject arbitrary provider URLs into the frozen request.
@@ -232,6 +252,42 @@ await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureR
   assert.equal(insecure.is_error, true)
   assert.match(parsed(insecure.content).error ?? '', /公网 HTTPS URL/)
   assert.equal(state.prepared.length, 1, 'HTTP media must fail before a paid Job is prepared')
+}
+
+// Multiple references must route to Lux img-to-3D even when the caller also
+// supplies design guidance. The guidance remains in the receipt without
+// becoming an incompatible provider prompt.
+{
+  const state = setupDependencies()
+  const result = await executeCreateObject3D({
+    prompt: 'Keep the same woven chair identity and proportions',
+    reference_image_paths: [
+      'output/spatial/images/chair.png',
+      'output/spatial/images/chair-back.png',
+    ],
+    output_path_prefix: 'output/spatial/objects/chair-multiview-v1',
+  }, workspace, {
+    executionContext: { ...rootContext, runId: 'run_multiview' },
+    invocation: { ...invocation, toolUseId: 'tool_multiview' },
+    dependencies: state.dependencies,
+  })
+  assert.equal(result.is_error, undefined)
+  assert.equal(state.prepared.length, 1)
+  assert.equal(state.prepared[0].request.prompt, undefined)
+  assert.deepEqual(state.prepared[0].request.input_image_paths, [
+    'output/spatial/images/chair.png',
+    'output/spatial/images/chair-back.png',
+  ])
+  assert.deepEqual(state.prepared[0].request.provider_options, {
+    version: 'G1-Turbo',
+    reference_guidance: 'Keep the same woven chair identity and proportions',
+    output_formats: ['glb', 'ply'],
+    source_image_urls: [
+      'https://media.example.test/raster-assets/asset_chair/original',
+      'https://media.example.test/raster-assets/asset_chair_back/original',
+    ],
+    source_asset_ids: ['asset_chair', 'asset_chair_back'],
+  })
 }
 
 {

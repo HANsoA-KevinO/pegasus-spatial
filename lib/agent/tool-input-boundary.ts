@@ -309,6 +309,7 @@ const SUPPORTED_SCHEMA_KEYWORDS = new Set([
   'maxLength',
   'pattern',
   'minimum',
+  'exclusiveMinimum',
   'maximum',
   'minItems',
   'maxItems',
@@ -435,6 +436,13 @@ function validateSchemaValue(
   if (typeof value === 'number') {
     if (typeof schema.minimum === 'number' && value < schema.minimum) {
       return schemaRejection('schema_constraint', path, `number is below minimum ${schema.minimum}`)
+    }
+    if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum) {
+      return schemaRejection(
+        'schema_constraint',
+        path,
+        `number is not above exclusive minimum ${schema.exclusiveMinimum}`,
+      )
     }
     if (typeof schema.maximum === 'number' && value > schema.maximum) {
       return schemaRejection('schema_constraint', path, `number is above maximum ${schema.maximum}`)

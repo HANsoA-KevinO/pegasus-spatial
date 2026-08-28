@@ -23,7 +23,6 @@ function testEnvironment(overrides: Record<string, string> = {}): NodeJS.Process
     AHOLO_ASSET_HOST_ALLOWLIST: 'artifacts.aholo.invalid',
     LUX3D_API_KEY: 'dummy-lux-key',
     LUX3D_ASSET_HOST_ALLOWLIST: 'artifacts.lux.invalid',
-    SPATIAL_PAID_CALLS_ENABLED: '1',
     ...overrides,
   }
 }

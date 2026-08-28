@@ -15,8 +15,7 @@ competition machine has these one-time prerequisites:
   current user can access it.
 - Docker Compose v2 is installed, and the official `mongo:7` image is cached or
   can be pulled.
-- `npm install` and `.env.local` setup are complete, with
-  `SPATIAL_PAID_CALLS_ENABLED=0`.
+- `npm install` and `.env.local` provider/media setup are complete.
 
 After those prerequisites, the demo starts with one command:
 
@@ -34,12 +33,11 @@ npm run demo:status   # configuration, persistence, and web health; no secrets
 npm run demo:down     # stops services without deleting the Mongo volume
 ```
 
-Demo startup refuses missing configuration, remote Mongo targets, any existing
-listener on port 3200, or any setting other than
-`SPATIAL_PAID_CALLS_ENABLED=0`. That flag blocks **new paid spatial
-submissions**. A persisted job with a known external ID may still resume
-polling/materialization, and ordinary chat may still use configured NewAPI; do
-not send a new chat prompt during a zero-external-call review.
+Demo startup refuses missing configuration, remote Mongo targets, or any
+existing listener on port 3200. Normal Agent calls have no separate global
+paid-call switch: concrete provider credentials, exact artifact host
+allowlists, durable receipts, and unknown-state replay protection are the
+submission boundary. Do not send a generation prompt during a static review.
 
 `demo:up` does not claim that live natural-language generation is enabled. Live
 generation is a team-controlled startup after the H0 download-host allowlists,
@@ -56,7 +54,7 @@ the judge-safe one-command review mode.
 - `InspectSpatialArtifact`: inspect published assets, manifests, and lineage.
 - Image viewing, GLB orbit preview, and Aholo World manifest/open affordances.
 
-Paid spatial tools are Root-only and fail closed unless `SPATIAL_PAID_CALLS_ENABLED=1`. External job idempotency is scoped by `project_id + run_id + tool_use_id`; ambiguous submissions enter `unknown` and are never automatically replayed.
+Spatial generation tools are Root-owned by default and may be explicitly delegated through persisted `allowed_tools`; wildcard grants do not expose them. Valid provider configuration is sufficient for submission. External job idempotency is scoped by `project_id + run_id + tool_use_id`; ambiguous submissions enter `unknown` and are never automatically replayed.
 
 ## Isolation
 

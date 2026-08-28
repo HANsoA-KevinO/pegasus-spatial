@@ -168,17 +168,21 @@ function finiteNonNegative(value: number | undefined): number {
     : 0
 }
 
-function normalizedDelta(delta: AgentExecutionUsageDelta): AgentExecutionUsageTotals {
+export function normalizedExecutionUsage(
+  delta?: AgentExecutionUsageDelta | null,
+): AgentExecutionUsageTotals {
   return {
-    input_tokens: finiteNonNegative(delta.input_tokens),
-    output_tokens: finiteNonNegative(delta.output_tokens),
-    cache_creation_input_tokens: finiteNonNegative(delta.cache_creation_input_tokens),
-    cache_read_input_tokens: finiteNonNegative(delta.cache_read_input_tokens),
-    cost_usd: finiteNonNegative(delta.cost_usd),
-    tool_calls: finiteNonNegative(delta.tool_calls),
-    download_bytes: finiteNonNegative(delta.download_bytes),
+    input_tokens: finiteNonNegative(delta?.input_tokens),
+    output_tokens: finiteNonNegative(delta?.output_tokens),
+    cache_creation_input_tokens: finiteNonNegative(delta?.cache_creation_input_tokens),
+    cache_read_input_tokens: finiteNonNegative(delta?.cache_read_input_tokens),
+    cost_usd: finiteNonNegative(delta?.cost_usd),
+    tool_calls: finiteNonNegative(delta?.tool_calls),
+    download_bytes: finiteNonNegative(delta?.download_bytes),
   }
 }
+
+const normalizedDelta = normalizedExecutionUsage
 
 function addUsage(
   left: AgentExecutionUsageTotals,

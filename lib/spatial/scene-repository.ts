@@ -15,6 +15,7 @@ import type {
   SceneMutationIdentity,
   SceneMutationResult,
   SceneObjectInstance,
+  ScenePanoramaEnvironment,
   SceneSourceArtifact,
   SceneViewpoint,
   SceneWorldSource,
@@ -23,6 +24,7 @@ import type {
   SpatialRenderSessionRecord,
   SpatialSceneRecord,
   SpatialSceneRevisionRecord,
+  Vec3,
 } from './scene-types'
 import type { SpatialArtifactNodeRecord, SpatialBuildJobRecord } from './types'
 
@@ -199,6 +201,7 @@ export async function createSpatialScene(input: {
   identity: SceneMutationIdentity
   title: string
   world?: SceneWorldSource | null
+  environment?: ScenePanoramaEnvironment | null
   commandHash: string
 }): Promise<SceneMutationResult> {
   await connectDB()
@@ -242,9 +245,10 @@ export async function createSpatialScene(input: {
     parent_revision_id: null,
     mutation_key: key,
     mutation_hash: input.commandHash,
+    environment: clone(input.environment ?? null),
     world: clone(input.world ?? null),
     instances: [],
-    change_summary: input.world ? '创建 Scene 并设置初始 World' : '创建空 Scene',
+    change_summary: input.environment ? '创建 Scene 并设置全景环境' : input.world ? '创建 Scene 并设置初始 World' : '创建空 Scene',
     observation_id: null,
     created_by: input.identity.actorId,
     committed: false,
@@ -277,10 +281,11 @@ export async function createSpatialScene(input: {
 export async function mutateSpatialScene(input: {
   identity: SceneMutationIdentity
   sceneId: string
+  expectedVersion?: number
   observationId?: string
   summary: string
   commandHash: string
-  mutate(snapshot: Pick<SpatialSceneRevisionRecord, 'world' | 'instances'>): Pick<SpatialSceneRevisionRecord, 'world' | 'instances'>
+  mutate(snapshot: Pick<SpatialSceneRevisionRecord, 'environment' | 'world' | 'instances'>): Pick<SpatialSceneRevisionRecord, 'environment' | 'world' | 'instances'>
 }): Promise<SceneMutationResult> {
   await connectDB()
   const key = mutationKey(input.identity)
@@ -306,6 +311,9 @@ export async function mutateSpatialScene(input: {
   }
   const scene = await requireSpatialScene(input.sceneId, input.identity)
   const parent = await getCurrentSpatialSceneRevision(scene)
+  if (input.expectedVersion !== undefined && parent.version !== input.expectedVersion) {
+    return { status: 'scene_changed', scene, latestRevision: parent }
+  }
   if (input.observationId) {
     const observation = await SpatialObservationModel.findOne({
       observation_id: input.observationId,
@@ -317,7 +325,7 @@ export async function mutateSpatialScene(input: {
       throw new SpatialSceneCommandRejectedError('观察点来自旧 Scene revision；请重新观察后再修改。')
     }
   }
-  const next = input.mutate({ world: clone(parent.world), instances: clone(parent.instances) })
+  const next = input.mutate({ environment: clone(parent.environment ?? null), world: clone(parent.world), instances: clone(parent.instances) })
   const revisionId = hashId('scnrev', scene.scene_id, key)
   const candidate: Omit<SpatialSceneRevisionRecord, 'created_at' | 'updated_at'> = {
     revision_id: revisionId,
@@ -328,6 +336,7 @@ export async function mutateSpatialScene(input: {
     parent_revision_id: parent.revision_id,
     mutation_key: key,
     mutation_hash: input.commandHash,
+    environment: clone(next.environment),
     world: clone(next.world),
     instances: clone(next.instances),
     change_summary: requireText('change_summary', input.summary, 1000),
@@ -371,7 +380,7 @@ export async function restoreSpatialSceneRevision(input: {
     sceneId: scene.scene_id,
     commandHash: input.commandHash,
     summary: `从 Scene v${source.version} 恢复为一个新的 revision`,
-    mutate: () => ({ world: clone(source.world), instances: clone(source.instances) }),
+    mutate: () => ({ environment: clone(source.environment ?? null), world: clone(source.world), instances: clone(source.instances) }),
   })
 }
 
@@ -401,7 +410,7 @@ export async function registerSpatialRenderSession(input: {
     $set: {
       scene_id: input.sceneId, project_id: input.scope.projectId, user_id: input.scope.userId,
       client_id: requireText('client_id', input.clientId), lease_token: randomUUID(), heartbeat_at: now,
-      expires_at: new Date(now.getTime() + Math.max(5_000, Math.min(input.ttlMs ?? 20_000, 60_000))),
+      expires_at: new Date(now.getTime() + Math.max(5_000, Math.min(input.ttlMs ?? 120_000, 300_000))),
     },
     $setOnInsert: { session_id: sessionId },
   }, { upsert: true, returnDocument: 'after' }).lean<SpatialRenderSessionRecord>()
@@ -414,9 +423,26 @@ export async function heartbeatSpatialRenderSession(input: {
 }): Promise<boolean> {
   const now = new Date()
   const result = await SpatialRenderSessionModel.updateOne({ session_id: input.sessionId, lease_token: input.leaseToken }, {
-    $set: { heartbeat_at: now, expires_at: new Date(now.getTime() + Math.max(5_000, Math.min(input.ttlMs ?? 20_000, 60_000))) },
+    $set: { heartbeat_at: now, expires_at: new Date(now.getTime() + Math.max(5_000, Math.min(input.ttlMs ?? 120_000, 300_000))) },
   })
   return result.matchedCount === 1
+}
+
+export async function releaseSpatialRenderSession(input: {
+  scope: SceneCommandScope
+  sceneId: string
+  sessionId: string
+  leaseToken: string
+}): Promise<boolean> {
+  await connectDB()
+  const result = await SpatialRenderSessionModel.deleteOne({
+    session_id: input.sessionId,
+    lease_token: input.leaseToken,
+    scene_id: input.sceneId,
+    project_id: input.scope.projectId,
+    user_id: input.scope.userId,
+  })
+  return result.deletedCount === 1
 }
 
 export async function enqueueSpatialRenderCommand(input: {
@@ -437,10 +463,51 @@ export async function enqueueSpatialRenderCommand(input: {
   return SpatialRenderCommandModel.create({
     command_id: commandId, scene_id: scene.scene_id, project_id: scene.project_id, user_id: scene.user_id,
     run_id: input.identity.runId, tool_use_id: input.identity.toolUseId,
+    kind: 'capture',
     revision_id: scene.current_revision_id, viewpoint: clone(scene.agent_viewpoint),
     note: input.note?.trim().slice(0, 1000) || null, status: 'queued', lease: null,
     observation_id: hashId('observation', commandId), screenshot_asset_id: null,
+    surface_query: null, surface_result: null,
     screenshot_workspace_path: null, last_error: null, completed_at: null,
+  }).then(document => document.toObject() as SpatialRenderCommandRecord)
+}
+
+export async function enqueueSpatialSurfaceQueryCommand(input: {
+  identity: SceneMutationIdentity
+  sceneId: string
+  terrainInstanceId: string
+  horizontal: [number, number]
+  castHeight?: number
+}): Promise<SpatialRenderCommandRecord | null> {
+  await connectDB()
+  const scene = await requireSpatialScene(input.sceneId, input.identity)
+  const revision = await getCurrentSpatialSceneRevision(scene)
+  const terrain = revision.instances.find(candidate => candidate.instance_id === input.terrainInstanceId)
+  if (!terrain || terrain.role !== 'terrain') {
+    throw new SpatialSceneCommandRejectedError('指定 instance 不是当前 Scene 的 Lux 地形。')
+  }
+  const active = await SpatialRenderSessionModel.exists({
+    scene_id: scene.scene_id, project_id: scene.project_id, user_id: scene.user_id, expires_at: { $gt: new Date() },
+  })
+  if (!active) return null
+  const commandId = hashId('rendercmd', scene.project_id, input.identity.runId, input.identity.toolUseId)
+  const existing = await SpatialRenderCommandModel.findOne({ command_id: commandId }).lean<SpatialRenderCommandRecord>()
+  if (existing) return existing
+  const castHeight = Math.max(1, Math.min(input.castHeight ?? 10_000, 1_000_000))
+  return SpatialRenderCommandModel.create({
+    command_id: commandId, scene_id: scene.scene_id, project_id: scene.project_id, user_id: scene.user_id,
+    run_id: input.identity.runId, tool_use_id: input.identity.toolUseId, kind: 'surface_query',
+    revision_id: scene.current_revision_id,
+    viewpoint: scene.agent_viewpoint ?? { position: [0, 0, 1], target: [0, 1, 1], up: [0, 0, 1], fov_deg: 56 },
+    note: null, status: 'queued', lease: null, observation_id: hashId('surface', commandId),
+    surface_query: {
+      terrain_instance_id: terrain.instance_id,
+      horizontal: clone(input.horizontal),
+      cast_height: castHeight,
+      up_axis: terrain.normalization.scene_up_axis,
+    },
+    surface_result: null, screenshot_asset_id: null, screenshot_workspace_path: null,
+    last_error: null, completed_at: null,
   }).then(document => document.toObject() as SpatialRenderCommandRecord)
 }
 
@@ -478,6 +545,35 @@ export async function completeSpatialRenderCommand(input: {
       screenshot_workspace_path: requireText('screenshot_workspace_path', input.screenshotWorkspacePath),
       completed_at: new Date(), last_error: null,
     },
+  }, { returnDocument: 'after' }).lean<SpatialRenderCommandRecord>()
+}
+
+export async function completeSpatialSurfaceQueryCommand(input: {
+  commandId: string; sessionId: string; leaseToken: string; point: Vec3; terrainInstanceId: string
+}): Promise<SpatialRenderCommandRecord | null> {
+  await connectDB()
+  return SpatialRenderCommandModel.findOneAndUpdate({
+    command_id: input.commandId, kind: 'surface_query', status: 'claimed',
+    'lease.session_id': input.sessionId, 'lease.token': input.leaseToken, 'lease.expires_at': { $gt: new Date() },
+    'surface_query.terrain_instance_id': input.terrainInstanceId,
+  }, {
+    $set: {
+      status: 'completed', lease: null,
+      surface_result: { point: clone(input.point), terrain_instance_id: input.terrainInstanceId },
+      completed_at: new Date(), last_error: null,
+    },
+  }, { returnDocument: 'after' }).lean<SpatialRenderCommandRecord>()
+}
+
+export async function failSpatialRenderCommand(input: {
+  commandId: string; sessionId: string; leaseToken: string; error: string
+}): Promise<SpatialRenderCommandRecord | null> {
+  await connectDB()
+  return SpatialRenderCommandModel.findOneAndUpdate({
+    command_id: input.commandId, status: 'claimed', 'lease.session_id': input.sessionId,
+    'lease.token': input.leaseToken, 'lease.expires_at': { $gt: new Date() },
+  }, {
+    $set: { status: 'failed', lease: null, last_error: requireText('error', input.error, 1000), completed_at: new Date() },
   }, { returnDocument: 'after' }).lean<SpatialRenderCommandRecord>()
 }
 

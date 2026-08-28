@@ -3094,16 +3094,23 @@ button.pmo-memory-node:hover {
 .pmo-spatial-composer > textarea::placeholder { color: #9a9f97; }
 .pmo-spatial-composer:focus-within { border-color: rgba(215, 90, 59, .42); box-shadow: 0 28px 84px rgba(59, 47, 40, .15), 0 0 0 4px rgba(215, 90, 59, .07); }
 .pmo-spatial-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--home-line); padding: 11px; }
-.pmo-spatial-context-switcher { display: flex; min-width: 0; gap: 3px; overflow-x: auto; }
-.pmo-spatial-context-switcher button { flex: none; border: 0; border-radius: 8px; padding: 8px 10px; color: #7a8079; font-size: 10px; background: transparent; cursor: pointer; }
-.pmo-spatial-context-switcher button:hover { color: var(--home-ink); background: rgba(215, 90, 59, .06); }
-.pmo-spatial-context-switcher button[aria-pressed="true"] { color: var(--home-mint); background: rgba(215, 90, 59, .1); }
+.pmo-spatial-composer-tools { display: flex; min-width: 0; align-items: center; gap: 4px; }
+.pmo-spatial-composer .pmo-tool-btn { min-height: 36px; padding: 7px 10px; color: #676e67; font-size: 11px; }
+.pmo-spatial-composer .pmo-tool-btn:hover:not(:disabled) { color: var(--home-ink); background: rgba(215, 90, 59, .07); }
+.pmo-spatial-composer .pmo-tool-btn:disabled { cursor: not-allowed; opacity: .42; }
+.pmo-spatial-composer .pmo-tool-btn.model { max-width: 230px; border-color: rgba(32, 37, 34, .09); background: rgba(255, 255, 255, .58); }
+.pmo-spatial-model-name { overflow: hidden; max-width: 170px; text-overflow: ellipsis; white-space: nowrap; }
+.pmo-spatial-composer-previews { display: flex; gap: 9px; overflow-x: auto; border-top: 1px solid rgba(32, 37, 34, .07); padding: 12px 20px; }
+.pmo-spatial-composer-preview { position: relative; width: 68px; height: 68px; flex: 0 0 auto; overflow: hidden; border: 1px solid rgba(32, 37, 34, .12); border-radius: 10px; background: #eeeae1; }
+.pmo-spatial-composer-preview > button { position: absolute; top: 4px; right: 4px; display: grid; width: 20px; height: 20px; place-items: center; border: 0; border-radius: 50%; color: #fff; font-size: 14px; line-height: 1; background: rgba(32, 37, 34, .72); cursor: pointer; backdrop-filter: blur(8px); }
+.pmo-spatial-composer-context { border-top: 1px solid rgba(32, 37, 34, .08); padding: 14px 20px 16px; background: rgba(244, 241, 234, .5); }
+.pmo-spatial-composer-context label { display: block; margin-bottom: 8px; color: var(--home-mint); font-family: var(--font-geist-mono), monospace; font-size: 9px; font-weight: 700; letter-spacing: .14em; }
+.pmo-spatial-composer-context textarea { display: block; width: 100%; resize: vertical; border: 1px solid rgba(32, 37, 34, .12); border-radius: 9px; padding: 11px 12px; color: var(--home-ink); font: inherit; font-size: 12px; line-height: 1.6; background: rgba(255, 254, 250, .78); outline: none; }
+.pmo-spatial-composer-context textarea:focus { border-color: rgba(215, 90, 59, .38); box-shadow: 0 0 0 3px rgba(215, 90, 59, .07); }
+.pmo-spatial-composer-status { padding: 0 20px 10px; color: var(--home-muted); font-size: 10px; }
+.pmo-spatial-composer-status.error { color: var(--danger); }
 .pmo-spatial-start { display: flex; flex: none; align-items: center; gap: 18px; border: 1px solid #d75a3b; border-radius: 9px; padding: 12px 15px; color: #fff; font-size: 12px; font-weight: 750; background: linear-gradient(135deg, #df6b4d, #c94d30); box-shadow: 0 8px 20px rgba(170, 65, 42, .22); cursor: pointer; }
 .pmo-spatial-start:disabled { cursor: not-allowed; filter: grayscale(.4); opacity: .35; }
-.pmo-spatial-constraints { margin-top: 13px; border: 1px solid var(--home-line); border-radius: 13px; background: rgba(255, 255, 255, .62); backdrop-filter: blur(18px); }
-.pmo-spatial-constraints summary { padding: 12px 15px; color: #656b65; font-size: 11px; cursor: pointer; }
-.pmo-spatial-constraints summary span { margin-left: 7px; color: #959a93; font-size: 9px; }
-.pmo-spatial-constraints textarea { display: block; width: calc(100% - 24px); margin: 0 12px 12px; resize: vertical; border: 1px solid var(--home-line); border-radius: 9px; padding: 12px; color: var(--home-ink); font: inherit; font-size: 12px; line-height: 1.6; background: rgba(255,255,255,.74); outline: none; }
 .pmo-spatial-home-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; border-top: 1px solid var(--home-line); padding: 18px clamp(24px, 5vw, 72px) 24px; }
 .pmo-spatial-home-footer p { margin: 6px 0 0; color: var(--home-muted); font-size: 10px; }
 .pmo-spatial-recents { display: flex; max-width: 55%; align-items: center; gap: 7px; }
@@ -3113,8 +3120,9 @@ button.pmo-memory-node:hover {
 @media (max-width: 760px) {
   .pmo-spatial-launcher { width: min(100% - 28px, 900px); padding-top: 2vh; }
   .pmo-spatial-launcher h1 { font-size: clamp(38px, 12vw, 58px); }
-  .pmo-spatial-composer-footer { align-items: flex-end; flex-direction: column; }
-  .pmo-spatial-context-switcher { width: 100%; }
+  .pmo-spatial-composer-footer { align-items: stretch; flex-direction: column; }
+  .pmo-spatial-composer-tools { overflow-x: auto; }
+  .pmo-spatial-start { justify-content: space-between; }
   .pmo-spatial-home-footer { align-items: flex-start; flex-direction: column; }
   .pmo-spatial-recents { display: none; }
 }

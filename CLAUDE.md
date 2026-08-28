@@ -5,7 +5,7 @@ Pegasus Spatial（飞马空间 Agent）是自然语言驱动的空间与 3D 资�
 ## 不可破坏的边界
 
 - 保持单一对话入口；不增加“物体 / 世界”预选模式，不把外部工具硬编成固定次序。
-- 所有付费空间工具都是 Root-only，从 wildcard member grant 显式排除，并在 `SPATIAL_PAID_CALLS_ENABLED` 缺省时 fail closed。
+- 空间生成工具默认归 Root，必须从 wildcard member grant 显式排除；Root 可通过持久 `allowed_tools` 明确委派。正常 Agent 路径不设置额外付费总开关。
 - 外部任务必须先持久化 provider job ID，再等待与发布。对可能已提交却缺少任务 ID 的结果使用 `unknown`，不自动付费重放。
 - 只接受当前 Workspace 内已授权图像路径。Lux3D 短期 URL 必须立即镜像并验证 MIME、magic、大小与 SHA-256。
 - 保留 `derived_from`、`revision_of`、`conditioned_by` 和 `compared_with`。不引入一阶段不需要的复杂图编辑器。

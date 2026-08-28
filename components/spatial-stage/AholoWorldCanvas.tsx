@@ -2,13 +2,24 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { Object3D, PerspectiveCamera, Splat, Vector3, Viewer } from '@manycore/aholo-viewer'
-import type { SceneObjectInstance, SceneViewpoint } from '@/lib/spatial/scene-types'
+import type { SceneViewpoint } from '@/lib/spatial/scene-types'
 import type { WorldRenderFormat } from './world-stage-model'
 import { computeGlbObjectAlignment, computeLuxPlyAlignment } from './object-alignment'
+import {
+  createSpatialProxyObject,
+  spatialInstanceAssetKey,
+  spatialInstanceLocalSize,
+  type SpatialStageInstance,
+} from './proxy-geometry'
 import { readRenderPixelsWithRetry } from './render-readback'
 import styles from './SpatialStage.module.css'
 
 type AholoViewerSdk = typeof import('@manycore/aholo-viewer')
+type QualityStageInstance = SpatialStageInstance & {
+  glb_artifact: NonNullable<SpatialStageInstance['glb_artifact']>
+  optional_ply_artifact: NonNullable<SpatialStageInstance['optional_ply_artifact']>
+  normalization: NonNullable<SpatialStageInstance['normalization']>
+}
 
 let aholoViewerSdkPromise: Promise<AholoViewerSdk> | null = null
 const QUALITY_ALIGNMENT_VERSION = 'lux-ply-x-minus-90-v3'
@@ -17,6 +28,48 @@ function loadAholoViewerSdk(): Promise<AholoViewerSdk> {
   if (aholoViewerSdkPromise) return aholoViewerSdkPromise
   aholoViewerSdkPromise = import('@manycore/aholo-viewer')
   return aholoViewerSdkPromise
+}
+
+/**
+ * Some generated GLBs omit NORMAL even though their material uses lighting.
+ * Aholo rejects that shader/geometry combination. Build smooth area-weighted
+ * normals once after parsing so the mesh remains renderable and raycastable.
+ */
+function ensureMissingMeshNormals(root: Object3D): void {
+  root.traverse(node => {
+    const mesh = node as Object3D & {
+      isMesh?: boolean
+      geometry?: {
+        getAttribute(name: string): { array: ArrayLike<number>; count: number; itemSize: number } | undefined
+        getIndex(): { array: ArrayLike<number> } | null
+        addOrSetAttribute(name: string, array: Float32Array, itemSize: number): void
+      }
+    }
+    if (!mesh.isMesh || !mesh.geometry || mesh.geometry.getAttribute('normal')) return
+    const position = mesh.geometry.getAttribute('position')
+    if (!position || position.itemSize < 3 || position.count < 3) return
+    const normals = new Float32Array(position.count * 3)
+    const index = mesh.geometry.getIndex()?.array
+    const triangleCount = index ? Math.floor(index.length / 3) : Math.floor(position.count / 3)
+    for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+      const a = Number(index ? index[triangle * 3] : triangle * 3)
+      const b = Number(index ? index[triangle * 3 + 1] : triangle * 3 + 1)
+      const c = Number(index ? index[triangle * 3 + 2] : triangle * 3 + 2)
+      const ax = Number(position.array[a * position.itemSize]); const ay = Number(position.array[a * position.itemSize + 1]); const az = Number(position.array[a * position.itemSize + 2])
+      const abx = Number(position.array[b * position.itemSize]) - ax; const aby = Number(position.array[b * position.itemSize + 1]) - ay; const abz = Number(position.array[b * position.itemSize + 2]) - az
+      const acx = Number(position.array[c * position.itemSize]) - ax; const acy = Number(position.array[c * position.itemSize + 1]) - ay; const acz = Number(position.array[c * position.itemSize + 2]) - az
+      const nx = aby * acz - abz * acy; const ny = abz * acx - abx * acz; const nz = abx * acy - aby * acx
+      for (const vertex of [a, b, c]) {
+        normals[vertex * 3] += nx; normals[vertex * 3 + 1] += ny; normals[vertex * 3 + 2] += nz
+      }
+    }
+    for (let vertex = 0; vertex < position.count; vertex += 1) {
+      const offset = vertex * 3
+      const length = Math.hypot(normals[offset], normals[offset + 1], normals[offset + 2]) || 1
+      normals[offset] /= length; normals[offset + 1] /= length; normals[offset + 2] /= length
+    }
+    mesh.geometry.addOrSetAttribute('normal', normals, 3)
+  })
 }
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -33,7 +86,9 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message:
 
 export interface StageCameraPose extends SceneViewpoint { distance: number }
 export interface SpatialCanvasHandle {
+  isReady(): boolean
   capture(viewpoint?: SceneViewpoint): Promise<Blob>
+  querySurface(terrainInstanceId: string, horizontal: [number, number], castHeight: number, upAxis: 'Y' | 'Z'): Promise<[number, number, number]>
   currentViewpoint(): SceneViewpoint | null
   visibleInstanceIds(): string[]
   resetUserView(): void
@@ -67,20 +122,33 @@ async function pixelsToPng(pixels: Uint8Array, width: number, height: number): P
   if (maximum <= 2 || maximum - minimum <= 1) {
     throw new Error('空间舞台尚未产生有效截图帧，请稍后重试。')
   }
-  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
-  const context = canvas.getContext('2d'); if (!context) throw new Error('浏览器无法创建截图画布。')
+  const source = document.createElement('canvas'); source.width = width; source.height = height
+  const context = source.getContext('2d'); if (!context) throw new Error('浏览器无法创建截图画布。')
   const flipped = new Uint8ClampedArray(pixels.length)
   for (let y = 0; y < height; y += 1) flipped.set(pixels.subarray((height - 1 - y) * width * 4, (height - y) * width * 4), y * width * 4)
   context.putImageData(new ImageData(flipped, width, height), 0, 0)
-  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('PNG 编码失败。')), 'image/png'))
+  const scale = Math.min(1, 1280 / Math.max(width, 1), 720 / Math.max(height, 1))
+  const outputWidth = Math.max(1, Math.round(width * scale))
+  const outputHeight = Math.max(1, Math.round(height * scale))
+  const output = scale < 1 ? document.createElement('canvas') : source
+  if (scale < 1) {
+    output.width = outputWidth; output.height = outputHeight
+    const outputContext = output.getContext('2d')
+    if (!outputContext) throw new Error('浏览器无法创建截图缩放画布。')
+    outputContext.drawImage(source, 0, 0, outputWidth, outputHeight)
+  }
+  return new Promise((resolve, reject) => output.toBlob(blob => blob ? resolve(blob) : reject(new Error('PNG 编码失败。')), 'image/png'))
 }
 
 export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   assetUrl: string | null
   format: WorldRenderFormat | null
+  environmentUrl?: string | null
+  environmentYawDeg?: number
+  environmentExposure?: number
   upAxis: string | undefined
-  instances?: SceneObjectInstance[]
-  objectUrl?: (instance: SceneObjectInstance, quality: 'glb' | 'ply') => string
+  instances?: SpatialStageInstance[]
+  objectUrl?: (instance: SpatialStageInstance, quality: 'glb' | 'ply') => string | null
   agentViewpoint?: SceneViewpoint | null
   agentMarkers?: SpatialAgentMarker[]
   cameraMode?: 'user' | 'agent'
@@ -91,7 +159,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   onSelectInstance?: (instanceId: string | null) => void
   onCameraChange?: (pose: StageCameraPose) => void
 }>(function AholoWorldCanvas({
-  assetUrl, format, upAxis, instances = [], objectUrl, agentViewpoint, agentMarkers = [], cameraMode = 'user', qualityMode = 'glb', selectedInstanceId,
+  assetUrl, format, environmentUrl = null, environmentYawDeg = 0, environmentExposure = 1, upAxis, instances = [], objectUrl, agentViewpoint, agentMarkers = [], cameraMode = 'user', qualityMode = 'glb', selectedInstanceId,
   qualityReloadToken = 0,
   onQualityStateChange, onSelectInstance, onCameraChange,
 }, ref) {
@@ -107,14 +175,20 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   instancesRef.current = instances
   const runtimeRef = useRef<{
     viewer: Viewer; camera: PerspectiveCamera; target: Vector3; objects: Map<string, Object3D>
-    applyUser(): void; resetUser(): void; applyViewpoint(value: SceneViewpoint): void; viewpoint(): SceneViewpoint
+    applyUser(): void; resetUser(): void; ensureInitialFit(): void; applyViewpoint(value: SceneViewpoint): void; viewpoint(): SceneViewpoint
   } | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(assetUrl ? 'loading' : 'idle')
   const [error, setError] = useState<string | null>(null)
   const [keyboardActive, setKeyboardActive] = useState(false)
-  const qualityCandidates = useMemo(
-    () => instances.filter(candidate => candidate.optional_ply_artifact),
+  const visibleInstances = useMemo(
+    () => instances.filter(candidate => candidate.visible !== false),
     [instances],
+  )
+  const qualityCandidates = useMemo(
+    () => visibleInstances.filter((candidate): candidate is QualityStageInstance => Boolean(
+      !candidate.proxy && candidate.glb_artifact && candidate.optional_ply_artifact && candidate.normalization,
+    )),
+    [visibleInstances],
   )
   const qualityCandidatesRef = useRef(qualityCandidates)
   qualityCandidatesRef.current = qualityCandidates
@@ -143,28 +217,50 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   }, [])
 
   useImperativeHandle(ref, () => ({
+    isReady: () => Boolean(runtimeRef.current && !runtimeRef.current.viewer.isDestroyed),
     currentViewpoint: () => runtimeRef.current?.viewpoint() ?? null,
     visibleInstanceIds: () => [...(runtimeRef.current?.objects.keys() ?? [])],
     resetUserView: () => runtimeRef.current?.resetUser(),
+    async querySurface(terrainInstanceId, horizontal, castHeight, surfaceUpAxis) {
+      const runtime = runtimeRef.current
+      if (!runtime) throw new Error('空间舞台尚未就绪。')
+      const loadDeadline = Date.now() + 10_000
+      let terrain = runtime.objects.get(terrainInstanceId)
+      while (!terrain && Date.now() < loadDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        terrain = runtime.objects.get(terrainInstanceId)
+      }
+      if (!terrain) throw new Error('Lux 地形尚未加载到空间舞台。')
+      const sdk = await loadAholoViewerSdk()
+      const candidates: Object3D[] = []
+      terrain.traverse(node => {
+        if ((node as Object3D & { isMesh?: boolean }).isMesh) candidates.push(node)
+      })
+      if (!candidates.length) throw new Error('Lux 地形没有可求交的网格。')
+      const picker = runtime.viewer.createPicker()
+      const origin = surfaceUpAxis === 'Y'
+        ? new sdk.Vector3(horizontal[0], castHeight, horizontal[1])
+        : new sdk.Vector3(horizontal[0], horizontal[1], castHeight)
+      const down = surfaceUpAxis === 'Y' ? new sdk.Vector3(0, -1, 0) : new sdk.Vector3(0, 0, -1)
+      picker.raycaster.set(origin, down)
+      const raw = picker.pickFirst(runtime.camera, candidates as never) as unknown
+      const hit = Array.isArray(raw) ? raw[0] : raw
+      if (!hit || typeof hit !== 'object' || !('point' in hit)) throw new Error('指定水平坐标没有命中 Lux 地形。')
+      const point = (hit as { point: { x: number; y: number; z: number } }).point
+      return [point.x, point.y, point.z]
+    },
     capture(value) {
       const operation = async () => {
         const runtime = runtimeRef.current; const container = containerRef.current
         if (!runtime || !container) throw new Error('空间舞台尚未就绪。')
-        const prior = runtime.viewpoint(); const originalSize = runtime.viewer.getSize(); const originalAspect = runtime.camera.aspect
-        const scale = Math.min(1, 1280 / Math.max(originalSize.width, 1), 720 / Math.max(originalSize.height, 1))
-        const width = Math.max(1, Math.round(originalSize.width * scale)); const height = Math.max(1, Math.round(originalSize.height * scale))
+        const prior = runtime.viewpoint(); const originalSize = runtime.viewer.getSize()
+        const width = Math.max(1, Math.round(originalSize.width)); const height = Math.max(1, Math.round(originalSize.height))
         try {
           if (value) runtime.applyViewpoint(value)
-          if (width !== originalSize.width || height !== originalSize.height) {
-            runtime.viewer.resize({ width, height }); runtime.camera.aspect = width / height; runtime.camera.updateProjectionMatrix()
-          }
           const pixels = new Uint8Array(width * height * 4)
           await readRenderPixelsWithRetry(runtime.viewer, pixels, { x: 0, y: 0, width, height })
           return await pixelsToPng(pixels, width, height)
         } finally {
-          if (width !== originalSize.width || height !== originalSize.height) {
-            runtime.viewer.resize(originalSize); runtime.camera.aspect = originalAspect; runtime.camera.updateProjectionMatrix()
-          }
           if (value) runtime.applyViewpoint(prior); else runtime.viewer.render()
         }
       }
@@ -181,43 +277,64 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
 
   useEffect(() => {
     const runtime = runtimeRef.current
-    if (!runtime || !objectUrl || status !== 'ready') return
+    if (!runtime || status !== 'ready') return
     let cancelled = false
     void (async () => {
       const sdk = await loadAholoViewerSdk()
-      const desired = new Set(instances.map(instance => instance.instance_id))
+      const desired = new Set(visibleInstances.map(instance => instance.instance_id))
       for (const [instanceId, object] of runtime.objects) {
         if (!desired.has(instanceId)) { runtime.viewer.getScene().remove(object); object.destroy(); runtime.objects.delete(instanceId) }
       }
-      for (const instance of instances) {
+      for (const instance of visibleInstances) {
         let outer = runtime.objects.get(instance.instance_id)
+        const assetKey = spatialInstanceAssetKey(instance)
+        if (outer && outer.userData.stageAssetKey !== assetKey) {
+          runtime.viewer.getScene().remove(outer)
+          outer.destroy()
+          runtime.objects.delete(instance.instance_id)
+          outer = undefined
+        }
         if (!outer) {
-          const response = await fetch(objectUrl(instance, 'glb'), { redirect: 'error' }); if (!response.ok || cancelled) continue
-          const parsed = await sdk.GLTFLoader.loadGLTF(await response.arrayBuffer(), { textureLoader: url => sdk.downloadTexture(url, { context: runtime.viewer }) })
-          if (cancelled) { parsed.scene.destroy(); continue }
-          outer = new sdk.Object3D(); outer.name = instance.label; outer.userData.instanceId = instance.instance_id
-          const glbAlignment = computeGlbObjectAlignment(instance.normalization)
-          const basis = new sdk.Object3D()
-          basis.rotation = new sdk.Euler(...glbAlignment.rotationRadians)
-          basis.position.set(...glbAlignment.pivot)
-          basis.add(parsed.scene); outer.add(basis); runtime.viewer.getScene().add(outer); runtime.objects.set(instance.instance_id, outer)
+          if (!assetKey) continue
+          if (instance.proxy) {
+            outer = createSpatialProxyObject(sdk, instance) ?? undefined
+          } else if (instance.glb_artifact && instance.normalization && objectUrl) {
+            const url = objectUrl(instance, 'glb')
+            if (!url) continue
+            const response = await fetch(url, { redirect: 'error' }); if (!response.ok || cancelled) continue
+            const parsed = await sdk.GLTFLoader.loadGLTF(await response.arrayBuffer(), { textureLoader: url => sdk.downloadTexture(url, { context: runtime.viewer }) })
+            if (cancelled) { parsed.scene.destroy(); continue }
+            ensureMissingMeshNormals(parsed.scene)
+            outer = new sdk.Object3D(); outer.name = instance.label; outer.userData.instanceId = instance.instance_id
+            const glbAlignment = computeGlbObjectAlignment(instance.normalization)
+            const basis = new sdk.Object3D()
+            basis.rotation = new sdk.Euler(...glbAlignment.rotationRadians)
+            basis.position.set(...glbAlignment.pivot)
+            basis.add(parsed.scene); outer.add(basis)
+          } else if (!instance.glb_artifact) {
+            outer = createSpatialProxyObject(sdk, instance) ?? undefined
+          }
+          if (!outer) continue
+          ensureMissingMeshNormals(outer)
+          outer.userData.stageAssetKey = assetKey
+          runtime.viewer.getScene().add(outer)
+          runtime.objects.set(instance.instance_id, outer)
         }
         outer.position.set(...instance.transform.position); outer.quaternion = new sdk.Quaternion(...instance.transform.rotation_quaternion); outer.scale.set(...instance.transform.scale); outer.updateMatrixWorld(true)
       }
-      const sceneExtent = instances.reduce((maximum, instance) => {
+      const sceneExtent = visibleInstances.reduce((maximum, instance) => {
         const centerDistance = Math.hypot(...instance.transform.position)
-        const localSize = instance.normalization.bounds
-          ? Math.hypot(...instance.normalization.bounds.size.map((value, axis) => value * instance.transform.scale[axis]))
-          : Math.max(...instance.transform.scale)
+        const localSize = Math.hypot(...spatialInstanceLocalSize(instance).map((value, axis) => value * instance.transform.scale[axis]))
         return Math.max(maximum, centerDistance + localSize)
       }, 1)
       runtime.camera.near = Math.max(Math.min(sceneExtent / 10_000, 0.05), 0.005)
       runtime.camera.far = Math.max(runtime.camera.far, sceneExtent * 20, 500)
       runtime.camera.updateProjectionMatrix()
+      runtime.ensureInitialFit()
       runtime.viewer.render()
     })().catch(() => undefined)
     return () => { cancelled = true }
-  }, [instances, objectUrl, status])
+  }, [visibleInstances, objectUrl, status])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -249,6 +366,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
           if (!response.ok || cancelled) continue
           const parsed = await sdk.GLTFLoader.loadGLTF(await response.arrayBuffer(), { textureLoader: url => sdk.downloadTexture(url, { context: runtime.viewer }) })
           if (cancelled) { parsed.scene.destroy(); continue }
+          ensureMissingMeshNormals(parsed.scene)
           object = new sdk.Object3D(); object.name = marker.label; object.userData.agentId = marker.id; object.add(parsed.scene)
           parsed.scene.traverse(node => {
             const tintable = node as Object3D & { isMesh?: boolean; material?: { setValues?(values: { color: string }): void } }
@@ -256,6 +374,11 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
           })
           runtime.viewer.getScene().add(object); agentObjectsRef.current.set(marker.id, object)
         }
+        // A saved Agent viewpoint is also the marker's world position. When the
+        // stage switches into that Agent's own camera, leaving the avatar visible
+        // puts the camera inside its mesh and fills the framebuffer with the
+        // marker tint. Third-person user view keeps the marker visible.
+        object.visible = cameraMode !== 'agent'
         object.position.set(...marker.viewpoint.position)
         object.lookAt(new sdk.Vector3(...marker.viewpoint.target))
         object.scale.set(0.7, 0.7, 0.7)
@@ -264,7 +387,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       runtime.viewer.render()
     })().catch(() => undefined)
     return () => { cancelled = true }
-  }, [agentMarkersKey, status])
+  }, [agentMarkersKey, cameraMode, status])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -299,7 +422,9 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
               cache.splat.freeGPU()
               qualityCacheRef.current.delete(instance.instance_id)
             }
-            const response = await fetch(objectUrl(instance, 'ply'), { redirect: 'error', signal: controller.signal })
+            const url = objectUrl(instance, 'ply')
+            if (!url) throw new Error('PLY 资产地址不可用。')
+            const response = await fetch(url, { redirect: 'error', signal: controller.signal })
             if (!response.ok) throw new Error(`PLY 下载失败（HTTP ${response.status}）`)
             const data = await sdk.SplatLoader.parseSplatData(sdk.SplatLoader.SplatFileType.PLY, new Uint8Array(await response.arrayBuffer()))
             const qualitySplat = await sdk.SplatUtils.createSplat(data)
@@ -372,8 +497,16 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       x: 0,
       y: 0,
     }
+    let hasInitialFit = false
     const fitEditableObjects = () => {
-      const editableInstances = instancesRef.current
+      const visibleInstances = instancesRef.current.filter(instance => instance.visible !== false)
+      // Terrain modules are deliberately oversized so they can hide the edge
+      // of the playable set. Including them in camera fitting makes the actual
+      // architecture appear as a tiny model in the middle of the viewport.
+      // Prefer authored objects whenever the Scene contains any, and only fit
+      // terrain for terrain-only Scenes.
+      const authoredInstances = visibleInstances.filter(instance => instance.role !== 'terrain')
+      const editableInstances = authoredInstances.length > 0 ? authoredInstances : visibleInstances
       if (editableInstances.length === 0) return
       const center = editableInstances.reduce<[number, number, number]>((sum, instance) => [
         sum[0] + instance.transform.position[0],
@@ -381,19 +514,38 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
         sum[2] + instance.transform.position[2],
       ], [0, 0, 0]).map(value => value / editableInstances.length) as [number, number, number]
       const radius = editableInstances.reduce((maximum, instance) => {
-        const size = instance.normalization.bounds?.size ?? [1, 1, 1]
+        const size = spatialInstanceLocalSize(instance)
         const scaled = size.map((value, index) => Math.abs(value * instance.transform.scale[index]))
         const extent = Math.hypot(...scaled) / 2
         const offset = Math.hypot(...instance.transform.position.map((value, index) => value - center[index]))
         return Math.max(maximum, extent + offset)
       }, 0.5)
       orbit.target = center
-      orbit.distance = Math.min(Math.max(radius * 2.8, 1.5), 2400)
+      orbit.distance = Math.min(Math.max(radius * 2.25, 1.5), 2400)
     }
     const objects = new Map<string, Object3D>()
     const render = () => { if (!cancelled && viewer && raf === null) raf = requestAnimationFrame(() => { raf = null; if (viewer && !viewer.isDestroyed) viewer.render() }) }
-    const viewpoint = (): SceneViewpoint => ({ position: camera ? [camera.position.x, camera.position.y, camera.position.z] : [0, 0, 0], target: [...orbit.target], up: camera ? [camera.up.x, camera.up.y, camera.up.z] : [0, 0, 1], fov_deg: camera?.fov ?? 56 })
-    const applyViewpoint = (value: SceneViewpoint) => { if (!camera || !target) return; camera.position.set(...value.position); camera.up.set(...value.up); camera.fov = value.fov_deg; target.set(...value.target); camera.lookAt(target); camera.updateMatrixWorld(true); render() }
+    const viewpoint = (): SceneViewpoint => ({
+      position: camera ? [camera.position.x, camera.position.y, camera.position.z] : [0, 0, 0],
+      target: target ? [target.x, target.y, target.z] : [...orbit.target],
+      up: camera ? [camera.up.x, camera.up.y, camera.up.z] : [0, 0, 1],
+      fov_deg: camera?.fov ?? 56,
+    })
+    const applyViewpoint = (value: SceneViewpoint) => {
+      if (!camera || !target) return
+      camera.position.set(...value.position)
+      camera.up.set(...value.up)
+      camera.fov = value.fov_deg
+      camera.updateProjectionMatrix()
+      target.set(...value.target)
+      camera.lookAt(target)
+      camera.updateMatrixWorld(true)
+      onCameraChange?.({
+        ...viewpoint(),
+        distance: Math.hypot(target.x - camera.position.x, target.y - camera.position.y, target.z - camera.position.z),
+      })
+      render()
+    }
     const applyUser = () => {
       if (!camera || !target) return
       const horizontal = Math.cos(orbit.pitch) * orbit.distance
@@ -409,6 +561,13 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       orbit.distance = orbit.home.distance
       orbit.target = [...orbit.home.target]
       applyUser()
+    }
+    const ensureInitialFit = () => {
+      if (hasInitialFit || instancesRef.current.every(instance => instance.visible === false)) return
+      fitEditableObjects()
+      orbit.home = { yaw: orbit.yaw, pitch: orbit.pitch, distance: orbit.distance, target: [...orbit.target] }
+      hasInitialFit = true
+      if (cameraModeRef.current === 'user') applyUser()
     }
     let lastNavigationTime = 0
     const navigate = (time: number) => {
@@ -467,12 +626,36 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
         viewer.config.isExtraCopyBeforeScreenEnabled.set(true)
         camera = new sdk.PerspectiveCamera(56, Math.max(container.clientWidth / Math.max(container.clientHeight, 1), 0.1), 0.02, 5000); target = new sdk.Vector3(); viewer.setCamera(camera)
         sdk.setViewerConfig(viewer, { pipeline: { Background: { background: { active: sdk.BackgroundMode.BasicBackground, basic: { color: new sdk.Color(0.018, 0.025, 0.035) } }, ground: { enabled: false } }, Splatting: { enabled: true }, TAA: { enabled: false } } }); viewer.requestRenderHandler = render
+        if (environmentUrl) {
+          try {
+            const texture = await sdk.downloadTexture(environmentUrl, { context: viewer })
+            if (!cancelled) sdk.setViewerConfig(viewer, { pipeline: { Background: { background: {
+              active: sdk.BackgroundMode.EnvMapBackground,
+              envmap: { texture, luma: environmentExposure, horizonRotation: environmentYawDeg * Math.PI / 180 },
+            }, ground: { enabled: false } } } })
+          } catch (cause) {
+            if (!cancelled) setError(cause instanceof Error ? `全景环境加载失败：${cause.message.replace(/https?:\/\/\S+/g, '[asset]')}` : '全景环境加载失败。')
+          }
+        }
         fitEditableObjects()
+        hasInitialFit = instancesRef.current.some(instance => instance.visible !== false)
         camera.near = Math.max(orbit.distance / 5000, 0.01); camera.far = Math.max(orbit.distance * 30, 500)
-        viewer.getScene().add(new sdk.AmbientLight(0xffffff, 0.85))
-        for (const [index, position] of [[4, -3, 7], [-5, 2, 4], [1, 6, 3]].entries()) { const light = new sdk.DirectionalLight(0xffffff, index === 0 ? 0.75 : 0.4); light.position.set(...position as [number, number, number]); viewer.getScene().add(light) }
+        // Lux assets already carry baked tonal information. A restrained
+        // three-point rig preserves material contrast instead of bleaching
+        // pale stone and sand textures into a flat white silhouette.
+        viewer.getScene().add(new sdk.AmbientLight(0xffffff, 0.32))
+        const stageLights = [
+          { position: [4, -3, 7] as [number, number, number], intensity: 0.5 },
+          { position: [-5, 2, 4] as [number, number, number], intensity: 0.16 },
+          { position: [1, 6, 3] as [number, number, number], intensity: 0.1 },
+        ]
+        for (const { position, intensity } of stageLights) {
+          const light = new sdk.DirectionalLight(0xffffff, intensity)
+          light.position.set(...position)
+          viewer.getScene().add(light)
+        }
         orbit.home = { yaw: orbit.yaw, pitch: orbit.pitch, distance: orbit.distance, target: [...orbit.target] }
-        runtimeRef.current = { viewer, camera, target, objects, applyUser, resetUser, applyViewpoint, viewpoint }
+        runtimeRef.current = { viewer, camera, target, objects, applyUser, resetUser, ensureInitialFit, applyViewpoint, viewpoint }
         if (cameraModeRef.current === 'agent' && agentViewpointRef.current) applyViewpoint(agentViewpointRef.current); else applyUser(); setStatus('ready')
         if (assetUrl && format) {
           try {
@@ -517,7 +700,15 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
         }
       } catch (cause) { if (!cancelled && !(cause instanceof DOMException && cause.name === 'AbortError')) { setError(cause instanceof Error ? cause.message.replace(/https?:\/\/\S+/g, '[asset]') : '空间载入失败。'); setStatus('error') } }
     })()
-    const resize = new ResizeObserver(() => { if (viewer && camera && !viewer.isDestroyed) { viewer.resize(); camera.aspect = Math.max(container.clientWidth / Math.max(container.clientHeight, 1), 0.1); camera.updateMatrixWorld(true); render() } }); resize.observe(container)
+    const resize = new ResizeObserver(() => {
+      if (viewer && camera && !viewer.isDestroyed) {
+        viewer.resize()
+        camera.aspect = Math.max(container.clientWidth / Math.max(container.clientHeight, 1), 0.1)
+        camera.updateProjectionMatrix()
+        camera.updateMatrixWorld(true)
+        render()
+      }
+    }); resize.observe(container)
     listen('focus', () => setKeyboardActive(true))
     listen('blur', () => { pressedKeys.clear(); lastNavigationTime = 0; setKeyboardActive(false) })
     listen('keydown', event => {
@@ -578,12 +769,12 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       onSelectInstance?.(instanceId)
     })
     return () => { cancelled = true; controller.abort(); resize.disconnect(); removers.forEach(remove => remove()); if (raf !== null) cancelAnimationFrame(raf); if (navigationRaf !== null) cancelAnimationFrame(navigationRaf); pressedKeys.clear(); runtimeRef.current = null; disposeQualityCaches(); for (const object of agentObjects.values()) object.destroy(); agentObjects.clear(); if (viewer && !viewer.isDestroyed) { if (splat) { viewer.getScene().remove(splat); splat.freeGPU() } viewer.destroy() } }
-  }, [assetUrl, disposeQualityCaches, format, upAxis, onCameraChange, onSelectInstance])
+  }, [assetUrl, disposeQualityCaches, environmentExposure, environmentUrl, environmentYawDeg, format, upAxis, onCameraChange, onSelectInstance])
 
   return <div className={styles.viewerRoot}>
     <div ref={containerRef} className={styles.viewerContainer} aria-label="Aholo 混合空间查看器" tabIndex={0} title="点击画面激活；WASD 水平移动；Q/E 下上移动；Shift 加速；左键环视" />
-    {status !== 'ready' && <div className={styles.viewerState} role={status === 'error' ? 'alert' : 'status'}><strong>{status === 'error' ? '空间载入失败' : status === 'idle' ? '选择一个 Scene' : '正在构建混合空间'}</strong><p>{status === 'error' ? error : '正在读取 World 3DGS 与 Scene GLB。'}</p></div>}
-    {status === 'ready' && error && <div className={styles.viewerWarning} role="alert"><strong>World 背景未载入</strong><span>{error}</span></div>}
+    {status !== 'ready' && <div className={styles.viewerState} role={status === 'error' ? 'alert' : 'status'}><strong>{status === 'error' ? '空间载入失败' : status === 'idle' ? '选择一个 Scene' : '正在构建混合空间'}</strong><p>{status === 'error' ? error : '正在读取全景环境与 Lux Scene 资产。'}</p></div>}
+    {status === 'ready' && error && <div className={styles.viewerWarning} role="alert"><strong>环境背景未完整载入</strong><span>{error}</span></div>}
     {status === 'ready' && cameraMode === 'user' && <div className={styles.viewerHint} data-active={keyboardActive}>
       <span className={styles.controlState}>{keyboardActive ? '自由相机已激活' : '点击画面激活自由相机'}</span>
       <span className={styles.keyGroup}><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><b>水平移动</b></span>

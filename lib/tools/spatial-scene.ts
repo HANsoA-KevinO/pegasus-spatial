@@ -1,11 +1,15 @@
+import { createHash } from 'node:crypto'
 import { getOwnedImageAsset } from '../media/storage'
 import { toRasterAssetRef } from '../media/reference'
+import { normalizeWorkspacePath } from '../workspace/path-policy'
+import type { WorkspaceInstance } from '../workspace/types'
 import type { AgentExecutionContext, ToolExecutionInvocation } from '../agent/execution-context'
 import type { ToolResult } from '../types'
 import {
   createSpatialScene,
   createSpatialObservation,
   enqueueSpatialRenderCommand,
+  enqueueSpatialSurfaceQueryCommand,
   getCurrentSpatialSceneRevision,
   getSpatialRenderCommand,
   listSpatialSceneHistory,
@@ -16,6 +20,8 @@ import {
   restoreSpatialSceneRevision,
   setSpatialSceneViewpoint,
 } from '../spatial/scene-repository'
+import { compileSceneSpecNodes, parseSceneSpecV1, summarizeSceneSpecChange } from '../spatial/scene-spec'
+import { sceneAlignedGlbSize } from '../spatial/object-alignment'
 import { normalizeTransform, normalizeViewpoint } from '../spatial/scene-math'
 import type {
   SceneCommandScope,
@@ -28,15 +34,19 @@ import type {
 
 export const SPATIAL_SCENE_TOOL_NAMES = [
   'CreateSpatialScene',
+  'SetSceneEnvironment',
   'SetSceneWorld',
+  'AddSceneTerrain',
   'AddSceneObject',
   'TransformSceneObject',
   'RemoveSceneObject',
+  'ApplySceneSpec',
   'InspectSpatialScene',
   'RestoreSpatialScene',
   'SetSceneViewpoint',
   'FocusSceneObject',
   'CaptureSceneView',
+  'QuerySceneSurface',
 ] as const
 export type SpatialSceneToolName = typeof SPATIAL_SCENE_TOOL_NAMES[number]
 
@@ -44,6 +54,7 @@ export interface SpatialSceneToolRuntime {
   executionContext?: AgentExecutionContext
   invocation?: ToolExecutionInvocation
   signal?: AbortSignal
+  workspace?: WorkspaceInstance
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -115,6 +126,51 @@ function optionalObservation(input: Record<string, unknown>): string | undefined
   return optionalText('observation_id', input.observation_id, 160)
 }
 
+function finiteNumber(label: string, value: unknown, fallback?: number): number {
+  if (value === undefined && fallback !== undefined) return fallback
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError(`${label} 必须是有限数字。`)
+  return value
+}
+
+function pair(label: string, value: unknown): [number, number] {
+  if (!Array.isArray(value) || value.length !== 2) throw new TypeError(`${label} 必须是两个有限数字。`)
+  return [finiteNumber(`${label}[0]`, value[0]), finiteNumber(`${label}[1]`, value[1])]
+}
+
+async function resolvePanoramaEnvironment(
+  workspace: WorkspaceInstance | undefined,
+  execution: AgentExecutionContext,
+  rawPath: unknown,
+  yaw: unknown,
+  exposure: unknown,
+) {
+  if (!workspace) throw new TypeError('SetSceneEnvironment 需要受权 Workspace。')
+  if (typeof rawPath !== 'string' || !rawPath.trim()) throw new TypeError('image_path 必须是非空 Workspace 图片路径。')
+  const path = normalizeWorkspacePath(rawPath)
+  const first = await workspace.readRaster(path)
+  if (!first) throw new TypeError(`Workspace 中不存在可用图片：${path}`)
+  const stored = await getOwnedImageAsset(first.assetId, execution.userId, execution.conversationId)
+  if (!stored) throw new TypeError('全景图片不属于当前项目或尚未完成持久化。')
+  const current = await workspace.readRaster(path)
+  if (!current || current.assetId !== first.assetId) throw new TypeError('读取期间 Workspace 图片发生变化，请重新提交。')
+  const yawDeg = finiteNumber('yaw_deg', yaw, 0)
+  const exposureValue = finiteNumber('exposure', exposure, 1)
+  if (exposureValue <= 0 || exposureValue > 8) throw new TypeError('exposure 必须大于 0 且不超过 8。')
+  const original = stored.variants.original
+  return {
+    kind: 'equirectangular_panorama' as const,
+    workspace_path: path,
+    asset_id: stored.assetId,
+    mime_type: original.mimeType,
+    width: original.width,
+    height: original.height,
+    size_bytes: original.sizeBytes,
+    sha256: stored.sha256,
+    yaw_deg: yawDeg,
+    exposure: exposureValue,
+  }
+}
+
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical)
   if (value && typeof value === 'object') {
@@ -146,6 +202,22 @@ export async function executeSpatialSceneTool(
         if (created.status !== 'applied') return mutationPayload(created)
         return result(revisionPayload(created.scene, created.revision, created.replayed))
       }
+      case 'SetSceneEnvironment': {
+        onlyKeys(input, ['scene_id', 'image_path', 'yaw_deg', 'exposure', 'observation_id'])
+        const environment = await resolvePanoramaEnvironment(
+          runtime.workspace,
+          durable.context,
+          input.image_path,
+          input.yaw_deg,
+          input.exposure,
+        )
+        return mutationPayload(await mutateSpatialScene({
+          identity: durable.identity, sceneId: text('scene_id', input.scene_id, 160),
+          commandHash: commandHash(name, input), observationId: optionalObservation(input),
+          summary: `设置等距柱状全景环境 ${environment.workspace_path}`,
+          mutate: snapshot => ({ ...snapshot, environment }),
+        }))
+      }
       case 'SetSceneWorld': {
         onlyKeys(input, ['scene_id', 'world_job_id', 'observation_id'])
         const world = await resolvePublishedWorldSource(text('world_job_id', input.world_job_id, 160), durable.scope)
@@ -165,6 +237,7 @@ export async function executeSpatialSceneTool(
         const instance: SceneObjectInstance = {
           instance_id: instanceId,
           label: optionalText('label', input.label, 160) ?? '未命名物体',
+          role: 'object',
           ...object,
           normalization: { ...object.normalization, scene_up_axis: current.world?.up_axis ?? 'Z' },
           transform: normalizeTransform({ position: input.position, rotation_deg: input.rotation_deg, scale: input.scale }),
@@ -173,6 +246,23 @@ export async function executeSpatialSceneTool(
           identity: durable.identity, sceneId: text('scene_id', input.scene_id, 160),
           commandHash: commandHash(name, input),
           observationId: optionalObservation(input), summary: `添加物体“${instance.label}”`,
+          mutate: snapshot => ({ ...snapshot, instances: [...snapshot.instances, instance] }),
+        }))
+      }
+      case 'AddSceneTerrain': {
+        onlyKeys(input, ['scene_id', 'object_job_id', 'label', 'position', 'rotation_deg', 'scale', 'observation_id'])
+        const object = await resolvePublishedObjectSource(text('object_job_id', input.object_job_id, 160), durable.scope)
+        const scene = await requireSpatialScene(text('scene_id', input.scene_id, 160), durable.scope)
+        const current = await getCurrentSpatialSceneRevision(scene)
+        const instance: SceneObjectInstance = {
+          instance_id: `terrain_${durable.invocation.toolUseId.replace(/[^a-zA-Z0-9_-]/g, '').slice(-48) || 'foundation'}`,
+          label: optionalText('label', input.label, 160) ?? 'Lux 地形模块', role: 'terrain', ...object,
+          normalization: { ...object.normalization, scene_up_axis: current.world?.up_axis ?? 'Z' },
+          transform: normalizeTransform({ position: input.position, rotation_deg: input.rotation_deg, scale: input.scale }),
+        }
+        return mutationPayload(await mutateSpatialScene({
+          identity: durable.identity, sceneId: scene.scene_id, commandHash: commandHash(name, input),
+          observationId: optionalObservation(input), summary: `添加 Lux 地形“${instance.label}”`,
           mutate: snapshot => ({ ...snapshot, instances: [...snapshot.instances, instance] }),
         }))
       }
@@ -212,6 +302,47 @@ export async function executeSpatialSceneTool(
           },
         }))
       }
+      case 'ApplySceneSpec': {
+        onlyKeys(input, ['scene_id', 'spec_path', 'observation_id'])
+        if (!runtime.workspace) throw new TypeError('ApplySceneSpec 需要受权 Workspace。')
+        const sceneId = text('scene_id', input.scene_id, 160)
+        const specPath = normalizeWorkspacePath(text('spec_path', input.spec_path, 512))
+        if (!specPath.startsWith('output/spatial/scenes/') || !specPath.endsWith('.json')) {
+          throw new TypeError('spec_path 必须位于 output/spatial/scenes/ 且使用 .json。')
+        }
+        const source = await runtime.workspace.readText(specPath)
+        if (source === null) throw new TypeError(`Workspace 中不存在 Scene spec：${specPath}`)
+        const spec = parseSceneSpecV1(source)
+        if (spec.scene_id !== sceneId) throw new TypeError('Scene spec 的 scene_id 与工具输入不一致。')
+        const scene = await requireSpatialScene(sceneId, durable.scope)
+        const current = await getCurrentSpatialSceneRevision(scene)
+        const instances = await compileSceneSpecNodes({
+          sceneId,
+          nodes: spec.nodes,
+          resolveObject: jobId => resolvePublishedObjectSource(jobId, durable.scope),
+        })
+        const environment = spec.environment === undefined
+          ? current.environment ?? null
+          : spec.environment === null
+            ? null
+            : await resolvePanoramaEnvironment(
+              runtime.workspace,
+              durable.context,
+              spec.environment.image_path,
+              spec.environment.yaw_deg,
+              spec.environment.exposure,
+            )
+        const sourceSha = createHash('sha256').update(source).digest('hex')
+        return mutationPayload(await mutateSpatialScene({
+          identity: durable.identity,
+          sceneId,
+          expectedVersion: spec.expected_scene_version,
+          commandHash: commandHash(name, { scene_id: sceneId, spec_path: specPath, spec_sha256: sourceSha }),
+          observationId: optionalObservation(input),
+          summary: summarizeSceneSpecChange(current.instances, instances),
+          mutate: snapshot => ({ ...snapshot, environment, instances }),
+        }))
+      }
       case 'InspectSpatialScene': {
         onlyKeys(input, ['scene_id', 'revision_version', 'include_history'])
         const scene = await requireSpatialScene(text('scene_id', input.scene_id, 160), durable.scope)
@@ -228,7 +359,7 @@ export async function executeSpatialSceneTool(
           : undefined
         return result({
           kind: 'scene', status: 'inspected', scene_id: scene.scene_id, scene_version: revision.version,
-          title: scene.title, world: revision.world, instances: revision.instances,
+          title: scene.title, environment: revision.environment ?? null, world: revision.world, instances: revision.instances,
           agent_viewpoint: scene.agent_viewpoint, ...(history ? { history } : {}),
         })
       }
@@ -255,8 +386,9 @@ export async function executeSpatialSceneTool(
         if (!instance) throw new TypeError('Scene 中不存在该 instance_id。')
         const framing = input.framing === undefined ? 'medium' : text('framing', input.framing, 20)
         if (!['close', 'medium', 'wide'].includes(framing)) throw new TypeError('framing 必须是 close、medium 或 wide。')
-        const radius = instance.normalization.bounds
-          ? Math.max(...instance.normalization.bounds.size.map((value, axis) => value * instance.transform.scale[axis]), 1)
+        const alignedSize = sceneAlignedGlbSize(instance.normalization)
+        const radius = alignedSize
+          ? Math.max(...alignedSize.map((value, axis) => value * instance.transform.scale[axis]), 1)
           : Math.max(...instance.transform.scale, 1)
         const distance = radius * ({ close: 1.8, medium: 3, wide: 5 }[framing] ?? 3)
         const target = instance.transform.position
@@ -318,9 +450,35 @@ export async function executeSpatialSceneTool(
           media: [toRasterAssetRef(asset)],
         }
       }
+      case 'QuerySceneSurface': {
+        onlyKeys(input, ['scene_id', 'terrain_instance_id', 'horizontal', 'cast_height'])
+        const command = await enqueueSpatialSurfaceQueryCommand({
+          identity: durable.identity,
+          sceneId: text('scene_id', input.scene_id, 160),
+          terrainInstanceId: text('terrain_instance_id', input.terrain_instance_id, 160),
+          horizontal: pair('horizontal', input.horizontal),
+          castHeight: input.cast_height === undefined ? undefined : finiteNumber('cast_height', input.cast_height),
+        })
+        if (!command) return result({ kind: 'scene_surface', status: 'viewer_unavailable', error: '没有活动的空间舞台。请用户打开空间舞台后重试。' }, true)
+        const deadline = Date.now() + 20_000
+        let current = command
+        while (!['completed', 'failed'].includes(current.status) && Date.now() < deadline) {
+          if (runtime.signal?.aborted) throw runtime.signal.reason ?? new Error('QuerySceneSurface 已取消。')
+          await new Promise(resolve => setTimeout(resolve, 250))
+          current = await getSpatialRenderCommand(current.command_id, durable.scope) ?? current
+        }
+        if (current.status !== 'completed' || !current.surface_result) {
+          return result({ kind: 'scene_surface', status: current.status === 'failed' ? 'failed' : 'pending', command_id: current.command_id, ...(current.last_error ? { error: current.last_error } : {}) }, current.status === 'failed')
+        }
+        return result({
+          kind: 'scene_surface', status: 'completed', scene_id: current.scene_id,
+          scene_revision_id: current.revision_id, command_id: current.command_id,
+          terrain_instance_id: current.surface_result.terrain_instance_id,
+          point: current.surface_result.point,
+        })
+      }
     }
   } catch (error) {
     return failure(error)
   }
 }
-import { createHash } from 'node:crypto'

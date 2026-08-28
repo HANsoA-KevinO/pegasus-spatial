@@ -900,6 +900,13 @@ export async function executeMemberAgentRun(
       role: 'member',
       privatePathReferences,
       managedReferenceTool: context.grant.capabilities.can_publish_references,
+      // The unscoped Workspace is handed only to GenerateImage as its trusted
+      // publication target. Generic member tools keep using the scoped view,
+      // so explicit delegation grants this one public image namespace without
+      // turning the member into a general public writer.
+      publicWriteTool: context.grant.allowed_tool_names.includes('GenerateImage')
+        ? 'GenerateImage'
+        : undefined,
     }
     const workspaceRepository = new MultiAgentWorkspaceRepository({
       fenceValidator: () => validateMemberExecutionFences(fences),

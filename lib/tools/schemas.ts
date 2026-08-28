@@ -6,14 +6,18 @@ export const EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES: ReadonlySet<string> = new S
   'CreateObject3D',
   'CreateWorld3D',
   'CreateSpatialScene',
+  'SetSceneEnvironment',
   'SetSceneWorld',
+  'AddSceneTerrain',
   'AddSceneObject',
   'TransformSceneObject',
   'RemoveSceneObject',
+  'ApplySceneSpec',
   'RestoreSpatialScene',
   'SetSceneViewpoint',
   'FocusSceneObject',
   'CaptureSceneView',
+  'QuerySceneSurface',
 ])
 /** @deprecated Use EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES. */
 export const ROOT_ONLY_SPATIAL_TOOL_NAMES = EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES
@@ -135,8 +139,9 @@ Use this when a requested spatial outcome benefits from a visual reference, or w
         },
         aspect_ratio: {
           type: 'string',
-          enum: ['1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16'],
-          description: 'Optional output aspect ratio. Omit when preserving an input image composition matters more.',
+          pattern: '^[0-9]+(?:\\.[0-9]+)?:[0-9]+(?:\\.[0-9]+)?$',
+          maxLength: 32,
+          description: 'Optional positive width:height ratio, for example 2:1, 16:9, or 2.39:1. Omit when preserving an input image composition matters more.',
         },
       },
       required: ['prompt', 'output_path'],
@@ -146,7 +151,7 @@ Use this when a requested spatial outcome benefits from a visual reference, or w
     name: 'CreateObject3D',
     description: `Queue one durable Lux3D object build and return immediately with its persistent Job identity.
 
-Provide text, one or more authorized Workspace reference images, or both. The build publishes a standalone editable GLB, optional high-quality PLY and manifest. A prepared result means the local durable queue accepted the request, not that Lux3D has accepted it yet. Continue independent work; a terminal completion reminder is delivered automatically. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
+The normal path is one clean canonical reference image. At least one of prompt or reference_image_paths is required; both may be provided. Use 2–4 ordered references only as an explicit recovery path after a real single-view result exposes unacceptable hidden-side ambiguity, or when the user specifically requests multi-view reconstruction. The build publishes a standalone editable GLB, optional high-quality PLY and manifest. A prepared result means the local durable queue accepted the request, not that Lux3D has accepted it yet. Continue independent work; a terminal completion reminder is delivered automatically. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -158,7 +163,7 @@ Provide text, one or more authorized Workspace reference images, or both. The bu
           maxItems: 4,
           uniqueItems: true,
           items: { type: 'string', minLength: 1 },
-          description: 'Authorized Workspace image paths. Arbitrary URLs are forbidden.',
+          description: 'Ordered authorized Workspace image paths. For multiple views, put the canonical/main view first. Arbitrary URLs are forbidden.',
         },
         output_path_prefix: {
           type: 'string',
@@ -167,17 +172,15 @@ Provide text, one or more authorized Workspace reference images, or both. The bu
         },
       },
       required: ['output_path_prefix'],
-      anyOf: [
-        { required: ['prompt'] },
-        { required: ['reference_image_paths'] },
-      ],
+      // Keep cross-field requirements in the runtime validator. Some
+      // Anthropic-compatible relays reject top-level JSON Schema combinators.
     },
   },
   {
     name: 'CreateWorld3D',
     description: `Queue one durable Aholo World generation and return immediately with its persistent Job identity.
 
-Provide a world brief, one authorized Workspace scene image, or both. A prepared result means the local durable queue accepted the request, not that Aholo has accepted it yet. Continue independent work; a terminal completion reminder is delivered automatically. The build publishes a manifest, preview when available, and an Aholo opening link. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
+At least one of prompt or source_image_path is required; both may be provided. A prepared result means the local durable queue accepted the request, not that Aholo has accepted it yet. Continue independent work; a terminal completion reminder is delivered automatically. The build publishes a manifest, preview when available, and an Aholo opening link. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -195,10 +198,7 @@ Provide a world brief, one authorized Workspace scene image, or both. A prepared
         },
       },
       required: ['output_path_prefix'],
-      anyOf: [
-        { required: ['prompt'] },
-        { required: ['source_image_path'] },
-      ],
+      // Cross-field validation remains authoritative in executeCreateWorld3D.
     },
   },
   {
@@ -208,6 +208,17 @@ Provide a world brief, one authorized Workspace scene image, or both. A prepared
       title: { type: 'string', minLength: 1, maxLength: 160 },
       world_job_id: { type: 'string', minLength: 1, maxLength: 160 },
     }, required: ['title'] },
+  },
+  {
+    name: 'SetSceneEnvironment',
+    description: 'Set an authorized Workspace image as the Scene equirectangular panorama environment. This is the normal far-field sky and horizon layer; it does not create geometry or a walkable surface.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 },
+      image_path: { type: 'string', minLength: 1, description: 'Authorized Workspace panorama image path. Prefer a seamless 2:1 equirectangular image.' },
+      yaw_deg: { type: 'number', description: 'Optional horizontal panorama rotation in degrees.' },
+      exposure: { type: 'number', exclusiveMinimum: 0, maximum: 8 },
+      observation_id: { type: 'string', maxLength: 160 },
+    }, required: ['scene_id', 'image_path'] },
   },
   {
     name: 'SetSceneWorld',
@@ -228,12 +239,23 @@ Provide a world brief, one authorized Workspace scene image, or both. A prepared
     }, required: ['scene_id', 'object_job_id'] },
   },
   {
+    name: 'AddSceneTerrain',
+    description: 'Add a published Lux GLB as a terrain, foundation, road, plaza, mountain or other large editable Scene module. Terrain remains an ordinary transformable Lux asset but is eligible for real mesh surface queries.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, object_job_id: { type: 'string', minLength: 1, maxLength: 160 }, label: { type: 'string', maxLength: 160 },
+      position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+      rotation_deg: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
+      scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number', exclusiveMinimum: 0 } },
+      observation_id: { type: 'string', maxLength: 160 },
+    }, required: ['scene_id', 'object_job_id'] },
+  },
+  {
     name: 'TransformSceneObject',
-    description: 'Set an existing object instance to absolute position, Euler XYZ rotation in degrees, and/or positive XYZ scale. Inspect first; do not use vague relative motion.',
+    description: 'Set an existing object instance to absolute position, Euler XYZ rotation in degrees, and/or positive XYZ scale. At least one of position, rotation_deg, or scale is required. Inspect first; do not use vague relative motion.',
     input_schema: { type: 'object', additionalProperties: false, properties: {
       scene_id: { type: 'string', minLength: 1, maxLength: 160 }, instance_id: { type: 'string', minLength: 1, maxLength: 160 },
       position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, rotation_deg: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number', exclusiveMinimum: 0 } }, observation_id: { type: 'string', maxLength: 160 },
-    }, required: ['scene_id', 'instance_id'], anyOf: [{ required: ['position'] }, { required: ['rotation_deg'] }, { required: ['scale'] }] },
+    }, required: ['scene_id', 'instance_id'] },
   },
   {
     name: 'RemoveSceneObject',
@@ -241,6 +263,17 @@ Provide a world brief, one authorized Workspace scene image, or both. A prepared
     input_schema: { type: 'object', additionalProperties: false, properties: {
       scene_id: { type: 'string', minLength: 1, maxLength: 160 }, instance_id: { type: 'string', minLength: 1, maxLength: 160 }, observation_id: { type: 'string', maxLength: 160 },
     }, required: ['scene_id', 'instance_id'] },
+  },
+  {
+    name: 'ApplySceneSpec',
+    description: `Compile and atomically apply one declarative Scene JSON file from the Workspace.
+
+Use this as the default authoring interface for multi-object layout. Each node uses exactly one published object_job_id or a procedural proxy (box, cylinder, or arch with dimensions, colour and material semantics). Maintain stable semantic node keys and absolute positions/rotations. Published objects use explicit scale or one target fit dimension; proxies use explicit dimensions and do not require a Job. The nodes array is the complete desired object set: omitted nodes are removed. One successful apply creates exactly one automatic revision. The JSON's expected_scene_version provides optimistic locking; inspect and update the file after scene_changed.`,
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 },
+      spec_path: { type: 'string', pattern: '^output/spatial/scenes/[a-zA-Z0-9][a-zA-Z0-9._/-]*\\.json$', description: 'Authorized Workspace JSON file containing schema_version, scene_id, expected_scene_version, optional environment, and the complete nodes array.' },
+      observation_id: { type: 'string', maxLength: 160 },
+    }, required: ['scene_id', 'spec_path'] },
   },
   {
     name: 'InspectSpatialScene',
@@ -278,8 +311,18 @@ Provide a world brief, one authorized Workspace scene image, or both. A prepared
     }, required: ['scene_id'] },
   },
   {
+    name: 'QuerySceneSurface',
+    description: 'Raycast downward against one loaded Lux terrain GLB in the active browser Stage and return the real mesh hit point. Use the returned absolute point when placing another object; never guess terrain height from image appearance or bounds.',
+    input_schema: { type: 'object', additionalProperties: false, properties: {
+      scene_id: { type: 'string', minLength: 1, maxLength: 160 },
+      terrain_instance_id: { type: 'string', minLength: 1, maxLength: 160 },
+      horizontal: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' }, description: 'Two coordinates on the terrain horizontal plane: X/Y for Z-up Scenes, X/Z for legacy Y-up Scenes.' },
+      cast_height: { type: 'number', exclusiveMinimum: 0, description: 'Optional origin along the Scene up axis. Defaults to a safely high value.' },
+    }, required: ['scene_id', 'terrain_instance_id', 'horizontal'] },
+  },
+  {
     name: 'GetSpatialJob',
-    description: 'Read one durable image/object/world Job snapshot by job_id. This does not submit work or poll repeatedly.',
+    description: 'Read one durable Lux3D object or Aholo world Job snapshot by job_id. This tool does not accept GenerateImage receipt IDs (`spimg_*`); the GenerateImage ToolResult is the authoritative image status. This does not submit work or poll repeatedly.',
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -903,7 +946,7 @@ Do not use this for a trivial operation that can be completed directly, and do n
 
 Use this for ordinary delegation, follow-up questions, evidence requests, peer review, corrections, progress updates, and continuing an existing Agent. Every direct message automatically wakes an idle recipient with its full prior context. Replies and other relevant updates are delivered automatically; do not inspect an inbox, poll, sleep, or use a wait tool.
 
-Do not create a new Agent merely to continue an existing one, do not address Agents by internal UUID, and do not send structured status payloads when TaskUpdate can record formal task state. Plain assistant text is not delivered to peers: call SendMessage whenever another Agent must receive something. The summary is only a concise notification preview; put the complete instruction in message.`,
+Do not create a new Agent merely to continue an existing one, do not address Agents by internal UUID, and do not send structured status payloads when TaskUpdate can record formal task state. Plain assistant text is not delivered to peers: call SendMessage whenever another Agent must receive something. The summary is only a concise notification preview; put the complete instruction in message. When source material already exists in the Workspace, attach its path in refs and send only the instruction or delta—do not paste the file body into the message.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -1052,9 +1095,9 @@ Do not poll TaskList for Agent replies or completion notifications. Messages and
   },
   {
     name: 'TaskGet',
-    description: `Retrieve one formal Task's complete current state, owner, dependencies, context references, results, and publication proposals visible to the caller.
+    description: `Retrieve one formal Task's complete current state, owner, dependencies, context references, results, publication proposals, and full durable message bodies visible to the caller.
 
-Use this before TaskUpdate or when detailed requirements are needed. Use TaskList for a compact overview and SendMessage for conversational follow-up. This is a state read, not a polling mechanism; Agent replies and important updates are delivered automatically.`,
+Use this before TaskUpdate, when detailed requirements are needed, or when an automatic mailbox notification says a large message body was retained under this task. Use TaskList for a compact overview and SendMessage for conversational follow-up. This is a state read, not a polling mechanism; Agent replies and important updates are delivered automatically.`,
     input_schema: {
       type: 'object',
       properties: {

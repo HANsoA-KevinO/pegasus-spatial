@@ -11,7 +11,6 @@ if (!databaseName?.endsWith(TEST_DATABASE_SUFFIX)) {
 }
 
 process.env.MONGODB_URI = mongoUri
-process.env.SPATIAL_PAID_CALLS_ENABLED = '0'
 process.env.AHOLO_API_BASE_URL = 'https://api.example.test'
 process.env.AHOLO_API_KEY = 'operator-test-key-never-sent'
 process.env.LLM_BASE_URL = 'https://newapi.example.test/v1'
@@ -37,7 +36,10 @@ async function main(): Promise<void> {
     resumeOperatorSmoke,
     statusOperatorSmoke,
   } = await import('../operator-smoke-runner')
-  const { ImageGenerationReceiptModel } = await import('../../image-generation/receipt-store')
+  const {
+    ImageGenerationReceiptModel,
+    reconcileImageGenerationPaidSlots,
+  } = await import('../../image-generation/receipt-store')
   const { writeImageAsset } = await import('../../media/storage')
   const {
     FakeSpatialProviderAdapter,
@@ -77,6 +79,39 @@ async function main(): Promise<void> {
   ])
 
   try {
+    // Normal product GenerateImage receipts do not allocate a global paid-slot
+    // row. Their stale submitting state must still converge to unknown during
+    // the periodic recovery sweep.
+    const receiptRecoveryNow = new Date('2026-08-28T12:00:00.000Z')
+    await ImageGenerationReceiptModel.create({
+      project_id: 'slotless_image_recovery_project',
+      user_id: 'slotless_image_recovery_user',
+      run_id: 'slotless_image_recovery_run',
+      tool_use_id: 'slotless_image_recovery_tool',
+      paid_slot_holder_key: 'spimg_slotless_image_recovery',
+      request_hash: 'request-hash',
+      command_hash: 'command-hash',
+      input_hash: 'input-hash',
+      status: 'submitting',
+      provider: 'newapi-chat-image-v1',
+      model: 'GPT-image-2',
+      output_path: 'output/spatial/images/slotless-recovery.png',
+      submission_owner: 'crashed-owner',
+      submission_started_at: new Date(receiptRecoveryNow.getTime() - 10 * 60_000),
+      created_at: new Date(receiptRecoveryNow.getTime() - 10 * 60_000),
+      updated_at: new Date(receiptRecoveryNow.getTime() - 10 * 60_000),
+    })
+    const slotlessRecovery = await reconcileImageGenerationPaidSlots(
+      receiptRecoveryNow,
+      6 * 60_000,
+    )
+    assert.equal(slotlessRecovery.markedUnknown, 1)
+    assert.equal(
+      await ImageGenerationReceiptModel.findOne({ project_id: 'slotless_image_recovery_project' })
+        .then(value => value?.status),
+      'unknown',
+    )
+
     // High-level prepare/status/resume use the real tool and Workspace bridge,
     // but the quarantined gate guarantees zero adapter submissions.
     await Conversation.create({

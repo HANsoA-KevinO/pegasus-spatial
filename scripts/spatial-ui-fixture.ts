@@ -25,9 +25,6 @@ export async function seedSpatialUiFixture(
   if (!/^[a-f0-9]{8,32}$/.test(input.suffix)) {
     throw new Error('Spatial UI fixture suffix must be 8-32 lowercase hex characters.')
   }
-  if (process.env.SPATIAL_PAID_CALLS_ENABLED !== '0') {
-    throw new Error('Spatial UI fixture refuses to run unless paid calls are disabled.')
-  }
   const conversationId = `e2e-conversation-${input.suffix}`
   const conversationTitle = `E2E · 零费用空间恢复 ${input.suffix}`
   const jobId = `spjob_e2e_${input.suffix}`

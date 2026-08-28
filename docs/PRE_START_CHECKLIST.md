@@ -17,7 +17,7 @@
 | 赛事信息基线 | 用户已提供的赛事通知与海报是当前规则基线；另已核对《Venture D 软件支持清单及领取方式》 | 后者是 AI Ping、Zion、Qoder 等软件福利领取说明，可见内容未出现 Aholo、Lux3D、群核或额外比赛规则；不将其当作付费测试授权 |
 | 外部能力选型 | 本项目从主办方/赛题平台提供的资源中仅领取和使用 Aholo；LLM 与生图使用自有 NewAPI | 不依赖 Zion 或其他赞助模型，也不需要为了参赛额外领取它们；Lux3D 若用于独立物体演示，其鉴权/额度仍是独立技术依赖，不由该福利文档证明 |
 | 产物域名白名单 | `AHOLO_ASSET_HOST_ALLOWLIST`、`LUX3D_ASSET_HOST_ALLOWLIST` 均为空 | 预期状态；必须从首次真实响应提取精确 hostname 后再填写，禁止猜测或使用通配符 |
-| 付费门禁 | `SPATIAL_PAID_CALLS_ENABLED=0` | 通过；普通聊天不能发起付费提交 |
+| 提交边界 | 供应商凭证、资产域名白名单、持久 receipt | 正常 Agent 无额外付费总开关；依靠具体配置与防重放契约 |
 | 真实供应商提交 | 0 次 | 尚无 GPT Image、Aholo 或 Lux3D 的真实成功产物 |
 | Operator smoke | 命令、durable intent、单次授权和恢复测试已实现 | Aholo/Lux `--dry-run` 为绿且提交数为 0；Image 因当前 NewAPI 为公网 HTTP 正确 fail closed；没有执行真实提交 |
 | 密钥风险 | 用户明确决定本轮暂不轮换已配置密钥 | 记为用户接受的已知风险，不作为本轮本地开发阻塞项；不得在文档、日志、截图或提交中记录密钥值 |
@@ -103,7 +103,7 @@ npm run spatial:smoke:aholo -- --resume --smoke-id <spsmoke_id>
 - [x] 未核销的 `unknown` 会按 project + provider budget 跨 phase 阻止后续 prepare/authorize/submit；Image text/edit 共用该供应商停止线，不能换 phase 或 mode 绕过。
 - [x] 同一 project + provider 的付费边界由 Mongo 唯一 guard 串行化；调用供应商前再次校验 guard 所有权。过期 Spatial `submitting` 与 Image receipt 会先恢复为 `unknown` 并同步 intent，不能由陈旧状态绕过停止线。
 - [x] smoke 复用正式 adapter、SpatialBuildJob、GenerateImage receipt、worker processor 与 Workspace CAS，不建立第二套临时提交路径。
-- [x] 普通聊天始终受 `SPATIAL_PAID_CALLS_ENABLED=0` 保护；operator 是局部、逐 intent 授权，不修改全局开关。
+- [x] 普通聊天不经过额外付费总开关；operator smoke 仍是局部、逐 intent 的人工授权路径。
 - [x] Aholo/Lux 首次成功若白名单为空，只持久化精确 hostname 并进入 `configuration_blocked`；配置 allowlist 后恢复同一 external job，不重复提交。
 
 `docs/LIVE_SMOKE_LOG.md` 的预算字段是人工门禁，CLI 不会替操作员解析或校验 Markdown。操作员必须在运行 `--submit` 前逐项填写并人工复核；精确确认文本只是第二道单次授权，不能替代预算检查。
@@ -140,7 +140,7 @@ npm run spatial:smoke:aholo -- --resume --smoke-id <spsmoke_id>
 
 只做复核，不新增产品范围；第一步先确认不会误付费：
 
-- [ ] `.env.local` 仍为 `0600`，`SPATIAL_PAID_CALLS_ENABLED=0`。
+- [ ] `.env.local` 仍为 `0600`，供应商凭证和精确产物域名已配置且未进入日志。
 - [ ] 运行 `npm run demo:status`；Mongo 为 `healthy`、数据库为 `pegasus_spatial`，端口只绑定 `127.0.0.1:27019`。
 - [ ] 应用在回环 `3200` 启动；无登录直达、Job 卡片、刷新和 Web 重启的零费用路径通过；聊天另按 NewAPI 门禁验证。
 - [ ] OSS/CDN 外网读取与 CORS 仍通过；测试对象删除成功。

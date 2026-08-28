@@ -3,22 +3,38 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ImageAttachment } from '@/lib/types'
-import type { SceneObjectInstance, SceneViewpoint } from '@/lib/spatial/scene-types'
+import type { ScenePanoramaEnvironment, SceneViewpoint } from '@/lib/spatial/scene-types'
+import { eulerDegreesToQuaternion, quaternionToEulerDegrees } from '@/lib/spatial/scene-math'
 import type { WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
 import { useChatContext } from '@/contexts/ChatContext'
 import { useGridFSContent } from '@/hooks/useGridFSContent'
 import { AholoWorldCanvas, type SpatialCanvasHandle, type SpatialQualityRenderState, type StageCameraPose } from './AholoWorldCanvas'
+import { normalizeSpatialProxy, type SpatialStageInstance } from './proxy-geometry'
 import { chooseWorldRenderSource, listWorldManifests, parseWorldStageManifest, worldBinaryUrl } from './world-stage-model'
 import styles from './SpatialStage.module.css'
 
 interface SceneSummary { scene_id: string; title: string; current_version: number; current_revision_id: string; agent_viewpoint: SceneViewpoint | null }
-interface SceneRevision { revision_id: string; version: number; change_summary: string; world: { up_axis: 'Y' | 'Z'; artifacts: Array<{ workspace_path: string; sha256: string }> } | null; instances: SceneObjectInstance[] }
+interface SceneRevision { revision_id: string; version: number; change_summary: string; environment: ScenePanoramaEnvironment | null; world: { up_axis: 'Y' | 'Z'; artifacts: Array<{ workspace_path: string; sha256: string }> } | null; instances: SpatialStageInstance[] }
 interface SceneResponse { scene: SceneSummary; revision: SceneRevision; history?: Array<{ revision_id: string; version: number; change_summary: string }> }
 interface RenderSession { session_id: string; lease_token: string }
-interface RenderCommand { command_id: string; observation_id: string; viewpoint: SceneViewpoint; lease: { token: string } }
+interface RenderCommand {
+  command_id: string
+  observation_id: string
+  viewpoint: SceneViewpoint
+  lease: { token: string }
+  kind?: 'capture' | 'surface_query'
+  surface_query?: { terrain_instance_id: string; horizontal: [number, number]; cast_height: number; up_axis: 'Y' | 'Z' } | null
+}
+
+interface EditableTransform {
+  position: [number, number, number]
+  rotation_deg: [number, number, number]
+  scale: [number, number, number]
+}
 
 const RENDER_COMMAND_IDLE_POLL_MS = 2_500
 const RENDER_COMMAND_ACTIVE_POLL_MS = 250
+const RENDER_SESSION_HEARTBEAT_MS = 15_000
 
 function shortId(value: string | null | undefined): string {
   if (!value) return '—'
@@ -65,6 +81,10 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
   const [error, setError] = useState<string | null>(null)
   const [activeDrawer, setActiveDrawer] = useState<'library' | 'inspector' | null>(null)
   const [libraryTab, setLibraryTab] = useState<'assets' | 'scenes' | 'history'>('assets')
+  const [editTransform, setEditTransform] = useState<EditableTransform | null>(null)
+  const [editDirty, setEditDirty] = useState(false)
+  const [editStatus, setEditStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [moveStep, setMoveStep] = useState(1)
   const manifestPreviewPath = initialManifestPath || null
   const isManifestPreview = manifestPreviewPath !== null
 
@@ -107,12 +127,22 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
   const assetUrl = worldAsset
     ? worldBinaryUrl(conversationId, worldAsset.workspace_path, worldAsset.sha256)
     : legacyRender ? worldBinaryUrl(conversationId, legacyRender.path, legacyRender.sha256) : null
+  const environment = displayedSceneData?.revision.environment ?? null
+  const environmentUrl = environment
+    ? worldBinaryUrl(conversationId, environment.workspace_path, environment.sha256)
+    : null
   const upAxis = displayedSceneData?.revision.world?.up_axis ?? legacyManifest?.up_axis
-  const objectUrl = useCallback((instance: SceneObjectInstance, quality: 'glb' | 'ply') => {
+  const objectUrl = useCallback((instance: SpatialStageInstance, quality: 'glb' | 'ply') => {
     const artifact = quality === 'ply' ? instance.optional_ply_artifact : instance.glb_artifact
-    return worldBinaryUrl(conversationId, artifact?.workspace_path ?? instance.glb_artifact.workspace_path, artifact?.sha256 ?? instance.glb_artifact.sha256)
+    return artifact ? worldBinaryUrl(conversationId, artifact.workspace_path, artifact.sha256) : null
   }, [conversationId])
-  const selectedInstance = displayedSceneData?.revision.instances.find(instance => instance.instance_id === selectedInstanceId) ?? null
+  const sourceSelectedInstance = displayedSceneData?.revision.instances.find(instance => instance.instance_id === selectedInstanceId) ?? null
+  const selectedInstance = sourceSelectedInstance && editTransform
+    ? { ...sourceSelectedInstance, transform: { position: editTransform.position, rotation_quaternion: eulerDegreesToQuaternion(editTransform.rotation_deg), scale: editTransform.scale } }
+    : sourceSelectedInstance
+  const effectiveInstances = useMemo(() => displayedSceneData?.revision.instances.map(instance => instance.instance_id === selectedInstanceId && editTransform
+    ? { ...instance, transform: { ...instance.transform, position: editTransform.position, rotation_quaternion: eulerDegreesToQuaternion(editTransform.rotation_deg), scale: editTransform.scale } }
+    : instance) ?? [], [displayedSceneData?.revision.instances, editTransform, selectedInstanceId])
   const agentMarkers = useMemo(() => displayedSceneData?.scene.agent_viewpoint
     ? [{ id: 'root-agent', label: '主 Agent', color: '#91dfc2', viewpoint: displayedSceneData.scene.agent_viewpoint }]
     : [], [displayedSceneData?.scene.agent_viewpoint])
@@ -122,10 +152,98 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
     }
   }, [displayedSceneData, selectedInstanceId])
 
-  const selectedAssetLabel = qualityMode === 'ply' && selectedInstance?.optional_ply_artifact
-    ? 'PLY 高质量替身'
-    : 'GLB 可编辑真值'
-  const plyCapableCount = displayedSceneData?.revision.instances.filter(instance => instance.optional_ply_artifact).length ?? 0
+  useEffect(() => {
+    if (!sourceSelectedInstance) { setEditTransform(null); setEditDirty(false); setEditStatus('idle'); return }
+    if (editDirty || editStatus === 'saving') return
+    setEditTransform({
+      position: [...sourceSelectedInstance.transform.position],
+      rotation_deg: quaternionToEulerDegrees(sourceSelectedInstance.transform.rotation_quaternion),
+      scale: [...sourceSelectedInstance.transform.scale],
+    })
+  }, [editDirty, editStatus, sourceSelectedInstance])
+
+  const updateEditTransform = useCallback((mutate: (current: EditableTransform) => EditableTransform) => {
+    setEditTransform(current => current ? mutate(current) : current)
+    setEditDirty(true)
+    setEditStatus('idle')
+  }, [])
+
+  const nudgeSelected = useCallback((axis: 0 | 1 | 2, amount: number) => {
+    updateEditTransform(current => ({ ...current, position: current.position.map((value, index) => index === axis ? value + amount : value) as [number, number, number] }))
+  }, [updateEditTransform])
+
+  const handleCanvasSelect = useCallback((instanceId: string | null) => {
+    setSelectedInstanceId(instanceId)
+    if (instanceId) setActiveDrawer('inspector')
+  }, [])
+
+  useEffect(() => {
+    if (!selectedInstanceId || !editTransform || previewVersion || cameraMode !== 'user') return
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, button')) return
+      const multiplier = event.shiftKey ? 5 : event.altKey ? 0.1 : 1
+      const step = moveStep * multiplier
+      const mapping: Partial<Record<string, [0 | 1 | 2, number]>> = {
+        ArrowLeft: [0, -step], ArrowRight: [0, step], ArrowDown: [1, -step], ArrowUp: [1, step], PageDown: [2, -step], PageUp: [2, step],
+      }
+      const movement = mapping[event.key]
+      if (!movement) return
+      event.preventDefault()
+      nudgeSelected(...movement)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [cameraMode, editTransform, moveStep, nudgeSelected, previewVersion, selectedInstanceId])
+
+  useEffect(() => {
+    if (!editDirty || !editTransform || !sourceSelectedInstance || !displayedSceneData || previewVersion) return
+    const timer = setTimeout(() => {
+      const endpoint = `/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes/${encodeURIComponent(displayedSceneData.scene.scene_id)}`
+      setEditStatus('saving')
+      void json<{ scene: SceneSummary; revision: SceneRevision }>(endpoint, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          edit_id: crypto.randomUUID(),
+          expected_version: displayedSceneData.scene.current_version,
+          instance_id: sourceSelectedInstance.instance_id,
+          ...editTransform,
+        }),
+      }).then(result => {
+        setSceneData(current => current ? { ...current, scene: result.scene, revision: result.revision } : current)
+        setEditDirty(false)
+        setEditStatus('saved')
+        void refreshScenes()
+      }).catch(cause => {
+        setEditStatus('error')
+        setEditDirty(false)
+        setError(cause instanceof Error && cause.message === 'scene_changed' ? '场景已被其他操作更新，请重新选择物体后再调整。' : cause instanceof Error ? cause.message : '物体变换保存失败。')
+        void refreshScene()
+      })
+    }, 520)
+    return () => clearTimeout(timer)
+  }, [conversationId, displayedSceneData, editDirty, editTransform, previewVersion, refreshScene, refreshScenes, sourceSelectedInstance])
+
+  const groundSelected = async () => {
+    if (!editTransform || !sourceSelectedInstance || !canvasRef.current) return
+    const terrain = displayedSceneData?.revision.instances.find(instance => instance.role === 'terrain' && instance.instance_id !== sourceSelectedInstance.instance_id)
+    if (!terrain) { setError('当前 Scene 没有可用于贴合的 Lux 地形。'); return }
+    setEditStatus('saving'); setError(null)
+    try {
+      const point = await canvasRef.current.querySurface(terrain.instance_id, [editTransform.position[0], editTransform.position[1]], Math.max(editTransform.position[2] + 1000, 1000), 'Z')
+      updateEditTransform(current => ({ ...current, position: [current.position[0], current.position[1], point[2] + 0.02] }))
+    } catch (cause) {
+      setEditStatus('error')
+      setError(cause instanceof Error ? cause.message : '无法查询当前位置的地形高度。')
+    }
+  }
+
+  const selectedAssetLabel = selectedInstance && normalizeSpatialProxy(selectedInstance)
+    ? '灰盒代理体'
+    : qualityMode === 'ply' && selectedInstance?.optional_ply_artifact
+      ? 'PLY 高质量替身'
+      : 'GLB 可编辑真值'
+  const plyCapableCount = displayedSceneData?.revision.instances.filter(instance => !normalizeSpatialProxy(instance) && instance.optional_ply_artifact).length ?? 0
   const toggleQualityMode = () => {
     if (qualityMode === 'ply' && qualityRenderState.status === 'error') setQualityReloadToken(current => current + 1)
     setQualityMode(current => current === 'glb' ? 'ply' : 'glb')
@@ -133,26 +251,89 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
 
   useEffect(() => {
     if (!selectedSceneId || isManifestPreview) return
-    let cancelled = false; let session: RenderSession | null = null; let pollTimer: ReturnType<typeof setTimeout> | null = null; let heartbeat: ReturnType<typeof setInterval> | null = null
-    const clientId = sessionStorage.getItem('pegasus-spatial-render-client') ?? crypto.randomUUID(); sessionStorage.setItem('pegasus-spatial-render-client', clientId)
+    let cancelled = false; let session: RenderSession | null = null; let registration: Promise<void> | null = null; let pollTimer: ReturnType<typeof setTimeout> | null = null; let heartbeat: ReturnType<typeof setInterval> | null = null
+    // A mounted Stage is one render client. Persisted browser IDs can be shared
+    // by copied tabs, which lets one tab invalidate the other's lease forever.
+    const clientId = crypto.randomUUID()
     const endpoint = `/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes/${encodeURIComponent(selectedSceneId)}`
+    const register = () => {
+      if (cancelled) return Promise.resolve()
+      if (registration) return registration
+      registration = json<{ session: RenderSession }>(endpoint + '/render-session', { method: 'POST', body: JSON.stringify({ client_id: clientId }) })
+        .then(body => { if (!cancelled) session = body.session })
+        .finally(() => { registration = null })
+      return registration
+    }
+    const invalidate = (candidate: RenderSession) => {
+      if (session?.session_id === candidate.session_id && session.lease_token === candidate.lease_token) session = null
+    }
+    const keepAlive = async () => {
+      if (cancelled) return
+      if (!session) { await register().catch(() => undefined); return }
+      const active = session
+      try {
+        await json(endpoint + '/render-session', { method: 'PATCH', body: JSON.stringify({ session_id: active.session_id, lease_token: active.lease_token }) })
+      } catch {
+        invalidate(active)
+        await register().catch(() => undefined)
+      }
+    }
     const poll = async () => {
-      if (cancelled || !session) return
+      if (cancelled) return
       let nextPollMs = RENDER_COMMAND_IDLE_POLL_MS
       try {
-        const body = await json<{ command: RenderCommand | null }>(`${endpoint}/render-command`, { method: 'POST', body: JSON.stringify({ session_id: session.session_id, lease_token: session.lease_token }) })
-        if (body.command && canvasRef.current) {
-          const blob = await canvasRef.current.capture(body.command.viewpoint); const image = await uploadPng(conversationId, blob)
-          await json(`${endpoint}/render-command/${encodeURIComponent(body.command.command_id)}/complete`, { method: 'POST', body: JSON.stringify({ session_id: session.session_id, command_lease_token: body.command.lease.token, asset_id: image.assetId, observation_id: body.command.observation_id, visible_instance_ids: canvasRef.current.visibleInstanceIds() }) })
+        if (!session) await register()
+        const active = session
+        const canvas = canvasRef.current
+        if (active && canvas?.isReady()) {
+          let body: { command: RenderCommand | null }
+          try {
+            body = await json<{ command: RenderCommand | null }>(endpoint + '/render-command', { method: 'POST', body: JSON.stringify({ session_id: active.session_id, lease_token: active.lease_token }) })
+          } catch (cause) {
+            invalidate(active)
+            throw cause
+          }
+          if (!body.command) {
+            if (!cancelled) pollTimer = setTimeout(poll, nextPollMs)
+            return
+          }
+          if (body.command.kind === 'surface_query' && body.command.surface_query) {
+            const query = body.command.surface_query
+            try {
+              const point = await canvas.querySurface(query.terrain_instance_id, query.horizontal, query.cast_height, query.up_axis)
+              await json(endpoint + '/render-command/' + encodeURIComponent(body.command.command_id) + '/complete', { method: 'POST', body: JSON.stringify({ session_id: active.session_id, command_lease_token: body.command.lease.token, terrain_instance_id: query.terrain_instance_id, point }) })
+            } catch (cause) {
+              const message = cause instanceof Error ? cause.message : 'Lux 地形表面查询失败。'
+              await json(endpoint + '/render-command/' + encodeURIComponent(body.command.command_id) + '/complete', { method: 'POST', body: JSON.stringify({ session_id: active.session_id, command_lease_token: body.command.lease.token, error: message }) })
+            }
+          } else {
+            try {
+              const blob = await canvas.capture(body.command.viewpoint); const image = await uploadPng(conversationId, blob)
+              await json(endpoint + '/render-command/' + encodeURIComponent(body.command.command_id) + '/complete', { method: 'POST', body: JSON.stringify({ session_id: active.session_id, command_lease_token: body.command.lease.token, asset_id: image.assetId, observation_id: body.command.observation_id, visible_instance_ids: canvas.visibleInstanceIds() }) })
+            } catch (cause) {
+              const message = cause instanceof Error ? cause.message : '空间舞台截图失败。'
+              await json(endpoint + '/render-command/' + encodeURIComponent(body.command.command_id) + '/complete', { method: 'POST', body: JSON.stringify({ session_id: active.session_id, command_lease_token: body.command.lease.token, error: message }) })
+            }
+          }
           nextPollMs = RENDER_COMMAND_ACTIVE_POLL_MS
         }
       } catch { /* session refresh and command lease recovery are durable */ }
       if (!cancelled) pollTimer = setTimeout(poll, nextPollMs)
     }
-    void json<{ session: RenderSession }>(`${endpoint}/render-session`, { method: 'POST', body: JSON.stringify({ client_id: clientId }) }).then(body => {
-      if (cancelled) return; session = body.session; heartbeat = setInterval(() => void json(`${endpoint}/render-session`, { method: 'PATCH', body: JSON.stringify({ session_id: session?.session_id, lease_token: session?.lease_token }) }).catch(() => undefined), 7000); void poll()
-    }).catch(() => undefined)
-    return () => { cancelled = true; if (pollTimer) clearTimeout(pollTimer); if (heartbeat) clearInterval(heartbeat) }
+    heartbeat = setInterval(() => void keepAlive(), RENDER_SESSION_HEARTBEAT_MS)
+    void register().catch(() => undefined).finally(() => void poll())
+    return () => {
+      cancelled = true
+      if (pollTimer) clearTimeout(pollTimer)
+      if (heartbeat) clearInterval(heartbeat)
+      const closing = session
+      if (closing) void fetch(endpoint + '/render-session', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: closing.session_id, lease_token: closing.lease_token }),
+        keepalive: true,
+      }).catch(() => undefined)
+    }
   }, [conversationId, isManifestPreview, selectedSceneId])
 
   const submitObservation = async () => {
@@ -176,8 +357,11 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
         ref={canvasRef}
         assetUrl={assetUrl}
         format={renderFormat}
+        environmentUrl={environmentUrl}
+        environmentYawDeg={environment?.yaw_deg}
+        environmentExposure={environment?.exposure}
         upAxis={upAxis}
-        instances={displayedSceneData?.revision.instances ?? []}
+        instances={effectiveInstances}
         objectUrl={objectUrl}
         agentViewpoint={displayedSceneData?.scene.agent_viewpoint}
         agentMarkers={agentMarkers}
@@ -186,7 +370,7 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
         qualityReloadToken={qualityReloadToken}
         selectedInstanceId={selectedInstanceId}
         onQualityStateChange={setQualityRenderState}
-        onSelectInstance={setSelectedInstanceId}
+        onSelectInstance={handleCanvasSelect}
         onCameraChange={setCameraPose}
       />
 
@@ -204,9 +388,9 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
         </div>
 
         <div className={styles.headerMeta} aria-label="空间状态">
-          <span>{renderFormat?.toUpperCase() ?? '无环境'}</span>
+          <span>{environment ? '全景环境' : renderFormat?.toUpperCase() ?? '无环境'}</span>
           <span>{displayedSceneData?.revision.instances.length ?? 0} 个物体</span>
-          <span>{assetUrl ? '渲染就绪' : isProjectLoading ? '读取中' : '等待 World'}</span>
+          <span>{environmentUrl || assetUrl ? '渲染就绪' : isProjectLoading ? '读取中' : '等待环境'}</span>
         </div>
 
         <div className={styles.headerActions}>
@@ -236,8 +420,8 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
 
       <div className={styles.selectionToast} data-visible={Boolean(selectedInstance)}>
         <span>已选择</span>
-        <strong>{selectedInstance?.label ?? '点击 GLB 物体进行选择'}</strong>
-        {selectedInstance && <button type="button" onClick={() => setActiveDrawer('inspector')}>查看</button>}
+        <strong>{selectedInstance?.label ?? '点击场景物体进行选择'}</strong>
+        {selectedInstance && <button type="button" onClick={() => setActiveDrawer('inspector')}>编辑位置</button>}
         {selectedInstance && <button type="button" onClick={() => setSelectedInstanceId(null)}>取消</button>}
       </div>
 
@@ -274,7 +458,7 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
           onClick={() => setSelectedInstanceId(instance.instance_id)}
         >
           <span className={styles.assetOrdinal}>{String(index + 1).padStart(2, '0')}</span>
-          <span className={styles.assetLibraryCopy}><strong>{instance.label}</strong><small>{instance.optional_ply_artifact ? 'GLB + PLY' : 'GLB'}</small></span>
+          <span className={styles.assetLibraryCopy}><strong>{instance.label}</strong><small>{instance.role === 'terrain' ? '地形 · ' : ''}{normalizeSpatialProxy(instance) ? '灰盒代理体' : instance.optional_ply_artifact ? 'GLB + PLY' : 'GLB'}</small></span>
           <i aria-hidden="true" />
         </button>)}</div>
         {!displayedSceneData?.revision.instances.length && <p className={styles.emptyCopy}>{isManifestPreview ? '当前正在预览独立 World manifest；Scene 物体未叠加。' : 'Agent 放入 Scene 的 Lux 资产会显示在这里。'}</p>}
@@ -307,13 +491,28 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
 
       {selectedInstance && <section className={styles.objectDetail}>
         <div className={styles.detailTitle}><div><span>当前选择</span><h2>{selectedInstance.label}</h2></div><button type="button" onClick={() => setSelectedInstanceId(null)}>×</button></div>
+        <div className={styles.editState} data-state={editStatus}><span>{editStatus === 'saving' ? '正在自动保存' : editStatus === 'saved' ? '已保存为新版本' : editStatus === 'error' ? '保存失败' : editDirty ? '等待保存' : '直接编辑 Scene'}</span><em>v{displayedSceneData?.revision.version ?? '—'}</em></div>
+        <div className={styles.positionPad}>
+          <div className={styles.padGrid} aria-label="平面移动">
+            <button type="button" aria-label="向前移动" onClick={() => nudgeSelected(1, moveStep)}>↑</button>
+            <button type="button" aria-label="向左移动" onClick={() => nudgeSelected(0, -moveStep)}>←</button>
+            <button type="button" aria-label="向后移动" onClick={() => nudgeSelected(1, -moveStep)}>↓</button>
+            <button type="button" aria-label="向右移动" onClick={() => nudgeSelected(0, moveStep)}>→</button>
+          </div>
+          <div className={styles.heightControls}><button type="button" onClick={() => nudgeSelected(2, moveStep)}>升高</button><button type="button" onClick={() => nudgeSelected(2, -moveStep)}>降低</button><button type="button" onClick={() => void groundSelected()}>贴合地形</button></div>
+          <label className={styles.stepControl}>移动步长<select value={moveStep} onChange={event => setMoveStep(Number(event.target.value))}><option value="0.1">0.1</option><option value="0.5">0.5</option><option value="1">1</option><option value="5">5</option></select></label>
+        </div>
+        {editTransform && <div className={styles.transformEditor}>
+          {(['position', 'rotation_deg', 'scale'] as const).map(field => <fieldset key={field}><legend>{field === 'position' ? '位置' : field === 'rotation_deg' ? '旋转 °' : '缩放'}</legend><div>{(['X', 'Y', 'Z'] as const).map((axisLabel, index) => <label key={axisLabel}><span>{axisLabel}</span><input type="number" step={field === 'rotation_deg' ? 1 : field === 'scale' ? 0.05 : 0.1} min={field === 'scale' ? 0.001 : undefined} value={Number(editTransform[field][index].toFixed(3))} onChange={event => {
+            const value = Number(event.target.value); if (!Number.isFinite(value) || (field === 'scale' && value <= 0)) return
+            updateEditTransform(current => ({ ...current, [field]: current[field].map((item, itemIndex) => itemIndex === index ? value : item) as [number, number, number] }))
+          }} /></label>)}</div></fieldset>)}
+        </div>}
         <dl className={styles.transformGrid}>
-          <div><dt>位置 XYZ</dt><dd>{vectorText(selectedInstance.transform.position)}</dd></div>
-          <div><dt>缩放 XYZ</dt><dd>{vectorText(selectedInstance.transform.scale)}</dd></div>
-          <div><dt>来源 Job</dt><dd title={selectedInstance.source_job_id}>{shortId(selectedInstance.source_job_id)}</dd></div>
+          <div><dt>来源 Job</dt><dd title={selectedInstance.source_job_id ?? undefined}>{shortId(selectedInstance.source_job_id)}</dd></div>
           <div><dt>显示资产</dt><dd>{selectedAssetLabel}</dd></div>
         </dl>
-        <p className={styles.qualityNotice}>{selectedInstance.optional_ply_artifact ? '支持舞台全局高质量 PLY 模式。' : '当前物体只提供 GLB。'}</p>
+        <p className={styles.qualityNotice}>{normalizeSpatialProxy(selectedInstance) ? '这是用于构图、比例与占位验证的低成本代理体。' : selectedInstance.optional_ply_artifact ? '支持舞台全局高质量 PLY 模式。' : '当前物体只提供 GLB。'}</p>
       </section>}
 
       <section className={styles.observationComposer}>

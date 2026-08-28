@@ -40,6 +40,11 @@ export const spatialCreationWorkspace: WorkspaceDefinition = {
         resolver: { type: 'field', field: 'output.spatial.worlds' },
       },
       {
+        path: 'output/spatial/scenes/<scene-id>/scene.json',
+        description: '可由 Agent 使用 Write/Edit 维护并通过 ApplySceneSpec 原子应用的声明式 Scene 源文件',
+        resolver: { type: 'field', field: 'output.spatial.scenes' },
+      },
+      {
         path: 'output/spatial/reviews/<artifact-id>.md',
         description: '基于可观察产物的 verified / inferred / unknown 评审与修订建议',
         resolver: { type: 'field', field: 'output.spatial.reviews' },

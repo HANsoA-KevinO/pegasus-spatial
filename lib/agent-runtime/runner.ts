@@ -79,8 +79,8 @@ state.mongoLastLogAt ??= null
 state.inFlight ??= new Map<string, Promise<void>>()
 
 function configuredWorkerCount(): number {
-  const parsed = Number.parseInt(process.env.AGENT_RUNTIME_WORKERS || '8', 10)
-  return Number.isFinite(parsed) ? Math.max(1, Math.min(32, parsed)) : 8
+  const parsed = Number.parseInt(process.env.AGENT_RUNTIME_WORKERS || '50', 10)
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(50, parsed)) : 50
 }
 
 function noteMongoFailure(error: unknown, operation: string): number {

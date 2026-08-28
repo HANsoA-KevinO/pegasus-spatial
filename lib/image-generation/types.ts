@@ -8,20 +8,26 @@ import type {
 export const IMAGE_GENERATION_SUBMISSION_LEASE_MS = 6 * 60_000
 export const IMAGE_GENERATION_RESERVATION_RECOVERY_MS = 60_000
 
-export const IMAGE_ASPECT_RATIOS = [
-  '1:1',
-  '16:9',
-  '9:16',
-  '4:3',
-  '3:4',
-  '3:2',
-  '2:3',
-  '5:4',
-  '4:5',
-  '21:9',
-] as const
+/**
+ * The NewAPI chat-image transport receives aspect ratio as a composition
+ * instruction, not a finite size enum. Accept any positive numeric
+ * `width:height` pair instead of maintaining a product-level whitelist.
+ */
+export type ImageAspectRatio = string
 
-export type ImageAspectRatio = typeof IMAGE_ASPECT_RATIOS[number]
+export function normalizeImageAspectRatio(value: unknown): ImageAspectRatio | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim()
+  if (normalized.length === 0 || normalized.length > 32) return null
+  const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(normalized)
+  if (!match) return null
+  const width = Number(match[1])
+  const height = Number(match[2])
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null
+  }
+  return normalized
+}
 
 export interface ImageGenerationSource {
   assetId: string

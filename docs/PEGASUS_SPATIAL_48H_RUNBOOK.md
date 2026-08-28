@@ -19,7 +19,7 @@
    若旧 NewAPI 尚无 HTTPS，只能在隔离的非生产联调环境显式设置
    `PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP=1`；该配置会暴露传输风险，生产启动与正式 readiness
    仍会拒绝它，现场演示前必须撤销或补上 HTTPS。
-2. 保持 `SPATIAL_PAID_CALLS_ENABLED=0`，运行：
+2. 运行只读预检（不会提交供应商）：
 
    ```bash
    npm run spatial:preflight:local
@@ -31,9 +31,9 @@
 3. Operator smoke 实现且 `--dry-run` 通过后，在正式 H0 后先填写 `docs/LIVE_SMOKE_LOG.md` 的预算、余额下限和单次人工授权，再分别做一次 NewAPI `GPT-image-2` 文生图、单图修订、Aholo World 和 Lux3D G1 最小真实请求。逐项记录请求时间、任务 ID、最终状态、脱敏响应字段、产物 MIME、文件 magic、字节数和 SHA-256；未经该流程不得提交。
 4. 从真实成功响应中提取 Aholo/Lux3D 产物 hostname，写入精确的 `*_ASSET_HOST_ALLOWLIST`。禁止使用通配符、任意 URL 或重定向扩展白名单。
 5. 图像路由必须保持唯一：`LLM_BASE_URL` 上的 `/chat/completions`、`LLM_API_KEY_TOOLS` 和区分大小写的精确别名 `GPT-image-2`。不测试或配置 `/images/generations`、`/images/edits`、provider selector 或自动 fallback；任一真实图像用例失败时先修复这条固定路由。
-6. 再次运行 readiness。只有全部门禁通过，才可显式设置 `SPATIAL_PAID_CALLS_ENABLED=1`。
+6. 再次运行 readiness。全部具体配置通过后，正常 Agent 可直接建立持久供应商任务，无需额外总开关。
 
-Operator smoke 的普通聊天全局开关始终保持 `0`。每次先运行 `--prepare --project-id <conversation-id> --phase H0 --purpose <fixed>`，记录返回的 `smoke_id`；只有逐字提供 `--confirm AUTHORIZE_ONE_PAID_SUBMISSION` 的 `--submit` 可以发起一次供应商请求。`--status` 与 `--resume` 永不从 prepared 状态提交。未核销的 `unknown` 会按项目和供应商跨 phase 阻止新提交；只有核对供应商账单后，才能用带操作员、理由和精确确认文本的 `--reconcile-unknown` 写入不可覆盖的核销记录，原任务仍保持 `unknown`。完整命令见 `docs/PRE_START_CHECKLIST.md`。
+Operator smoke 仍使用逐 intent 的单次授权。每次先运行 `--prepare --project-id <conversation-id> --phase H0 --purpose <fixed>`，记录返回的 `smoke_id`；只有逐字提供 `--confirm AUTHORIZE_ONE_PAID_SUBMISSION` 的 `--submit` 可以发起一次供应商请求。`--status` 与 `--resume` 永不从 prepared 状态提交。未核销的 `unknown` 会按项目和供应商跨 phase 阻止新提交；只有核对供应商账单后，才能用带操作员、理由和精确确认文本的 `--reconcile-unknown` 写入不可覆盖的核销记录，原任务仍保持 `unknown`。完整命令见 `docs/PRE_START_CHECKLIST.md`。
 
 ## 2. 发布前自动验收
 

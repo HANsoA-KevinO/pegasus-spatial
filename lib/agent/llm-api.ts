@@ -21,6 +21,45 @@ export interface StreamResult {
   usage: TokenUsage
 }
 
+/** Structured transport error. Callers must inspect `status`, never search an
+ * opaque provider message or request id for status-code digits. */
+export class LLMAPIError extends Error {
+  constructor(
+    readonly status: number,
+    readonly responseBody: string,
+    readonly model: string,
+  ) {
+    super(`LLM API error ${status} (model=${model}): ${responseBody}`)
+    this.name = 'LLMAPIError'
+  }
+}
+
+export function isPromptTooLongLLMError(error: unknown): boolean {
+  if (error instanceof LLMAPIError) {
+    if (error.status === 413) return true
+    if (![400, 422].includes(error.status)) return false
+    return /(?:prompt|context|input|request)[^\n]{0,120}(?:too long|too large|exceeds?|maximum|max(?:imum)? tokens?|context length)/i
+      .test(error.responseBody)
+  }
+
+  // Compatibility for custom providers and tests that do not construct the
+  // transport error. Word boundaries prevent a request id containing "413"
+  // (the incident that motivated this guard) from becoming a false positive.
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return /(?:^|\b(?:http|status|error)\s*)413\b/i.test(message)
+    || /(?:prompt|context|input|request)[^\n]{0,120}(?:too long|too large|exceeds?|maximum|max(?:imum)? tokens?|context length)/i.test(message)
+}
+
+export function isRetryableLLMTransportFailure(status: number, responseBody: string): boolean {
+  if (status >= 500 && status < 600) return true
+  // NewAPI uses 422 for a channel/upstream availability failure after its own
+  // internal attempts. HTTP 400 is deliberately excluded: the same opaque
+  // "Provider returned error" envelope is also used for deterministic payload
+  // incompatibilities, so replaying it only burns latency and obscures the
+  // request regression.
+  return status === 422 && /Upstream request error|Provider returned error/i.test(responseBody)
+}
+
 export async function callAnthropicAPIStream(
   request: AnthropicRequest,
   baseUrl?: string,
@@ -41,11 +80,9 @@ export async function callAnthropicAPIStream(
   const bodyJson = JSON.stringify(streamRequest)
   console.log(`[llm-api] Sending request: model=${request.model}, messages=${request.messages.length}, bodySize=${(bodyJson.length / 1024).toFixed(0)}KB`)
 
-  // Retry upstream-availability failures that NewAPI itself already retried several
-  // times (<10s window) but the upstream was still down. These surface as HTTP 422
-  // with `"type":"<nil>"` + "Upstream request error" or as 5xx. We add 2 more attempts
-  // with exponential backoff to cover ~10-30s of upstream flap. Payload errors (400,
-  // 401, 403, content-policy 4xx etc.) are NOT retried — those are real problems.
+  // Retry only status codes that unambiguously represent transport/upstream
+  // availability. NewAPI's opaque HTTP 400 "Provider returned error" can also
+  // mean an invalid or unsupported request shape and must not be replayed.
   const MAX_ATTEMPTS = 3
   const BACKOFF_MS = [2000, 5000]
   let res: Response | null = null
@@ -82,9 +119,7 @@ export async function callAnthropicAPIStream(
     if (res.ok) break
 
     lastErrText = await res.text().catch(() => '')
-    const isUpstreamTransient =
-      (res.status === 422 && lastErrText.includes('Upstream request error')) ||
-      (res.status >= 500 && res.status < 600)
+    const isUpstreamTransient = isRetryableLLMTransportFailure(res.status, lastErrText)
 
     if (isUpstreamTransient && attempt < MAX_ATTEMPTS) {
       console.warn(`[llm-api] Upstream transient ${res.status} on attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${BACKOFF_MS[attempt - 1]}ms...`)
@@ -97,7 +132,7 @@ export async function callAnthropicAPIStream(
 
   if (!res || !res.ok) {
     const status = res?.status ?? 0
-    throw new Error(`LLM API error ${status} (model=${request.model}): ${lastErrText}`)
+    throw new LLMAPIError(status, lastErrText, request.model)
   }
 
   // Parse SSE stream

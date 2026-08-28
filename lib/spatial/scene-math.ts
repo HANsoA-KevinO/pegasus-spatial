@@ -27,6 +27,20 @@ export function eulerDegreesToQuaternion(rotation: unknown): Quaternion {
   return quaternion.map(value => value / magnitude) as Quaternion
 }
 
+export function quaternionToEulerDegrees(value: unknown): Vec3 {
+  if (!Array.isArray(value) || value.length !== 4) throw new TypeError('rotation_quaternion 必须是四个数字。')
+  const [rawX, rawY, rawZ, rawW] = value.map((item, index) => finite(`rotation_quaternion[${index}]`, item))
+  const magnitude = Math.hypot(rawX, rawY, rawZ, rawW)
+  if (!Number.isFinite(magnitude) || magnitude < 1e-12) throw new TypeError('rotation_quaternion 不是有效旋转。')
+  const x = rawX / magnitude; const y = rawY / magnitude; const z = rawZ / magnitude; const w = rawW / magnitude
+  const roll = Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
+  const pitchInput = 2 * (w * y - z * x)
+  const pitch = Math.abs(pitchInput) >= 1 ? Math.sign(pitchInput) * Math.PI / 2 : Math.asin(pitchInput)
+  const yaw = Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+  const degrees = 180 / Math.PI
+  return [roll * degrees, pitch * degrees, yaw * degrees]
+}
+
 export function normalizeScale(value: unknown): Vec3 {
   const scale = normalizeVec3('scale', value)
   if (scale.some(component => component <= 0)) throw new TypeError('scale 的三个分量都必须大于 0。')

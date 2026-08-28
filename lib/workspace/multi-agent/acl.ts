@@ -71,7 +71,9 @@ export function assertWorkspaceWriteAllowed(input: {
   }
 
   if (visibility === 'public') {
-    if (actor.role !== 'root') {
+    const delegatedImageOutput = actor.publicWriteTool === 'GenerateImage'
+      && /^output\/spatial\/images\/[A-Za-z0-9][A-Za-z0-9._/-]*\.(?:png|jpe?g|webp)$/i.test(path)
+    if (actor.role !== 'root' && !delegatedImageOutput) {
       throw new WorkspaceAclError('Only the root Agent may write public workspace paths')
     }
     if (path.startsWith('.sci-pegasus/agents/')) {

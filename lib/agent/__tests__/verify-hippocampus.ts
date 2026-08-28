@@ -8,6 +8,40 @@ import type { ConversationMessage } from '../../types'
 import type { AgentProvider } from '../loop'
 import { agentLoop } from '../loop'
 import type { WorkspaceInstance } from '../../workspace/types'
+import {
+  isPromptTooLongLLMError,
+  isRetryableLLMTransportFailure,
+  LLMAPIError,
+} from '../llm-api'
+
+function verifyPromptTooLongClassification(): void {
+  assert.equal(isPromptTooLongLLMError(new LLMAPIError(413, 'payload too large', 'model')), true)
+  assert.equal(isPromptTooLongLLMError(new LLMAPIError(400, 'prompt exceeds maximum context length', 'model')), true)
+  assert.equal(isPromptTooLongLLMError(new Error('413 prompt too long')), true)
+
+  const incident = new LLMAPIError(
+    400,
+    '{"error":{"message":"Provider returned error (request id: 202608280441397227011608268d9d65ajvd21Q)"}}',
+    'Claude-opus-4.6',
+  )
+  assert.equal(
+    isPromptTooLongLLMError(incident),
+    false,
+    'digits inside an opaque request id must never be interpreted as HTTP 413',
+  )
+}
+
+function verifyTransportRetryClassification(): void {
+  assert.equal(isRetryableLLMTransportFailure(500, ''), true)
+  assert.equal(isRetryableLLMTransportFailure(503, 'unavailable'), true)
+  assert.equal(isRetryableLLMTransportFailure(422, 'Upstream request error'), true)
+  assert.equal(isRetryableLLMTransportFailure(422, 'Provider returned error'), true)
+  assert.equal(
+    isRetryableLLMTransportFailure(400, 'Provider returned error'),
+    false,
+    'opaque HTTP 400 may be a deterministic payload failure and must not be replayed',
+  )
+}
 
 function verifySecondRequestColdCompactionProfile(): void {
   const firstLoop = new HippocampusTelemetry()
@@ -728,11 +762,18 @@ async function verifyReactive413ReleasesGuardBeforeDurablePause(): Promise<void>
     stat: async () => null,
   } as unknown as WorkspaceInstance
 
-  await assert.rejects(agentLoop(provider, [{
-    role: 'user',
-    content: [{ type: 'text', text: 'x'.repeat(18_000) }],
-    message_id: 'reactive-guard-boundary',
-  }], {
+  await assert.rejects(agentLoop(provider, [
+    {
+      role: 'user',
+      content: [{ type: 'text', text: 'x'.repeat(18_000) }],
+      message_id: 'reactive-guard-history',
+    },
+    {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'historical response' }],
+      message_id: 'reactive-guard-boundary',
+    },
+  ], {
     runId: 'run-reactive-guard',
     workspace,
     contextWindow: 10_000,
@@ -761,6 +802,42 @@ async function verifyReactive413ReleasesGuardBeforeDurablePause(): Promise<void>
 
   assert.equal(providerCalls, 1)
   assert.equal(releaseCalls, 1)
+}
+
+async function verifyFirstTurn413PreservesTheOnlyUserRequest(): Promise<void> {
+  const providerError = new LLMAPIError(413, 'prompt too large', 'test-model')
+  let silentCalls = 0
+  const provider: AgentProvider = {
+    toolSchemas: [],
+    buildRequest: () => ({}),
+    buildCompactionRequest: () => ({}),
+    async callLLM() {
+      throw providerError
+    },
+    async callLLMSilent() {
+      silentCalls += 1
+      throw new Error('the only user request must not be summarized')
+    },
+    async executeTool() {
+      return { content: '' }
+    },
+  }
+  const workspace = {
+    list: () => [],
+    stat: async () => null,
+  } as unknown as WorkspaceInstance
+
+  await assert.rejects(agentLoop(provider, [{
+    role: 'user',
+    content: [{ type: 'text', text: 'preserve this exact request' }],
+  }], {
+    workspace,
+    contextWindow: 10_000,
+    mainMaxOutputTokens: 1_000,
+    summaryMaxTokens: 500,
+  }), error => error === providerError)
+
+  assert.equal(silentCalls, 0)
 }
 
 async function verifyWorkerWinsGuardAcquireWithoutMainProviderCall(): Promise<void> {
@@ -1405,6 +1482,8 @@ async function verifyAskUserRepairReloadsAfterGuardTakeover(
 }
 
 async function main(): Promise<void> {
+  verifyPromptTooLongClassification()
+  verifyTransportRetryClassification()
   verifySecondRequestColdCompactionProfile()
   verifyStableConversationGrowthTelemetry()
   verifyApiAnchorPlusLocalDeltaAcrossRequests()
@@ -1420,6 +1499,7 @@ async function main(): Promise<void> {
   await verifyFlushFailureReleasesGuardAndPreservesPrimaryError()
   await verifyLostGuardDropsProviderResponseBeforePersistence()
   await verifyReactive413ReleasesGuardBeforeDurablePause()
+  await verifyFirstTurn413PreservesTheOnlyUserRequest()
   await verifyWorkerWinsGuardAcquireWithoutMainProviderCall()
   await verifyPrepareConflictFailsClosedBeforeLocalProvider()
   await verifyOfferWinsGateBeforeMainProvider()

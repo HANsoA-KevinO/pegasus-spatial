@@ -11,6 +11,32 @@ interface ConversationSummary {
   _waiting_for_user?: boolean
 }
 
+export interface ConversationActionResult {
+  ok: boolean
+  error?: string
+}
+
+async function responseError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = await response.json() as { error?: unknown }
+    if (typeof body.error === 'string' && body.error.trim()) return body.error
+  } catch {
+    // The status-specific fallback is clearer than a JSON parsing failure.
+  }
+  return fallback
+}
+
+async function waitForDeletionAfterStop(id: string): Promise<Response> {
+  const deadline = Date.now() + 8_000
+  let response: Response
+  do {
+    await new Promise(resolve => setTimeout(resolve, 200))
+    response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (response.status !== 409) return response
+  } while (Date.now() < deadline)
+  return response
+}
+
 export function useConversations() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -41,15 +67,48 @@ export function useConversations() {
     return () => clearInterval(interval)
   }, [refresh])
 
-  const deleteConversation = useCallback(async (id: string) => {
+  const deleteConversation = useCallback(async (id: string): Promise<ConversationActionResult> => {
     try {
-      const res = await fetch(`/api/conversations/${id}`, { method: 'DELETE' })
+      let res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+      // A recoverable, waiting, or currently executing Run owns an active_key
+      // and deliberately blocks repository deletion. The user-facing Delete
+      // action means stop that work first, then remove the conversation.
+      if (res.status === 409) {
+        let runId: string | undefined
+        try {
+          const conflict = await res.json() as { run_id?: unknown }
+          if (typeof conflict.run_id === 'string') runId = conflict.run_id
+        } catch {
+          // The stop endpoint can resolve the current Run from conversation_id.
+        }
+        const stopRes = await fetch('/api/chat/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversation_id: id, ...(runId ? { run_id: runId } : {}) }),
+        })
+        if (!stopRes.ok) {
+          return {
+            ok: false,
+            error: await responseError(stopRes, '无法停止当前任务，因此没有删除该对话。'),
+          }
+        }
+        res = await waitForDeletionAfterStop(id)
+      }
+
       if (res.ok) {
         setConversations(prev => prev.filter(c => c.conversation_id !== id))
+        return { ok: true }
       }
-      return res.ok
-    } catch {
-      return false
+      return {
+        ok: false,
+        error: await responseError(res, `删除失败（HTTP ${res.status}）。`),
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : '删除请求失败。',
+      }
     }
   }, [])
 

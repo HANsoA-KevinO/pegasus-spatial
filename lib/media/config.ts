@@ -15,6 +15,19 @@ export interface OSSMediaConfig {
   stsToken?: string
   endpoint?: string
   cdnBaseUrl: string
+  requestTimeoutMs: number
+  uploadAttempts: number
+}
+
+function boundedPositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(minimum, Math.min(maximum, Math.trunc(parsed)))
 }
 
 export function getOSSMediaConfig(): OSSMediaConfig {
@@ -50,5 +63,12 @@ export function getOSSMediaConfig(): OSSMediaConfig {
     stsToken: process.env.OSS_STS_TOKEN?.trim() || undefined,
     endpoint: process.env.OSS_ENDPOINT?.trim() || undefined,
     cdnBaseUrl: cdn.origin,
+    requestTimeoutMs: boundedPositiveInteger(
+      process.env.OSS_REQUEST_TIMEOUT_MS,
+      120_000,
+      30_000,
+      10 * 60_000,
+    ),
+    uploadAttempts: boundedPositiveInteger(process.env.OSS_UPLOAD_ATTEMPTS, 3, 1, 5),
   }
 }

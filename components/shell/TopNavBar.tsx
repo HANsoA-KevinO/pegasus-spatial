@@ -36,6 +36,8 @@ export function TopNavBar() {
               <Link
                 key={link.href}
                 href={link.href}
+                target={link.href.startsWith('/spatial/') ? '_blank' : undefined}
+                rel={link.href.startsWith('/spatial/') ? 'noreferrer' : undefined}
                 className={`text-sm transition-colors ${active ? 'font-semibold text-primary' : 'text-ink-muted hover:text-ink'}`}
               >
                 {link.label}

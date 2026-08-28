@@ -46,6 +46,12 @@ export interface WorkspaceActor {
   privatePathReferences?: readonly string[]
   /** Set only by the trusted literature tool adapter, never from model input. */
   managedReferenceTool?: boolean
+  /**
+   * Narrow public-output capability held only by the trusted GenerateImage
+   * adapter after Root explicitly delegates that tool. It is never derived
+   * from a model-supplied path or a wildcard grant.
+   */
+  publicWriteTool?: 'GenerateImage'
 }
 
 export interface WorkspaceFileSnapshot {

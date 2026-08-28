@@ -1,7 +1,29 @@
 import assert from 'node:assert/strict'
 import { ImageGenerationProviderError } from '../errors'
-import { NewApiChatImageAdapter } from '../providers/newapi-chat-image'
+import {
+  NewApiChatImageAdapter,
+  transportErrorMayHaveBeenAccepted,
+} from '../providers/newapi-chat-image'
 import { fetchImageGenerationJSON } from '../transport'
+import { normalizeImageAspectRatio } from '../types'
+
+assert.equal(normalizeImageAspectRatio('2:1'), '2:1')
+assert.equal(normalizeImageAspectRatio(' 2.39:1 '), '2.39:1')
+assert.equal(normalizeImageAspectRatio('0:1'), null)
+assert.equal(normalizeImageAspectRatio('16x9'), null)
+
+assert.equal(
+  transportErrorMayHaveBeenAccepted(new Error('fetch failed', {
+    cause: Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' }),
+  })),
+  false,
+)
+assert.equal(
+  transportErrorMayHaveBeenAccepted(new Error('fetch failed', {
+    cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+  })),
+  true,
+)
 
 function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
   return (async (_url, init) => {
@@ -69,7 +91,6 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase: 'https://api.test/v1',
-    allowPaidCalls: true,
     fetchImpl: (async (url, init) => {
       capturedUrl = String(url)
       capturedInit = init
@@ -90,7 +111,7 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
       })
     }) as typeof fetch,
   })
-  const output = await adapter.generate({ prompt: 'a quiet room', aspectRatio: '16:9' })
+  const output = await adapter.generate({ prompt: 'a quiet panoramic environment', aspectRatio: '2:1' })
   assert.equal(capturedUrl, 'https://api.test/v1/chat/completions')
   assert.equal(capturedInit?.method, 'POST')
   assert.equal(capturedInit?.redirect, 'error')
@@ -98,8 +119,10 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
   assert.equal(body.model, 'GPT-image-2')
   assert.deepEqual(body.modalities, ['text', 'image'])
   assert.equal(body.messages[0].role, 'user')
-  assert.match(body.messages[0].content, /16:9/)
+  assert.match(body.messages[0].content, /2:1/)
   assert.equal(new Headers(capturedInit?.headers).get('content-type'), 'application/json')
+  assert.equal(new Headers(capturedInit?.headers).get('http-referer'), 'https://pegasus.local')
+  assert.equal(new Headers(capturedInit?.headers).get('x-title'), 'Pegasus Spatial')
   assert.equal(output.buffer.toString(), 'generated-image')
   assert.equal(output.mimeType, 'image/png')
   assert.equal(output.providerRequestId, 'req_test')
@@ -112,7 +135,6 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase: 'https://api.test/v1',
-    allowPaidCalls: true,
     fetchImpl: (async (url, init) => {
       capturedUrl = String(url)
       capturedInit = init
@@ -182,27 +204,6 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
   assert.doesNotMatch(first.configurationFingerprint, /secret|api\.test/i)
 }
 
-// The paid-call gate is enforced inside the adapter before any provider I/O.
-{
-  let fetchCalls = 0
-  const adapter = new NewApiChatImageAdapter({
-    apiKey: 'test-key',
-    apiBase: 'https://api.test/v1',
-    allowPaidCalls: false,
-    fetchImpl: (async () => {
-      fetchCalls += 1
-      throw new Error('must not fetch')
-    }) as typeof fetch,
-  })
-  await assert.rejects(adapter.generate({ prompt: 'must stay local' }), error => {
-    assert.ok(error instanceof ImageGenerationProviderError)
-    assert.equal(error.code, 'provider_paid_calls_disabled')
-    assert.equal(error.requestMayHaveBeenAccepted, false)
-    return true
-  })
-  assert.equal(fetchCalls, 0)
-}
-
 // Invalid gateway bases fail locally and never expose data through redirects or URL fields.
 for (const apiBase of [
   'ftp://api.test/v1',
@@ -214,7 +215,6 @@ for (const apiBase of [
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase,
-    allowPaidCalls: true,
     fetchImpl: (async () => {
       fetchCalls += 1
       throw new Error('must not fetch')
@@ -235,7 +235,6 @@ for (const apiBase of [
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase: 'https://api.test/v1',
-    allowPaidCalls: true,
     maxSourceImageBytes: 3,
     fetchImpl: (async () => {
       fetchCalls += 1
@@ -259,6 +258,40 @@ for (const apiBase of [
 }
 
 // Every unusable HTTP 2xx payload is ambiguous because the generation may have been billed.
+
+// NewAPI's GPT-image-2 success payload uses `content: null` while placing the
+// generated image in `message.images[]`. This is the exact production shape;
+// null content must not reject an otherwise valid image response.
+{
+  const expected = Buffer.from('newapi-image')
+  const adapter = new NewApiChatImageAdapter({
+    apiKey: 'test-key',
+    apiBase: 'https://api.test/v1',
+    fetchImpl: (async () => new Response(JSON.stringify({
+      id: 'gen-production-shape',
+      choices: [{
+        message: {
+          role: 'assistant',
+          content: null,
+          images: [{
+            type: 'image_url',
+            image_url: {
+              url: `data:image/png;base64,${expected.toString('base64')}`,
+            },
+          }],
+        },
+      }],
+    }), {
+      status: 200,
+      headers: { 'x-request-id': 'req-production-shape' },
+    })) as typeof fetch,
+  })
+  const result = await adapter.generate({ prompt: 'production response shape' })
+  assert.deepEqual(result.buffer, expected)
+  assert.equal(result.mimeType, 'image/png')
+  assert.equal(result.providerRequestId, 'req-production-shape')
+}
+
 for (const testCase of [
   {
     name: 'no message',
@@ -290,7 +323,6 @@ for (const testCase of [
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase: 'https://api.test/v1',
-    allowPaidCalls: true,
     fetchImpl: (async () => new Response(JSON.stringify(testCase.payload), {
       status: 200,
     })) as typeof fetch,
@@ -308,7 +340,6 @@ for (const testCase of [
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase: 'https://api.test/v1',
-    allowPaidCalls: true,
     maxProviderImageBytes: 3,
     fetchImpl: (async () => new Response(JSON.stringify({
       choices: [{
@@ -335,7 +366,6 @@ for (const testCase of [
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase: 'https://api.test/v1',
-    allowPaidCalls: true,
     fetchImpl: (async () => new Response(
       JSON.stringify({ error: { message: 'bad prompt' } }),
       { status: 400 },
@@ -359,7 +389,6 @@ for (const testCase of [
     const adapter = new NewApiChatImageAdapter({
       apiKey: secret,
       apiBase: 'https://api.test/v1',
-      allowPaidCalls: true,
       fetchImpl: (async () => new Response(
         JSON.stringify({ error: { message: `gateway echoed ${secret}`, api_key: secret } }),
         { status: 400 },
@@ -382,7 +411,6 @@ for (const status of [408, 409, 425, 499, 502]) {
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase: 'https://api.test/v1',
-    allowPaidCalls: true,
     fetchImpl: (async () => new Response(
       JSON.stringify({ error: { message: 'gateway lost upstream response' } }),
       { status },

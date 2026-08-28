@@ -8,6 +8,8 @@ import {
   validateMediaObjectPrefixConfiguration,
 } from '../object-prefix'
 import { buildMediaPublicUrl } from '../public-url'
+import { getOSSMediaConfig } from '../config'
+import { isRetryableOSSWriteError } from '../storage'
 
 const assetId = 'A'.repeat(43)
 
@@ -18,7 +20,15 @@ process.env.OSS_ACCESS_KEY_ID = 'test-access-id'
 process.env.OSS_ACCESS_KEY_SECRET = 'test-access-secret'
 process.env.OSS_CDN_BASE_URL = 'https://media.example.test'
 process.env.NEXT_PUBLIC_MEDIA_CDN_BASE_URL = 'https://media.example.test'
+delete process.env.OSS_REQUEST_TIMEOUT_MS
+delete process.env.OSS_UPLOAD_ATTEMPTS
 delete process.env.PEGASUS_SPATIAL_MEDIA_PREFIX
+
+assert.equal(getOSSMediaConfig().requestTimeoutMs, 120_000)
+assert.equal(getOSSMediaConfig().uploadAttempts, 3)
+assert.equal(isRetryableOSSWriteError(new Error('Response timeout for 30000ms')), true)
+assert.equal(isRetryableOSSWriteError({ status: 503, message: 'service unavailable' }), true)
+assert.equal(isRetryableOSSWriteError({ status: 403, message: 'forbidden' }), false)
 
 delete process.env.NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX
 assert.equal(getMediaObjectPrefix(), DEFAULT_MEDIA_OBJECT_PREFIX)

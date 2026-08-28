@@ -110,6 +110,64 @@ async function main(): Promise<void> {
   const secondClaim = await spatial.claimSpatialRenderCommand({ scope: base, sceneId, sessionId: session.session_id, leaseToken: session.lease_token })
   assert.equal(secondClaim, null, 'completed command must never be rendered twice')
 
+  const terrainSceneCreated = await spatial.createSpatialScene({
+    identity: identity('create_terrain_scene'), title: '全景与 Lux 地形 Scene', commandHash: 'create-terrain-scene',
+  })
+  assert.equal(terrainSceneCreated.status, 'applied')
+  if (terrainSceneCreated.status !== 'applied') throw new Error('terrain scene fixture failed')
+  assert.equal(terrainSceneCreated.revision.environment ?? null, null)
+  const terrainSceneId = terrainSceneCreated.scene.scene_id
+  const terrainMutation = await spatial.mutateSpatialScene({
+    identity: identity('set_environment_and_terrain'), sceneId: terrainSceneId,
+    commandHash: 'set-environment-and-terrain', summary: '设置全景并加入地形',
+    mutate: snapshot => ({
+      ...snapshot,
+      environment: {
+        kind: 'equirectangular_panorama', workspace_path: 'output/spatial/images/sky.exr',
+        asset_id: 'asset_sky', mime_type: 'image/png', width: 2048, height: 1024,
+        size_bytes: 2048, sha256: 'a'.repeat(64), yaw_deg: 12, exposure: 1.1,
+      },
+      instances: [{
+        instance_id: 'terrain_ground', label: '山谷地形', role: 'terrain', source_job_id: 'job_terrain',
+        glb_artifact: {
+          artifact_id: 'artifact_ground', job_id: 'job_terrain', kind: 'glb',
+          workspace_path: 'output/spatial/objects/ground/model.glb', mime_type: 'model/gltf-binary',
+          size_bytes: 1024, sha256: 'b'.repeat(64), metadata: {},
+        },
+        normalization: { source_up_axis: 'Y', scene_up_axis: 'Z', pivot: 'bottom_center' },
+        transform: { position: [0, 0, 0], rotation_quaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+      }],
+    }),
+  })
+  assert.equal(terrainMutation.status, 'applied')
+  if (terrainMutation.status !== 'applied') throw new Error('terrain mutation failed')
+  assert.equal(terrainMutation.revision.environment?.asset_id, 'asset_sky')
+  assert.equal(terrainMutation.revision.instances[0].role, 'terrain')
+
+  const terrainSession = await spatial.registerSpatialRenderSession({ scope: base, sceneId: terrainSceneId, clientId: 'browser_terrain', ttlMs: 20_000 })
+  const surfaceCommand = await spatial.enqueueSpatialSurfaceQueryCommand({
+    identity: identity('surface_query'), sceneId: terrainSceneId,
+    terrainInstanceId: 'terrain_ground', horizontal: [3, -2], castHeight: 500,
+  })
+  assert.equal(surfaceCommand?.kind, 'surface_query')
+  assert.deepEqual(surfaceCommand?.surface_query, {
+    terrain_instance_id: 'terrain_ground', horizontal: [3, -2], cast_height: 500, up_axis: 'Z',
+  })
+  const claimedSurface = await spatial.claimSpatialRenderCommand({
+    scope: base, sceneId: terrainSceneId, sessionId: terrainSession.session_id, leaseToken: terrainSession.lease_token,
+  })
+  assert.equal(claimedSurface?.command_id, surfaceCommand?.command_id)
+  const completedSurface = await spatial.completeSpatialSurfaceQueryCommand({
+    commandId: claimedSurface!.command_id, sessionId: terrainSession.session_id,
+    leaseToken: claimedSurface!.lease!.token, terrainInstanceId: 'terrain_ground', point: [3, -2, 1.75],
+  })
+  assert.equal(completedSurface?.status, 'completed')
+  assert.deepEqual(completedSurface?.surface_result?.point, [3, -2, 1.75])
+  const repeatedSurfaceClaim = await spatial.claimSpatialRenderCommand({
+    scope: base, sceneId: terrainSceneId, sessionId: terrainSession.session_id, leaseToken: terrainSession.lease_token,
+  })
+  assert.equal(repeatedSurfaceClaim, null, 'completed surface query must never be executed twice')
+
   console.log('spatial scene Mongo verification passed')
   await database.dropDatabase()
   await mongoose.disconnect()

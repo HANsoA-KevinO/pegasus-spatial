@@ -63,6 +63,27 @@ function httpResultMayHaveBeenAccepted(status: number): boolean {
   return status >= 500 || status === 408 || status === 409 || status === 425 || status === 499
 }
 
+export function transportErrorMayHaveBeenAccepted(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined
+  const code = String(
+    (cause as { code?: unknown } | null)?.code
+      || (error as { code?: unknown } | null)?.code
+      || '',
+  ).toUpperCase()
+  // These failures happen before a TCP/TLS connection can deliver the POST.
+  // Everything else remains ambiguous: a socket can close after the provider
+  // accepted and charged the request but before its synchronous image arrives.
+  return !new Set([
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'ECONNREFUSED',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'CERT_HAS_EXPIRED',
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  ]).has(code)
+}
+
 function sourceAsDataUrl(
   input: NonNullable<ImageGenerationRequest['source']>,
   maxBytes: number,
@@ -192,6 +213,7 @@ function parseOutput(
     (message.images !== undefined && !Array.isArray(message.images))
     || (
       message.content !== undefined
+      && message.content !== null
       && typeof message.content !== 'string'
       && !Array.isArray(message.content)
     )
@@ -232,8 +254,6 @@ export interface NewApiChatImageAdapterOptions {
   model?: string
   fetchImpl?: typeof fetch
   timeoutMs?: number
-  /** Explicit test override; production is gated by SPATIAL_PAID_CALLS_ENABLED. */
-  allowPaidCalls?: boolean
   /** Tests only; production defaults are fixed in this adapter. */
   maxSourceImageBytes?: number
   /** Tests only; production defaults are fixed in this adapter. */
@@ -254,7 +274,6 @@ export class NewApiChatImageAdapter implements ImageGenerationProvider {
   private readonly apiBase: string
   private readonly fetchImpl?: typeof fetch
   private readonly timeoutMs?: number
-  private readonly allowPaidCalls: boolean
   private readonly maxSourceImageBytes: number
   private readonly maxProviderImageBytes: number
   private readonly configurationError?: string
@@ -276,22 +295,11 @@ export class NewApiChatImageAdapter implements ImageGenerationProvider {
     this.configurationFingerprint = configurationFingerprint(this.apiBase, this.model)
     this.fetchImpl = options.fetchImpl
     this.timeoutMs = options.timeoutMs
-    this.allowPaidCalls = options.allowPaidCalls
-      ?? process.env.SPATIAL_PAID_CALLS_ENABLED === '1'
     this.maxSourceImageBytes = options.maxSourceImageBytes ?? DEFAULT_MAX_SOURCE_IMAGE_BYTES
     this.maxProviderImageBytes = options.maxProviderImageBytes ?? DEFAULT_MAX_PROVIDER_IMAGE_BYTES
   }
 
   async generate(input: ImageGenerationRequest): Promise<ImageGenerationOutput> {
-    if (!this.allowPaidCalls) {
-      throw new ImageGenerationProviderError(
-        '付费空间调用尚未启用；请先完成供应商预检。',
-        {
-          code: 'provider_paid_calls_disabled',
-          requestMayHaveBeenAccepted: false,
-        },
-      )
-    }
     if (this.configurationError) {
       throw new ImageGenerationProviderError(this.configurationError, {
         code: 'provider_invalid_configuration',
@@ -333,6 +341,8 @@ export class NewApiChatImageAdapter implements ImageGenerationProvider {
           headers: {
             Authorization: `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://pegasus.local',
+            'X-Title': 'Pegasus Spatial',
           },
           body: JSON.stringify(requestBody),
           redirect: 'error',
@@ -349,7 +359,7 @@ export class NewApiChatImageAdapter implements ImageGenerationProvider {
           : error instanceof Error && error.name === 'AbortError'
             ? 'provider_cancelled'
             : 'provider_transport_error',
-        requestMayHaveBeenAccepted: true,
+        requestMayHaveBeenAccepted: transportErrorMayHaveBeenAccepted(error),
         cause: error,
       })
     }

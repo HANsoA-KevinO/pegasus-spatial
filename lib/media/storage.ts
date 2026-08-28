@@ -108,9 +108,80 @@ function getOSSClient(): OSS {
     stsToken: config.stsToken,
     endpoint: config.endpoint,
     secure: true,
-    timeout: 30_000,
+    timeout: config.requestTimeoutMs,
   })
   return ossClient
+}
+
+function ossErrorStatus(error: unknown): number | undefined {
+  const status = (error as { status?: unknown; statusCode?: unknown } | null)?.status
+    ?? (error as { statusCode?: unknown } | null)?.statusCode
+  return typeof status === 'number' ? status : undefined
+}
+
+export function isRetryableOSSWriteError(error: unknown): boolean {
+  const status = ossErrorStatus(error)
+  if (status !== undefined && (status === 408 || status === 429 || status >= 500)) return true
+  const code = String((error as { code?: unknown } | null)?.code || '').toLowerCase()
+  const name = String((error as { name?: unknown } | null)?.name || '').toLowerCase()
+  const message = String((error as { message?: unknown } | null)?.message || error || '').toLowerCase()
+  return [code, name, message].some(value => (
+    value.includes('timeout')
+    || value.includes('econnreset')
+    || value.includes('socket')
+    || value.includes('connection')
+    || value.includes('network')
+  ))
+}
+
+async function ossObjectMatches(
+  objectKey: string,
+  expectedSha256: string,
+  expectedBytes: number,
+): Promise<boolean> {
+  try {
+    const head = await getOSSClient().head(objectKey) as {
+      res?: { headers?: Record<string, string | number | undefined> }
+    }
+    const headers = head.res?.headers || {}
+    const storedSha = String(headers['x-oss-meta-sha256'] || '')
+    const storedBytes = Number(headers['content-length'])
+    return storedSha === expectedSha256 && storedBytes === expectedBytes
+  } catch {
+    return false
+  }
+}
+
+async function writeOSSObjectWithRetry(input: {
+  objectKey: string
+  buffer: Buffer
+  mimeType: string
+}): Promise<void> {
+  const config = getOSSMediaConfig()
+  const sha256 = createHash('sha256').update(input.buffer).digest('hex')
+  let lastError: unknown
+  for (let attempt = 1; attempt <= config.uploadAttempts; attempt += 1) {
+    try {
+      await getOSSClient().put(input.objectKey, input.buffer, {
+        headers: {
+          'Content-Type': input.mimeType,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'x-oss-forbid-overwrite': 'true',
+          'x-oss-meta-sha256': sha256,
+        },
+      })
+      return
+    } catch (error) {
+      lastError = error
+      // A timed-out response may hide a successful immutable PUT. Verify the
+      // exact object before retrying so local persistence recovery never
+      // creates a second paid image request.
+      if (await ossObjectMatches(input.objectKey, sha256, input.buffer.length)) return
+      if (!isRetryableOSSWriteError(error) || attempt === config.uploadAttempts) throw error
+      await new Promise(resolve => setTimeout(resolve, attempt * 500))
+    }
+  }
+  throw lastError
 }
 
 function toVariant(value: AssetVariantDocument): StoredAssetVariant {
@@ -288,12 +359,10 @@ async function writeStoredObject(input: {
 }): Promise<string> {
   if (input.driver === 'oss') {
     const objectKey = buildRasterAssetObjectKey(input.assetId, input.variant)
-    await getOSSClient().put(objectKey, input.buffer, {
-      headers: {
-        'Content-Type': input.mimeType,
-        'Cache-Control': 'public, max-age=31536000, immutable',
-        'x-oss-forbid-overwrite': 'true',
-      },
+    await writeOSSObjectWithRetry({
+      objectKey,
+      buffer: input.buffer,
+      mimeType: input.mimeType,
     })
     return objectKey
   }

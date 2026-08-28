@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict'
-import { eulerDegreesToQuaternion, normalizeScale, normalizeTransform, normalizeViewpoint } from '../scene-math'
+import { eulerDegreesToQuaternion, normalizeScale, normalizeTransform, normalizeViewpoint, quaternionToEulerDegrees } from '../scene-math'
 import { inspectGlbMetadata } from '../glb-metadata'
 
 assert.deepEqual(eulerDegreesToQuaternion([0, 0, 0]), [0, 0, 0, 1])
 const quarterTurn = eulerDegreesToQuaternion([0, 0, 90])
 assert.ok(Math.abs(quarterTurn[2] - Math.SQRT1_2) < 1e-10)
 assert.ok(Math.abs(quarterTurn[3] - Math.SQRT1_2) < 1e-10)
+const quarterTurnEuler = quaternionToEulerDegrees(quarterTurn)
+assert.ok(Math.abs(quarterTurnEuler[0]) < 1e-10)
+assert.ok(Math.abs(quarterTurnEuler[1]) < 1e-10)
+assert.ok(Math.abs(quarterTurnEuler[2] - 90) < 1e-10)
 assert.deepEqual(normalizeTransform({ position: [1, 2, 3], scale: [1, 2, 3] }).position, [1, 2, 3])
 assert.throws(() => normalizeScale([1, 0, 1]), /大于 0/)
 assert.throws(() => normalizeScale([1, Number.NaN, 1]), /有限数字/)

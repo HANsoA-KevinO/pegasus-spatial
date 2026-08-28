@@ -150,6 +150,32 @@ async function verifyAclAndExplicitPrivateReference(): Promise<void> {
     }),
     WorkspaceAclError,
   )
+  const delegatedImageMember: WorkspaceActor = {
+    ...owner,
+    publicWriteTool: 'GenerateImage',
+  }
+  const delegatedImage = await repo.commitFile(delegatedImageMember, {
+    workspaceId: WORKSPACE,
+    path: 'output/spatial/images/member-generated.png',
+    expectedRevision: null,
+    visibility: 'public',
+    storageRef: { driver: 'asset', asset_id: 'asset_member_generated', variant: 'model' },
+    metadata: {
+      kind: 'raster',
+      mime_type: 'image/png',
+      size_bytes: 128,
+      sha256: 'a'.repeat(64),
+    },
+    writer: writer(owner.agentId, 'member_generate_image'),
+  })
+  assert.equal(delegatedImage.path, 'output/spatial/images/member-generated.png')
+  await assert.rejects(
+    repo.commitFile(delegatedImageMember, {
+      ...publicWrite('analysis/member-still-cannot-publish.md', 'no', 'member_public_other'),
+      writer: writer(owner.agentId, 'member_public_other'),
+    }),
+    WorkspaceAclError,
+  )
   await assert.rejects(
     repo.commitFile(owner, {
       workspaceId: WORKSPACE,

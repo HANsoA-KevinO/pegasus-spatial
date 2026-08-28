@@ -386,7 +386,34 @@ export async function reconcileImageGenerationPaidSlots(
   submissionLeaseMs = IMAGE_GENERATION_SUBMISSION_LEASE_MS,
   reservationRecoveryMs = IMAGE_GENERATION_RESERVATION_RECOVERY_MS,
 ): Promise<{ bound: number; released: number; markedUnknown: number }> {
-  let markedUnknown = 0
+  const submittingCutoff = new Date(now.getTime() - submissionLeaseMs)
+  // Product GenerateImage no longer requires a global paid-slot gate, so an
+  // ambiguous receipt may have no SpatialPaidSlot row to drive reconciliation.
+  // Seal every expired submitting receipt directly before reconciling any
+  // optional Operator/test slots.
+  const expired = await ImageGenerationReceiptModel.updateMany(
+    {
+      status: 'submitting',
+      $or: [
+        { submission_started_at: { $lte: submittingCutoff } },
+        {
+          $and: [
+            { $or: [{ submission_started_at: null }, { submission_started_at: { $exists: false } }] },
+            { updated_at: { $lte: submittingCutoff } },
+          ],
+        },
+      ],
+    },
+    {
+      $set: {
+        status: 'unknown',
+        error_code: 'submission_lease_expired',
+        error_message: '图片提交租约过期；供应商可能已接受请求，禁止自动重复付费提交。',
+        updated_at: now,
+      },
+    },
+  )
+  let markedUnknown = expired.modifiedCount
   const result = await reconcileSpatialPaidSlots({
     holderType: 'image_generation',
     now,

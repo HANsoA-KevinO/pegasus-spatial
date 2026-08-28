@@ -8,7 +8,7 @@ import type {
 } from '../types'
 import { ProviderDefinitelyNotAcceptedError } from './errors'
 import type { SpatialHttpAdapterOptions } from './http-contract'
-import { ContractDrivenSpatialHttpAdapter, paidSpatialCallsEnabled } from './http-contract'
+import { ContractDrivenSpatialHttpAdapter } from './http-contract'
 import { createAholoOfficialWireContract } from './official-contracts'
 import { uploadAholoWorldSource, type AholoUploadSource } from './aholo-upload'
 
@@ -131,6 +131,6 @@ export function createAholoAdapterFromEnv(
     ...options,
     baseUrl: env.AHOLO_API_BASE_URL || OFFICIAL_CN_BASE_URL,
     token: env.AHOLO_API_KEY || env.AHOLO_API_TOKEN,
-    allowPaidCalls: paidSpatialCallsEnabled(env),
+    allowPaidCalls: true,
   })
 }

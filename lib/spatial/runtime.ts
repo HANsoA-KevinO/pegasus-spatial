@@ -11,7 +11,6 @@ import {
 } from '../workspace/multi-agent'
 import type { FileEntry, ManifestEntry, WorkspaceInstance } from '../workspace/types'
 import { AholoAdapter } from './adapters/aholo'
-import { paidSpatialCallsEnabled } from './adapters/http-contract'
 import { Lux3DAdapter } from './adapters/lux3d'
 import { SpatialBuildJobModel } from './models'
 import type { ProcessSpatialBuildDependencies } from './processor'
@@ -37,7 +36,6 @@ export interface SpatialProviderRuntimeConfig {
 
 export interface SpatialRuntimeConfig {
   workerEnabled: boolean
-  paidCallsEnabled: boolean
   concurrency: number
   pollIntervalMs: number
   leaseMs: number
@@ -97,7 +95,6 @@ export function parseSpatialAssetHostAllowlist(raw: string | undefined): {
 
 function providerConfig(input: {
   provider: 'Aholo' | 'Lux3D'
-  paidCallsEnabled: boolean
   apiBaseUrl: string | undefined
   apiKey: string | undefined
   allowlist: string | undefined
@@ -109,20 +106,19 @@ function providerConfig(input: {
       `${input.provider} 产物域名白名单包含无效条目；该供应商的付费提交已关闭。`,
     )
   }
-  if (input.paidCallsEnabled && parsed.hosts.length === 0) {
+  if (parsed.hosts.length === 0) {
     input.warnings.push(
       `${input.provider} 缺少产物域名白名单；为避免任意远程下载，该供应商的付费提交已关闭。`,
     )
   }
-  if (input.paidCallsEnabled && !input.apiKey?.trim()) {
+  if (!input.apiKey?.trim()) {
     input.warnings.push(`${input.provider} 缺少 API Key；该供应商的付费提交已关闭。`)
   }
   return {
     apiBaseUrl: input.apiBaseUrl?.trim() || OFFICIAL_API_BASE_URL,
     apiKey: input.apiKey?.trim() || undefined,
     assetHosts: parsed.hosts,
-    submissionEnabled: input.paidCallsEnabled
-      && parsed.invalid.length === 0
+    submissionEnabled: parsed.invalid.length === 0
       && parsed.hosts.length > 0
       && Boolean(input.apiKey?.trim()),
   }
@@ -131,11 +127,12 @@ function providerConfig(input: {
 export function readSpatialRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): SpatialRuntimeConfig {
-  const paidCallsEnabled = paidSpatialCallsEnabled(env)
+  // Provider submission is controlled by concrete credentials, artifact-host
+  // allowlists and durable receipts. There is no separate global paid-call
+  // switch in the Agent path: it caused valid jobs to fail before provider I/O.
   const warnings: string[] = []
   const aholo = providerConfig({
     provider: 'Aholo',
-    paidCallsEnabled,
     apiBaseUrl: env.AHOLO_API_BASE_URL,
     apiKey: env.AHOLO_API_KEY || env.AHOLO_API_TOKEN,
     allowlist: env.AHOLO_ASSET_HOST_ALLOWLIST,
@@ -143,7 +140,6 @@ export function readSpatialRuntimeConfig(
   })
   const lux3d = providerConfig({
     provider: 'Lux3D',
-    paidCallsEnabled,
     apiBaseUrl: env.LUX3D_API_BASE_URL,
     apiKey: env.LUX3D_API_KEY || env.LUX3D_API_TOKEN,
     allowlist: env.LUX3D_ASSET_HOST_ALLOWLIST,
@@ -151,7 +147,6 @@ export function readSpatialRuntimeConfig(
   })
   return {
     workerEnabled: env.SPATIAL_WORKER_ENABLED?.trim() !== '0',
-    paidCallsEnabled,
     // This bounds local network/lease work only. It is not a product-level
     // limit on how many durable image or 3D jobs a project may create.
     concurrency: boundedInteger(env.SPATIAL_WORKER_CONCURRENCY, 8, 1, 32),

@@ -21,7 +21,15 @@ export class ImageGenerationReceiptConflictError extends Error {
 }
 
 export function boundedErrorMessage(error: unknown, maxLength = 2_000): string {
-  const raw = error instanceof Error ? error.message : String(error)
+  const cause = error instanceof Error ? error.cause : undefined
+  const errorMessage = error instanceof Error ? error.message : String(error)
+  const causeCode = typeof (cause as { code?: unknown } | null)?.code === 'string'
+    ? ` [cause=${(cause as { code: string }).code}]`
+    : ''
+  const causeMessage = cause instanceof Error && cause.message !== errorMessage
+    ? `: ${cause.message}`
+    : ''
+  const raw = `${errorMessage}${causeCode}${causeMessage}`
   let sanitized = raw
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
     .replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/gi, 'data:image/[REDACTED]')

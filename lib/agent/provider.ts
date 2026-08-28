@@ -548,19 +548,24 @@ export function createAgentProvider(
             signal: config.abortSignal,
           })
         case 'CreateSpatialScene':
+        case 'SetSceneEnvironment':
         case 'SetSceneWorld':
+        case 'AddSceneTerrain':
         case 'AddSceneObject':
         case 'TransformSceneObject':
         case 'RemoveSceneObject':
+        case 'ApplySceneSpec':
         case 'InspectSpatialScene':
         case 'RestoreSpatialScene':
         case 'SetSceneViewpoint':
         case 'FocusSceneObject':
         case 'CaptureSceneView':
+        case 'QuerySceneSurface':
           return executeSpatialSceneTool(name as SpatialSceneToolName, input, {
             executionContext: config.executionContext,
             invocation,
             signal: config.abortSignal,
+            workspace,
           })
         case 'RecallHistory':
           if (!memoryContext?.userId || !memoryV2Flags.recallTool()) {
@@ -676,15 +681,19 @@ export function summarizeToolCall(
     case 'WaitSpatialJob': action = `等待了空间任务 ${input.job_id ?? ''}`.trim(); break
     case 'InspectSpatialArtifact': action = `检查了空间资产 ${input.artifact_id ?? ''}`.trim(); break
     case 'CreateSpatialScene': action = `创建了 Scene「${input.title ?? ''}」`; break
+    case 'SetSceneEnvironment': action = `设置了 Scene ${input.scene_id ?? ''} 的全景环境`.trim(); break
     case 'SetSceneWorld': action = `更新了 Scene ${input.scene_id ?? ''} 的整体 World`.trim(); break
+    case 'AddSceneTerrain': action = `向 Scene ${input.scene_id ?? ''} 添加了 Lux 地形`.trim(); break
     case 'AddSceneObject': action = `向 Scene ${input.scene_id ?? ''} 添加了物体`.trim(); break
     case 'TransformSceneObject': action = `调整了物体 ${input.instance_id ?? ''} 的绝对变换`.trim(); break
     case 'RemoveSceneObject': action = `从 Scene 移除了物体 ${input.instance_id ?? ''}`.trim(); break
+    case 'ApplySceneSpec': action = `应用了 Scene ${input.scene_id ?? ''} 的声明式场景文件 ${input.spec_path ?? ''}`.trim(); break
     case 'InspectSpatialScene': action = `检查了 Scene ${input.scene_id ?? ''}`.trim(); break
     case 'RestoreSpatialScene': action = `将 Scene 恢复为基于 v${input.revision_version ?? ''} 的新版本`.trim(); break
     case 'SetSceneViewpoint': action = `设置了 Scene ${input.scene_id ?? ''} 的 Agent 相机`.trim(); break
     case 'FocusSceneObject': action = `将 Agent 相机聚焦到 ${input.instance_id ?? ''}`.trim(); break
     case 'CaptureSceneView': action = `从 Scene ${input.scene_id ?? ''} 捕获了真实渲染画面`.trim(); break
+    case 'QuerySceneSurface': action = `查询了 Scene ${input.scene_id ?? ''} 的真实地形表面`.trim(); break
     case 'Agent': action = `创建了 Agent ${input.name ?? input.description ?? ''}`.trim(); break
     case 'SendMessage': action = `向 ${input.to ?? 'Agent'} 发送了消息`; break
     case 'TaskCreate': action = `创建了任务「${input.subject ?? '未命名任务'}」`; break

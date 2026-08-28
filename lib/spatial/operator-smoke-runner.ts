@@ -6,7 +6,7 @@ import { Conversation } from '../db/models'
 import { getConversation } from '../db/repository'
 import { NewApiChatImageAdapter } from '../image-generation/providers/newapi-chat-image'
 import { mongoImageGenerationReceiptStore } from '../image-generation/receipt-store'
-import { IMAGE_ASPECT_RATIOS, type ImageGenerationReceipt } from '../image-generation/types'
+import { normalizeImageAspectRatio, type ImageGenerationReceipt } from '../image-generation/types'
 import { ensureProviderImageDeliveryUrl } from '../media/storage'
 import {
   createDefaultGenerateImageDependencies,
@@ -117,12 +117,6 @@ function optionalPrompt(value: string | undefined): string | undefined {
   return requiredText('prompt', value)
 }
 
-function assertGlobalPaidGateClosed(env: NodeJS.ProcessEnv): void {
-  if (env.SPATIAL_PAID_CALLS_ENABLED?.trim() !== '0') {
-    throw new Error('Operator smoke 要求 SPATIAL_PAID_CALLS_ENABLED 精确保持为 0。')
-  }
-}
-
 function assertHttpsBase(label: string, raw: string | undefined): URL {
   let parsed: URL
   try {
@@ -181,14 +175,12 @@ export function validateOperatorSmokeConfiguration(
   provider: SpatialOperatorSmokeProvider,
   env: NodeJS.ProcessEnv = process.env,
 ): Array<{ name: string; ok: boolean; detail: string }> {
-  assertGlobalPaidGateClosed(env)
   providerKey(provider, env)
   if (provider === 'image') {
     const imageBase = assertImageBase(env)
     const model = env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim() || 'GPT-image-2'
     if (model !== 'GPT-image-2') throw new Error('图片 smoke 必须冻结精确模型别名 GPT-image-2。')
     return [
-      { name: 'global_paid_gate', ok: true, detail: '0（普通聊天保持关闭）' },
       {
         name: 'image_transport',
         ok: true,
@@ -205,7 +197,6 @@ export function validateOperatorSmokeConfiguration(
   const allowlist = parseSpatialAssetHostAllowlist(env[`${prefix}_ASSET_HOST_ALLOWLIST`])
   if (allowlist.invalid.length > 0) throw new Error(`${prefix}_ASSET_HOST_ALLOWLIST 包含无效 hostname。`)
   return [
-    { name: 'global_paid_gate', ok: true, detail: '0（普通聊天保持关闭）' },
     { name: 'provider_transport', ok: true, detail: 'HTTPS；凭证存在但未输出' },
     {
       name: 'artifact_allowlist',
@@ -525,7 +516,7 @@ export async function prepareOperatorSmoke(
       invocation: invocation(intent),
       dependencies: {
         ...dependencies,
-        provider: new NewApiChatImageAdapter({ allowPaidCalls: false }),
+        provider: new NewApiChatImageAdapter(),
       },
       submissionPolicy: 'prepare-only',
     })
@@ -567,7 +558,6 @@ function operatorSpatialConfig(
   const config = readSpatialRuntimeConfig(env)
   return {
     ...config,
-    paidCallsEnabled: false,
     aholo: { ...config.aholo, submissionEnabled: provider === 'aholo' },
     lux3d: { ...config.lux3d, submissionEnabled: provider === 'lux3d' },
   }
@@ -642,7 +632,7 @@ async function submitOrResumeImage(
     invocation: invocation(intent),
     dependencies: {
       ...dependencies,
-      provider: new NewApiChatImageAdapter({ allowPaidCalls: allowSubmit }),
+      provider: new NewApiChatImageAdapter(),
     },
     submissionPolicy: allowSubmit ? 'allow-submit' : 'forbid-submit',
   })
@@ -656,7 +646,6 @@ export async function submitOperatorSmoke(
   smokeId: string,
   confirmation: string,
 ): Promise<OperatorSmokeReport> {
-  assertGlobalPaidGateClosed(process.env)
   const initial = await requireSpatialOperatorSmokeIntent(smokeId)
   validateOperatorSmokeConfiguration(initial.provider, process.env)
   let intent = await authorizeSpatialOperatorSmokeIntent(smokeId, confirmation)
@@ -668,7 +657,6 @@ export async function submitOperatorSmoke(
 }
 
 export async function resumeOperatorSmoke(smokeId: string): Promise<OperatorSmokeReport> {
-  assertGlobalPaidGateClosed(process.env)
   let intent = await requireSpatialOperatorSmokeIntent(smokeId)
   intent = await syncIntent(intent)
   if (intent.state === 'prepared' || intent.state === 'authorized') {
@@ -704,7 +692,7 @@ export async function dryRunOperatorSmoke(
   if (mode === 'text' && input.inputPath) throw new TypeError('图片 text dry-run 不接受 --input-path。')
   if (
     input.aspectRatio
-    && !IMAGE_ASPECT_RATIOS.includes(input.aspectRatio.trim() as typeof IMAGE_ASPECT_RATIOS[number])
+    && !normalizeImageAspectRatio(input.aspectRatio)
   ) throw new TypeError(`不支持的 aspect ratio：${input.aspectRatio}`)
   if (input.outputPath) {
     normalizeOperatorOutputPath(input.provider, input.outputPath)

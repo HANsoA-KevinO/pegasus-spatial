@@ -264,7 +264,3 @@ export abstract class ContractDrivenSpatialHttpAdapter {
     }
   }
 }
-
-export function paidSpatialCallsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.SPATIAL_PAID_CALLS_ENABLED?.trim() === '1'
-}

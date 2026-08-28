@@ -14,7 +14,7 @@ import { validateOperatorSmokeConfiguration } from '../operator-smoke-runner'
 import { spatialArtifactHostnames } from '../processor'
 
 function environment(values: Record<string, string>): NodeJS.ProcessEnv {
-  return { NODE_ENV: 'test', SPATIAL_PAID_CALLS_ENABLED: '0', ...values }
+  return { NODE_ENV: 'test', ...values }
 }
 
 const identity = operatorSmokeIdentity({
@@ -99,14 +99,14 @@ const aholoChecks = validateOperatorSmokeConfiguration('aholo', environment({
   AHOLO_API_KEY: 'not-printed',
 }))
 assert.equal(aholoChecks.at(-1)?.detail, 'dry-run 未调用供应商')
-assert.match(aholoChecks[2].detail, /configuration_blocked/)
+assert.match(aholoChecks[1].detail, /configuration_blocked/)
 
 const imageChecks = validateOperatorSmokeConfiguration('image', environment({
   LLM_BASE_URL: 'https://newapi.example.test/v1',
   LLM_API_KEY_TOOLS: 'not-printed',
   PEGASUS_SPATIAL_IMAGE_MODEL: 'GPT-image-2',
 }))
-assert.match(imageChecks[1].detail, /HTTPS/)
+assert.match(imageChecks[0].detail, /HTTPS/)
 assert.throws(
   () => validateOperatorSmokeConfiguration('image', environment({
     LLM_BASE_URL: 'http://newapi.example.test/v1',
@@ -119,7 +119,7 @@ const insecureImageChecks = validateOperatorSmokeConfiguration('image', environm
   LLM_API_KEY_TOOLS: 'not-printed',
   PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP: '1',
 }))
-assert.match(insecureImageChecks[1].detail, /HTTP 开发例外[^]*明文传输/)
+assert.match(insecureImageChecks[0].detail, /HTTP 开发例外[^]*明文传输/)
 assert.throws(
   () => validateOperatorSmokeConfiguration('image', environment({
     NODE_ENV: 'production',
@@ -129,14 +129,6 @@ assert.throws(
   })),
   /非 production/,
 )
-assert.throws(
-  () => validateOperatorSmokeConfiguration('lux3d', environment({
-    SPATIAL_PAID_CALLS_ENABLED: '1',
-    LUX3D_API_KEY: 'not-printed',
-  })),
-  /精确保持为 0/,
-)
-
 assert.deepEqual(spatialArtifactHostnames([
   {
     assetKey: 'one',

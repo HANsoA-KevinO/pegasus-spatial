@@ -8,8 +8,8 @@ import {
 import { createDefaultImageGenerationProvider } from '../image-generation/providers/newapi-chat-image'
 import { mongoImageGenerationReceiptStore } from '../image-generation/receipt-store'
 import {
-  IMAGE_ASPECT_RATIOS,
   IMAGE_GENERATION_SUBMISSION_LEASE_MS,
+  normalizeImageAspectRatio,
   receiptToolResult,
   type GenerateImageDependencies,
   type ImageAspectRatio,
@@ -277,11 +277,11 @@ function parseInput(rawInput: unknown, workspace: WorkspaceInstance): GenerateIm
   ) {
     return invalid('input_image_path 必须是非空 Workspace 路径。')
   }
-  if (
-    input.aspect_ratio !== undefined
-    && !IMAGE_ASPECT_RATIOS.includes(input.aspect_ratio as ImageAspectRatio)
-  ) {
-    return invalid(`不支持的 aspect_ratio；可选值：${IMAGE_ASPECT_RATIOS.join(', ')}。`)
+  const aspectRatio = input.aspect_ratio === undefined
+    ? undefined
+    : normalizeImageAspectRatio(input.aspect_ratio) ?? undefined
+  if (input.aspect_ratio !== undefined && !aspectRatio) {
+    return invalid('aspect_ratio 必须是正数“宽:高”，例如 2:1、16:9 或 2.39:1。')
   }
 
   let outputPath: string
@@ -310,7 +310,7 @@ function parseInput(rawInput: unknown, workspace: WorkspaceInstance): GenerateIm
     prompt: input.prompt.trim(),
     output_path: outputPath,
     input_image_path: sourcePath,
-    aspect_ratio: input.aspect_ratio,
+    aspect_ratio: aspectRatio,
   }
 }
 

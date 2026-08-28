@@ -26,7 +26,11 @@ import {
   compactRecentTurnResults,
   isAgentTeamTool,
 } from '../tool-adapter'
-import { rootCanAcceptTeamUpdate, routineSupervisionEvents } from '../orchestrator'
+import {
+  rootCanAcceptTeamUpdate,
+  rootMailboxModelBody,
+  routineSupervisionEvents,
+} from '../orchestrator'
 import type {
   AgentResultRecord,
   TeamAgentRecord,
@@ -263,6 +267,37 @@ function testDormantRootSupervisionGuard(): void {
   assert.equal(rootCanAcceptTeamUpdate('completed'), false)
 }
 
+function testRootMailboxContextBudget(): void {
+  const observer = rootMailboxModelBody({
+    message_id: 'message_observer',
+    task_id: 'task_observer',
+    summary: 'Peer completed image work',
+    content: 'private peer body that Root should not receive automatically',
+  }, 'root_observer')
+  assert.match(observer, /Peer completed image work/)
+  assert.match(observer, /TaskGet/)
+  assert.doesNotMatch(observer, /private peer body/)
+
+  const oversizedTaskBody = `full prompt ${'x'.repeat(8_100)}`
+  const oversizedTask = rootMailboxModelBody({
+    message_id: 'message_large_task',
+    task_id: 'task_large',
+    summary: null,
+    content: oversizedTaskBody,
+  }, 'primary')
+  assert.ok(oversizedTask.length < oversizedTaskBody.length)
+  assert.match(oversizedTask, /TaskGet/)
+  assert.match(oversizedTask, /task_large/)
+
+  const tasklessBody = `taskless ${'y'.repeat(8_100)}`
+  assert.equal(rootMailboxModelBody({
+    message_id: 'message_taskless',
+    task_id: null,
+    summary: 'Taskless direct message',
+    content: tasklessBody,
+  }, 'primary'), tasklessBody, 'taskless direct messages need a lossless inline path')
+}
+
 function main(): void {
   testDefaults()
   testRootOnlyCapabilitiesCannotLeak()
@@ -275,6 +310,7 @@ function main(): void {
   testTasklessWorkspaceChangesRemainReachable()
   testRoutineSupervisionFeedbackGuard()
   testDormantRootSupervisionGuard()
+  testRootMailboxContextBudget()
   console.log('Agent Team unit verification passed.')
 }
 

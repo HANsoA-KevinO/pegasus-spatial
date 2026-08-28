@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { resolveLocalOwner } from '@/lib/local-owner'
-import { completeSpatialRenderCommand, createSpatialObservation, getSpatialRenderCommand } from '@/lib/spatial'
+import { completeSpatialRenderCommand, completeSpatialSurfaceQueryCommand, createSpatialObservation, failSpatialRenderCommand, getSpatialRenderCommand } from '@/lib/spatial'
 import { getOwnedImageAsset } from '@/lib/media/storage'
 import { toRasterAssetRef } from '@/lib/media/reference'
 import { createScenePublicationWorkspace } from '@/lib/spatial/scene-workspace'
@@ -11,12 +11,29 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const userId = await resolveLocalOwner(); if (userId instanceof Response) return userId
   const { id, sceneId, commandId } = await params
   try {
-    const body = await request.json() as { session_id?: unknown; command_lease_token?: unknown; asset_id?: unknown; visible_instance_ids?: unknown }
-    if ([body.session_id, body.command_lease_token, body.asset_id].some(value => typeof value !== 'string')) return NextResponse.json({ error: 'invalid completion' }, { status: 400 })
-    const asset = await getOwnedImageAsset(body.asset_id as string, userId, id)
-    if (!asset) return NextResponse.json({ error: 'screenshot asset not found' }, { status: 404 })
+    const body = await request.json() as { session_id?: unknown; command_lease_token?: unknown; asset_id?: unknown; visible_instance_ids?: unknown; point?: unknown; terrain_instance_id?: unknown; error?: unknown }
+    if ([body.session_id, body.command_lease_token].some(value => typeof value !== 'string')) return NextResponse.json({ error: 'invalid completion' }, { status: 400 })
     const existing = await getSpatialRenderCommand(commandId, { projectId: id, userId })
     if (!existing || existing.scene_id !== sceneId) return NextResponse.json({ error: 'render command not found' }, { status: 404 })
+    if (typeof body.error === 'string' && body.error.trim()) {
+      const command = await failSpatialRenderCommand({ commandId, sessionId: body.session_id as string, leaseToken: body.command_lease_token as string, error: body.error })
+      return command ? NextResponse.json({ command }) : NextResponse.json({ error: 'render command lease lost' }, { status: 409 })
+    }
+    if (existing.kind === 'surface_query') {
+      const point = body.point
+      if (!Array.isArray(point) || point.length !== 3 || point.some(value => typeof value !== 'number' || !Number.isFinite(value)) || typeof body.terrain_instance_id !== 'string') {
+        return NextResponse.json({ error: 'invalid surface result' }, { status: 400 })
+      }
+      const command = await completeSpatialSurfaceQueryCommand({
+        commandId, sessionId: body.session_id as string, leaseToken: body.command_lease_token as string,
+        point: point as [number, number, number], terrainInstanceId: body.terrain_instance_id,
+      })
+      if (!command) return NextResponse.json({ error: 'render command lease lost' }, { status: 409 })
+      return NextResponse.json({ command })
+    }
+    if (typeof body.asset_id !== 'string') return NextResponse.json({ error: 'invalid capture completion' }, { status: 400 })
+    const asset = await getOwnedImageAsset(body.asset_id, userId, id)
+    if (!asset) return NextResponse.json({ error: 'screenshot asset not found' }, { status: 404 })
     const workspacePath = `output/spatial/reviews/${existing.observation_id}/view.png`
     const workspace = await createScenePublicationWorkspace({ conversationId: id, userId })
     await workspace.writeRaster(workspacePath, toRasterAssetRef(asset), 'Spatial Stage captured real pixels', { archive: false })

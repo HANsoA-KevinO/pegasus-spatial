@@ -479,8 +479,6 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
     outputFormat: ['glb', 'ply'],
     version: 'G1',
     faceCount: 60000,
-    enablePbr: true,
-    textureSize: 2048,
   })
   assert.equal(officialLuxSubmission.externalJobId, '4815162342')
   assert.equal(officialLuxRequests[0].headers.get('Authorization'), 'lux-key')
@@ -514,6 +512,51 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
     /unknown status: 2/,
   )
 
+  const multiImageLuxJob = job({
+    provider: 'lux3d',
+    request_snapshot: {
+      output_path_prefix: 'output/spatial/objects/multi-image',
+      provider_options: {
+        source_image_urls: [
+          'https://media.example.test/chair-front.png',
+          'https://media.example.test/chair-back.png',
+        ],
+        reference_guidance: 'same chair, consistent proportions',
+        version: 'G1-Turbo',
+        output_formats: ['glb', 'ply'],
+      },
+    },
+  })
+  await officialLux.submit(multiImageLuxJob, { providerIdempotencyKey: 'lux-multi-image' })
+  assert.match(officialLuxRequests[2].url, /\/lux3d\/v1\/generate\/img-to-3d\/task\/create$/)
+  assert.deepEqual(await officialLuxRequests[2].json(), {
+    imgs: [
+      'https://media.example.test/chair-front.png',
+      'https://media.example.test/chair-back.png',
+    ],
+    outputFormat: ['glb', 'ply'],
+    version: 'G1-Turbo',
+    faceCount: 200000,
+    enablePbr: true,
+  })
+  const multiImageLuxPoll = luxWire.decodePoll({
+    d: {
+      status: 3,
+      outputs: [
+        { content: 'https://assets.example.test/lux/turbo.glb' },
+        { content: 'https://assets.example.test/lux/turbo.ply' },
+      ],
+    },
+    c: 0,
+  }, multiImageLuxJob)
+  assert.equal(multiImageLuxPoll.state, 'succeeded')
+  if (multiImageLuxPoll.state === 'succeeded') {
+    assert.equal(multiImageLuxPoll.artifacts[0].fileName, 'model.glb')
+    assert.equal(multiImageLuxPoll.artifacts[0].metadata?.output_index, 0)
+    assert.equal(multiImageLuxPoll.artifacts[1].fileName, 'gaussian.ply')
+    assert.equal(multiImageLuxPoll.artifacts[1].metadata?.output_index, 1)
+  }
+
   const textWithImageJob = job({
     provider: 'lux3d',
     request_snapshot: {
@@ -523,15 +566,13 @@ async function verifyAdaptersFailClosedAndUseFixtures(): Promise<void> {
     },
   })
   await officialLux.submit(textWithImageJob, { providerIdempotencyKey: 'lux-text-image' })
-  assert.match(officialLuxRequests[2].url, /\/lux3d\/v1\/generate\/text-to-3d\/task\/create$/)
-  assert.deepEqual(await officialLuxRequests[2].json(), {
+  assert.match(officialLuxRequests[3].url, /\/lux3d\/v1\/generate\/text-to-3d\/task\/create$/)
+  assert.deepEqual(await officialLuxRequests[3].json(), {
     img: 'https://media.example.test/chair.png',
     prompt: 'a refined chair',
     outputFormat: ['glb'],
     version: 'G1',
     faceCount: 60000,
-    enablePbr: true,
-    textureSize: 2048,
   })
   await assert.rejects(
     officialLux.submit(job({
