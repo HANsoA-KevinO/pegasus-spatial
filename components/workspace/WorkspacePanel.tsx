@@ -7,7 +7,9 @@ import type { WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
 import type { QuotedSelection } from '@/components/chat/ChatContainer'
 import { useChatContext } from '@/contexts/ChatContext'
 import { useGridFSContent } from '@/hooks/useGridFSContent'
+import { useConversationTitle } from '@/hooks/useConversation'
 import { ShimmerBlock } from '@/components/loading/Skeleton'
+import { SpatialStage } from '@/components/spatial-stage/SpatialStage'
 import { ArtifactLoadingOverlay } from './ArtifactLoadingOverlay'
 import { LiteraturePaperReader } from './LiteraturePaperReader'
 import { parseLiteratureArtifactPath } from './literature-paper-model'
@@ -27,15 +29,33 @@ interface WorkspacePanelProps {
 export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection, quotedSelection }: WorkspacePanelProps) {
   const {
     activeArtifactPath,
+    activeSceneId,
+    conversationId,
     setSidebarCollapsed,
     setSidebarView,
   } = useChatContext()
+  const { title: projectTitle } = useConversationTitle(conversationId)
   const active = artifacts.find(item => item.path === activeArtifactPath) ?? artifacts[0]
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [active?.path])
+
+  if (activeSceneId && conversationId) {
+    return (
+      <section className="h-full min-w-0 border-r border-[var(--glass-panel-border)]">
+        <SpatialStage
+          embedded
+          sceneId={activeSceneId}
+          conversationId={conversationId}
+          projectTitle={projectTitle}
+          artifacts={artifacts}
+          isProjectLoading={isStreaming}
+        />
+      </section>
+    )
+  }
 
   if (!active) {
     return (

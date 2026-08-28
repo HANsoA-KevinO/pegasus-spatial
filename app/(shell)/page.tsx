@@ -31,9 +31,9 @@ export default function WorkspacePage() {
   if (messages.length === 0 && !isLoading && !showWorkspace) {
     return (
       <TaskWorkbench
-        onSubmit={(message, domain) => {
+        onSubmit={(message, domain, images) => {
           setResearchDomain(domain)
-          sendMessage(message, undefined, undefined, domain)
+          sendMessage(message, images, undefined, domain)
         }}
       />
     )

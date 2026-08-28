@@ -200,7 +200,7 @@
 .drawerTabs button { display: flex; height: 34px; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 6px; color: var(--ink-soft); font-size: 11px; background: transparent; cursor: pointer; }
 .drawerTabs button:hover { background: rgba(36, 40, 36, 0.05); }
 .drawerTabs button[aria-selected="true"] { color: #fff; background: var(--signal); }
-.drawerTabs span { font-family: "JetBrains Mono", monospace; font-size: 8px; opacity: 0.72; }
+.drawerTabs span { font-family: "JetBrains Mono", monospace; font-size: 9px; opacity: 0.72; }
 
 .railSection,
 .historySection,
@@ -248,7 +248,7 @@
 .historyItemActive::before { border-color: var(--signal); background: var(--signal); }
 .historyItem > span { color: var(--signal); font-family: "JetBrains Mono", monospace; font-size: 9px; }
 .historyItem strong { overflow: hidden; font-size: 10px; font-weight: 550; line-height: 1.45; text-overflow: ellipsis; }
-.historyItem small { border-radius: 99px; padding: 2px 6px; color: var(--green); font-size: 8px; background: rgba(57, 113, 92, 0.08); }
+.historyItem small { border-radius: 99px; padding: 2px 6px; color: var(--green); font-size: 9px; background: rgba(57, 113, 92, 0.08); }
 .returnCurrent { width: 100%; margin-top: 12px; border: 1px solid rgba(215, 90, 59, 0.28); border-radius: 7px; padding: 9px; color: var(--signal); font-size: 10px; background: var(--signal-soft); cursor: pointer; }
 .railFooter { flex: 0 0 auto; border-top: 1px solid var(--line); padding: 12px 16px 14px; background: rgba(232, 227, 217, 0.44); }
 .railFooter p,
@@ -262,7 +262,7 @@
 .agentPresence small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agentPresence strong { font-size: 10px; }
 .agentPresence small { margin-top: 2px; color: var(--ink-faint); font-size: 9px; }
-.agentPresence em { margin-left: auto; color: var(--green); font-family: "JetBrains Mono", monospace; font-size: 7px; font-style: normal; }
+.agentPresence em { margin-left: auto; color: var(--green); font-family: "JetBrains Mono", monospace; font-size: 9px; font-style: normal; }
 .agentOrb { position: relative; width: 12px; height: 12px; flex: none; transform: rotate(45deg); border: 1px solid var(--signal); background: rgba(215, 90, 59, 0.14); box-shadow: 0 0 0 4px var(--signal-soft); }
 .agentOrb::after { position: absolute; right: -6px; bottom: -6px; width: 6px; height: 1px; background: var(--signal); content: ""; }
 
@@ -273,12 +273,12 @@
 .composerHeading h2 { margin: 3px 0 0; font-family: "Songti SC", "Iowan Old Style", Georgia, serif; font-size: 19px; font-weight: 650; line-height: 1.25; }
 .transformGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 14px 0; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--line); }
 .transformGrid > div { min-width: 0; padding: 10px; background: rgba(251, 249, 243, 0.92); }
-.transformGrid dt { color: var(--ink-faint); font-size: 8px; text-transform: uppercase; }
+.transformGrid dt { color: var(--ink-faint); font-size: 9px; text-transform: uppercase; }
 .transformGrid dd { margin: 4px 0 0; overflow: hidden; color: var(--ink-soft); font-family: "JetBrains Mono", monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .qualityNotice { margin: 0; border-left: 2px solid rgba(215, 90, 59, 0.42); padding: 7px 0 7px 9px; color: var(--ink-soft); font-size: 9px; line-height: 1.55; }
 
 .observationComposer { margin-top: 0; }
-.composerHeading b { flex: none; border: 1px solid rgba(57, 113, 92, 0.22); border-radius: 99px; padding: 4px 7px; color: var(--green); font-size: 8px; background: rgba(57, 113, 92, 0.07); }
+.composerHeading b { flex: none; border: 1px solid rgba(57, 113, 92, 0.22); border-radius: 99px; padding: 4px 7px; color: var(--green); font-size: 9px; background: rgba(57, 113, 92, 0.07); }
 .observationComposer label { display: block; margin-top: 15px; color: var(--ink-soft); font-size: 10px; font-weight: 650; }
 .observationComposer textarea { width: 100%; resize: vertical; min-height: 126px; margin-top: 7px; border: 1px solid var(--line); border-radius: 8px; padding: 11px; color: var(--ink); font-size: 12px; line-height: 1.6; background: rgba(255, 255, 255, 0.66); }
 .observationComposer textarea::placeholder { color: var(--ink-faint); }
@@ -292,7 +292,7 @@
 
 .selectionToast { position: absolute; z-index: 9; bottom: 75px; left: 50%; display: flex; max-width: min(460px, calc(100% - 40px)); align-items: center; gap: 8px; transform: translate(-50%, 8px); border: 1px solid rgba(255, 255, 255, 0.65); border-radius: 8px; padding: 8px 9px; color: var(--ink); opacity: 0; background: rgba(251, 249, 243, 0.86); box-shadow: 0 10px 30px rgba(35, 37, 33, 0.15); pointer-events: none; backdrop-filter: blur(14px); transition: opacity 140ms ease, transform 140ms ease; }
 .selectionToast[data-visible="true"] { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
-.selectionToast span { color: var(--signal); font-family: "JetBrains Mono", monospace; font-size: 8px; }
+.selectionToast span { color: var(--signal); font-family: "JetBrains Mono", monospace; font-size: 9px; }
 .selectionToast strong { min-width: 0; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .selectionToast button { border: 0; border-left: 1px solid var(--line); padding: 2px 4px 2px 8px; color: var(--ink-soft); font-size: 9px; background: transparent; cursor: pointer; }
 .selectionToast button:hover { color: var(--signal); }
@@ -300,8 +300,8 @@
 .viewportFooter { position: absolute; z-index: 7; bottom: 20px; left: 20px; display: flex; align-items: center; gap: 13px; border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 8px; padding: 7px 10px; color: var(--ink); background: rgba(251, 249, 243, 0.82); box-shadow: 0 8px 24px rgba(35, 37, 33, 0.13); backdrop-filter: blur(14px); }
 .cameraReadout { display: flex; align-items: center; gap: 6px; }
 .cameraReadout + .cameraReadout { border-left: 1px solid var(--line); padding-left: 13px; }
-.cameraReadout code { color: var(--ink-soft); font-family: "JetBrains Mono", monospace; font-size: 8px; }
-.viewportFooter p { margin: 0; border-left: 1px solid var(--line); padding-left: 13px; color: var(--ink-faint); font-size: 8px; }
+.cameraReadout code { color: var(--ink-soft); font-family: "JetBrains Mono", monospace; font-size: 9px; }
+.viewportFooter p { margin: 0; border-left: 1px solid var(--line); padding-left: 13px; color: var(--ink-faint); font-size: 9px; }
 
 .viewerRoot { position: relative; min-height: 0; flex: 1; overflow: hidden; background: linear-gradient(rgba(36, 40, 36, 0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(36, 40, 36, 0.04) 1px, transparent 1px), #d8d3c8; background-size: 52px 52px; }
 .viewerContainer { position: absolute; inset: 0; cursor: grab; outline: none; touch-action: none; }
@@ -317,8 +317,8 @@
 .viewerHint[data-active="true"] { border-color: rgba(215, 90, 59, 0.35); background: rgba(255, 248, 241, 0.92); }
 .controlState { color: var(--signal); font-weight: 700; }
 .keyGroup { display: flex; align-items: center; gap: 3px; border-left: 1px solid var(--line); padding-left: 9px; }
-.keyGroup kbd { display: grid; min-width: 20px; height: 20px; place-items: center; border: 1px solid var(--line-strong); border-bottom-color: rgba(36, 40, 36, 0.35); border-radius: 4px; color: var(--ink); font-family: inherit; font-size: 8px; background: rgba(255, 255, 255, 0.7); box-shadow: 0 2px 0 rgba(36, 40, 36, 0.12); }
-.keyGroup b { margin-left: 3px; color: var(--ink-soft); font-size: 8px; font-weight: 500; }
+.keyGroup kbd { display: grid; min-width: 20px; height: 20px; place-items: center; border: 1px solid var(--line-strong); border-bottom-color: rgba(36, 40, 36, 0.35); border-radius: 4px; color: var(--ink); font-family: inherit; font-size: 9px; background: rgba(255, 255, 255, 0.7); box-shadow: 0 2px 0 rgba(36, 40, 36, 0.12); }
+.keyGroup b { margin-left: 3px; color: var(--ink-soft); font-size: 9px; font-weight: 500; }
 .mouseControl { border-left: 1px solid var(--line); padding-left: 9px; color: var(--ink-soft); }
 .scanline { display: none; }
 

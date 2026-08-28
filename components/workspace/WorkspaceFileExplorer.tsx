@@ -244,7 +244,7 @@ export function WorkspaceFileExplorer({
           <FolderIcon open />
         </div>
         <p className="text-xs font-medium text-ink-secondary">空间资产尚未生成</p>
-        <p className="mt-1 max-w-44 text-[10px] leading-4 text-ink-faint">Agent 发布图像、GLB 或 World manifest 后，会自动出现在这里。</p>
+        <p className="mt-1 max-w-44 text-[11px] leading-5 text-ink-muted">Agent 发布图像、GLB 或 World manifest 后，会自动出现在这里。</p>
       </div>
     )
   }
@@ -262,7 +262,7 @@ export function WorkspaceFileExplorer({
             value={query}
             onChange={event => setQuery(event.target.value)}
             placeholder={`筛选 ${artifacts.length} 个文件`}
-            className="min-w-0 flex-1 bg-transparent text-[11px] text-ink outline-none placeholder:text-ink-faint"
+            className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-muted"
           />
           {query && (
             <button type="button" onClick={() => setQuery('')} aria-label="清除筛选" className="text-[13px] text-ink-faint hover:text-ink">×</button>
@@ -282,7 +282,7 @@ export function WorkspaceFileExplorer({
                 onSelect={onSelect}
               />
             ))}
-            {matches.length === 0 && <p className="px-3 py-8 text-center text-[10px] text-ink-faint">没有匹配的文件</p>}
+            {matches.length === 0 && <p className="px-3 py-8 text-center text-[11px] text-ink-muted">没有匹配的文件</p>}
           </div>
         ) : (
           <div role="tree" aria-label={`Workspace 文件，共 ${artifacts.length} 个`} className="w-full min-w-0">
@@ -313,7 +313,7 @@ export function WorkspaceFileExplorer({
                   onFocus={() => setFocusedPath(node.path)}
                   onClick={() => activateNode(node)}
                   onKeyDown={event => handleTreeKeyDown(event, node)}
-                  className={`group relative flex h-[30px] w-full min-w-0 max-w-full items-center overflow-hidden rounded-lg pr-2 text-left transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${isSelected ? 'bg-primary/10 font-semibold text-primary' : 'text-ink-secondary hover:bg-white/45 hover:text-ink'}`}
+                  className={`group relative flex h-[34px] w-full min-w-0 max-w-full items-center overflow-hidden rounded-lg pr-2 text-left transition focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 ${isSelected ? 'bg-primary/10 font-semibold text-primary' : 'text-ink-secondary hover:bg-white/45 hover:text-ink dark:hover:bg-white/[0.05]'}`}
                   style={{ paddingLeft: 6 + depth * 14 }}
                 >
                   {isSelected && (
@@ -329,9 +329,9 @@ export function WorkspaceFileExplorer({
                   <span className="mr-1.5 flex h-4 w-4 shrink-0 items-center justify-center">
                     {isFolder ? <FolderIcon open={isOpen} /> : <FileTypeMark path={node.path} />}
                   </span>
-                  <span className={`min-w-0 flex-1 truncate text-[10.5px] ${paperSummary ? 'font-medium tracking-[-0.01em] text-ink' : 'font-mono'}`} data-path={node.path}>{label}</span>
+                  <span className={`min-w-0 flex-1 truncate text-[12px] ${paperSummary ? 'font-medium tracking-[-0.01em] text-ink' : 'font-mono'}`} data-path={node.path}>{label}</span>
                   {isFolder ? (
-                    <span className="ml-2 shrink-0 font-mono text-[9px] tabular-nums text-ink-faint">{node.descendantFileCount}</span>
+                    <span className="ml-2 shrink-0 font-mono text-[10px] tabular-nums text-ink-muted">{node.descendantFileCount}</span>
                   ) : (
                     <span className="ml-2 flex shrink-0 items-center gap-1.5">
                       {managedReference(node.path) && <ManagedReferenceMark />}
@@ -365,8 +365,8 @@ function SearchResult({ artifact, active, paperSummary, onSelect }: {
     >
       <FileTypeMark path={artifact.path} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-mono text-[10.5px] font-medium">{artifact.label || artifact.path.split('/').at(-1)}</span>
-        <span className={`block truncate text-[9px] text-ink-faint ${paperSummary ? 'font-medium' : 'font-mono'}`}>
+        <span className="block truncate font-mono text-[12px] font-medium">{artifact.label || artifact.path.split('/').at(-1)}</span>
+        <span className={`block truncate text-[10.5px] text-ink-muted ${paperSummary ? 'font-medium' : 'font-mono'}`}>
           {(paperSummary?.title ?? artifact.path.split('/').slice(0, -1).join('/')) || 'Workspace'}
         </span>
       </span>
@@ -392,7 +392,7 @@ function FolderIcon({ open }: { open: boolean }) {
 
 function FileTypeMark({ path }: { path: string }) {
   const badge = extensionBadge(path)
-  return <span aria-hidden="true" className={`w-5 shrink-0 text-center font-mono text-[7.5px] font-bold tracking-[-0.04em] ${badge.tone}`}>{badge.label}</span>
+  return <span aria-hidden="true" className={`w-5 shrink-0 text-center font-mono text-[9px] font-bold tracking-[-0.04em] ${badge.tone}`}>{badge.label}</span>
 }
 
 function ManagedReferenceMark() {

@@ -39,31 +39,13 @@ const STATUS_PRESENTATION: Record<AgentTeamMemberStatus, {
 }
 
 export function AgentTeamPanel({ conversationId }: AgentTeamPanelProps) {
-  const { snapshot, isLoading, isLive, error } = useAgentTeam(conversationId)
+  const { snapshot, isLive, error } = useAgentTeam(conversationId)
 
   if (!conversationId) return null
-  if (isLoading && !snapshot) {
-    return (
-      <section aria-label="Agent Team 状态" className="shrink-0 border-b border-ghost-border/20 bg-surface-lowest/55 px-5 py-3">
-        <div className="flex items-center gap-3 text-xs text-ink-muted">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-          <span className="font-semibold uppercase tracking-[0.16em]">Team</span>
-          <span>正在建立只读状态视图…</span>
-        </div>
-      </section>
-    )
-  }
-  if (!snapshot) {
-    return (
-      <section aria-label="Agent Team 状态" className="shrink-0 border-b border-ghost-border/20 bg-surface-lowest/55 px-5 py-3">
-        <div className="flex items-center gap-3 text-xs text-error">
-          <span className="h-1.5 w-1.5 rounded-full bg-error" />
-          <span className="font-semibold uppercase tracking-[0.16em]">Team</span>
-          <span className="truncate">{error || '状态暂时不可用，正在重试'}</span>
-        </div>
-      </section>
-    )
-  }
+  if (!snapshot) return null
+
+  const hasMemberAgents = snapshot.agents.some(agent => !agent.is_root)
+  if (!hasMemberAgents) return null
 
   const counts = [
     { label: '全部', value: snapshot.counts.total, className: 'text-ink' },

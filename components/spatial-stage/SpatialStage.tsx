@@ -43,14 +43,14 @@ async function uploadPng(conversationId: string, blob: Blob): Promise<{ assetId:
   return body.image
 }
 
-export function SpatialStage({ conversationId, projectTitle, artifacts, isProjectLoading, initialManifestPath = null, embedded = false }: {
-  conversationId: string; projectTitle: string | null; artifacts: WorkspaceArtifact[]; isProjectLoading: boolean; initialManifestPath?: string | null; embedded?: boolean
+export function SpatialStage({ conversationId, projectTitle, artifacts, isProjectLoading, initialManifestPath = null, embedded = false, sceneId = null }: {
+  conversationId: string; projectTitle: string | null; artifacts: WorkspaceArtifact[]; isProjectLoading: boolean; initialManifestPath?: string | null; embedded?: boolean; sceneId?: string | null
 }) {
   const { sendMessage } = useChatContext()
   const canvasRef = useRef<SpatialCanvasHandle>(null)
   const manifests = useMemo(() => listWorldManifests(artifacts), [artifacts])
   const [scenes, setScenes] = useState<SceneSummary[]>([])
-  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null)
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(sceneId)
   const [sceneData, setSceneData] = useState<SceneResponse | null>(null)
   const [previewVersion, setPreviewVersion] = useState<number | null>(null)
   const [legacyPath, setLegacyPath] = useState<string>('')
@@ -70,8 +70,12 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
 
   const refreshScenes = useCallback(async () => {
     const list = await json<{ scenes: SceneSummary[] }>(`/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes`)
-    setScenes(list.scenes); setSelectedSceneId(current => current && list.scenes.some(scene => scene.scene_id === current) ? current : list.scenes[0]?.scene_id ?? null)
-  }, [conversationId])
+    setScenes(list.scenes)
+    setSelectedSceneId(current => {
+      if (sceneId && list.scenes.some(scene => scene.scene_id === sceneId)) return sceneId
+      return current && list.scenes.some(scene => scene.scene_id === current) ? current : list.scenes[0]?.scene_id ?? null
+    })
+  }, [conversationId, sceneId])
   const refreshScene = useCallback(async () => {
     if (!selectedSceneId) { setSceneData(null); return }
     const query = new URLSearchParams({ history: '1' }); if (previewVersion) query.set('version', String(previewVersion))
@@ -84,6 +88,7 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
     setLegacyPath(current => current && manifests.some(item => item.path === current) ? current : manifests[0]?.path ?? '')
   }, [manifestPreviewPath, manifests])
   useEffect(() => { setPreviewVersion(null) }, [selectedSceneId])
+  useEffect(() => { if (sceneId) setSelectedSceneId(sceneId) }, [sceneId])
   useEffect(() => {
     if (!activeDrawer) return
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setActiveDrawer(null) }

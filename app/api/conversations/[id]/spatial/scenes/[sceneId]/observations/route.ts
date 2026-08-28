@@ -15,6 +15,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const body = await request.json() as Record<string, unknown>
     if (typeof body.asset_id !== 'string' || typeof body.comment !== 'string' || !body.comment.trim()) return NextResponse.json({ error: 'asset_id and comment required' }, { status: 400 })
     const scene = await requireSpatialScene(sceneId, { projectId: id, userId })
+    if (typeof body.revision_id === 'string' && body.revision_id !== scene.current_revision_id) {
+      return NextResponse.json({ error: 'Scene 已更新，请重新截取当前视角后再提交。' }, { status: 409 })
+    }
     const viewpoint = normalizeViewpoint(body.viewpoint as Parameters<typeof normalizeViewpoint>[0])
     const selected = typeof body.selected_instance_id === 'string' ? body.selected_instance_id : null
     const visible = Array.isArray(body.visible_instance_ids) ? body.visible_instance_ids.filter((value): value is string => typeof value === 'string').slice(0, 500) : []

@@ -57,7 +57,7 @@ export function ChatContainer({
     // + subtle blue radial accent). The chat panel IS the conversation, just
     // at the "in-progress" stage of the same surface — so it must share bg
     // with the hero, not with Chrome panels.
-    <div className="flex flex-col h-full pmo-conversation-bg">
+    <div className="flex flex-col h-full pmo-conversation-bg" style={{ background: 'transparent' }}>
       {/* Context usage bar */}
       {contextUsage && contextUsage.compressible > 0 && (
         <div className="flex-shrink-0 px-5 pt-3">

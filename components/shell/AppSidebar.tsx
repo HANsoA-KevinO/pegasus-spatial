@@ -7,6 +7,8 @@ import { useConversationTitle } from '@/hooks/useConversation'
 import { useLiteraturePaperSummaries } from '@/hooks/useLiteraturePaperSummaries'
 import { parsePaperSummaryFile } from '@/lib/literature/paper-summaries'
 import { WorkspaceFileExplorer } from '@/components/workspace/WorkspaceFileExplorer'
+import { SpatialSceneList } from '@/components/spatial-stage/SpatialSceneList'
+import { useSpatialScenes } from '@/hooks/useSpatialScenes'
 import { ConversationList } from './ConversationList'
 import { FeedbackDialog } from './FeedbackDialog'
 
@@ -22,12 +24,13 @@ function SidebarModeTab({ selected, disabled = false, label, count, onClick }: {
       type="button"
       role="tab"
       aria-selected={selected}
+      title={disabled ? '请先创建或打开一个项目' : label}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-8 items-center justify-center gap-1.5 rounded-ctrl text-[11px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-35 ${selected ? 'bg-surface-lowest text-primary shadow-sm' : 'text-ink-muted hover:bg-white/35 hover:text-ink'}`}
+      className={`flex h-8 items-center justify-center gap-1.5 rounded-ctrl text-[12.5px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-35 ${selected ? 'bg-surface-lowest text-primary shadow-sm' : 'text-ink-muted hover:bg-white/35 hover:text-ink dark:hover:bg-white/[0.04]'}`}
     >
       {label}
-      {count !== undefined && <span className={`font-mono text-[8.5px] tabular-nums ${selected ? 'text-primary/70' : 'text-ink-faint'}`}>{count}</span>}
+      {count !== undefined && <span className={`font-mono text-[10px] tabular-nums ${selected ? 'text-primary/70' : 'text-ink-faint'}`}>{count}</span>}
     </button>
   )
 }
@@ -36,7 +39,7 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
   active: boolean
   disabled?: boolean
   label: string
-  icon: 'projects' | 'files'
+  icon: 'projects' | 'scenes' | 'files'
   count?: number
   onClick: () => void
 }) {
@@ -51,10 +54,12 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
     >
       {icon === 'projects' ? (
         <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25A2.25 2.25 0 0 1 6 3h3.19c.6 0 1.17.24 1.59.66l.56.56c.42.42.99.66 1.59.66H18A2.25 2.25 0 0 1 20.25 7.1v10.65A2.25 2.25 0 0 1 18 20H6a2.25 2.25 0 0 1-2.25-2.25V5.25Z" /></svg>
+      ) : icon === 'scenes' ? (
+        <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 7.5 7.5-4 7.5 4-7.5 4-7.5-4Z" /><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12 7.5 4 7.5-4M4.5 16.5l7.5 4 7.5-4" /></svg>
       ) : (
         <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3.75h7.69c.4 0 .78.16 1.06.44l2.31 2.31c.28.28.44.66.44 1.06v12.69h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.25a1.5 1.5 0 0 1 1.5-1.5Z" /><path strokeLinecap="round" d="M14.25 3.75V7.5h3.75M8.5 12h6.5M8.5 15h6.5" /></svg>
       )}
-      {count !== undefined && count > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 font-mono text-[7px] leading-4 text-on-primary shadow-sm">{count > 99 ? '99+' : count}</span>}
+      {count !== undefined && count > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 font-mono text-[9px] leading-4 text-on-primary shadow-sm">{count > 99 ? '99+' : count}</span>}
     </button>
   )
 }
@@ -67,6 +72,8 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     artifacts,
     activeArtifactPath,
     setActiveArtifactPath,
+    activeSceneId,
+    setActiveSceneId,
     inFlightPaths,
     runningConversationIds,
     waitingForUserIds,
@@ -86,6 +93,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const canBrowseFiles = pathname === '/' && Boolean(conversationId)
   const effectiveView = canBrowseFiles ? sidebarView : 'projects'
+  const spatialScenes = useSpatialScenes(canBrowseFiles ? conversationId : null, canBrowseFiles)
   const { title: activeProjectTitle } = useConversationTitle(canBrowseFiles ? conversationId : null)
   const paperFingerprint = useMemo(() => {
     const bundles = new Map<string, Set<string>>()
@@ -118,12 +126,24 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     setShimmering(true)
     setTimeout(() => setShimmering(false), 850)
     handleNewChat()
+    if (pathname !== '/') router.push('/')
   }
 
   const selectConversation = (id: string) => {
     setSidebarView('files')
     loadConversation(id)
   }
+
+  const openScenes = () => {
+    if (!canBrowseFiles) return
+    setSidebarView('scenes')
+    if (!activeSceneId && spatialScenes.scenes[0]) setActiveSceneId(spatialScenes.scenes[0].scene_id)
+  }
+
+  useEffect(() => {
+    if (!spatialScenes.hasLoaded || !activeSceneId) return
+    if (!spatialScenes.scenes.some(scene => scene.scene_id === activeSceneId)) setActiveSceneId(null)
+  }, [activeSceneId, setActiveSceneId, spatialScenes.hasLoaded, spatialScenes.scenes])
 
   // Close menu on outside click
   useEffect(() => {
@@ -139,12 +159,11 @@ export function AppSidebar({ className = '' }: { className?: string }) {
 
   return (
     <>
-      {/* 玻璃岛(W3b):侧栏面板底从 bg-surface-sidebar 硬底校准到玻璃 token——
-          区域玻璃取 --glass-panel-bg 的 55%(与顶栏/hero 同比),活背景从侧栏
-          下透过;右缘 1px 硬发丝分隔线 → 极淡玻璃边。 */}
+      {/* 侧栏底色由 AppBackground 放在“呼吸气团”下方；aside 自身只负责
+          毛玻璃合成和内容，使文字、图标与控件始终位于气团之上。 */}
       <aside
         aria-label="项目与文件导航"
-        className={`h-screen fixed left-0 top-0 pt-16 flex flex-col bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)] backdrop-blur-[20px] backdrop-saturate-150 z-40 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+        className={`h-screen fixed left-0 top-0 pt-16 flex flex-col bg-transparent backdrop-blur-[20px] backdrop-saturate-150 z-40 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
           collapsed ? 'w-16' : 'w-[280px]'
         } ${className}`}
         style={{ boxShadow: '1px 0 0 rgba(20,26,38,0.08), 10px 0 30px -18px rgba(16,20,32,0.15)' }}
@@ -161,19 +180,21 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          {!collapsed && <span className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink-faint">空间创作导航</span>}
-          <button
-            type="button"
-            onClick={handleCreate}
-            className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-card text-primary transition hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${collapsed ? 'mt-1' : ''}`}
-            title="新项目"
-            aria-label="新项目"
-          >
-            <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9} aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            <span aria-hidden="true" className={`pmo-shimmer ${shimmering ? 'pmo-shimmer-fire' : ''}`} />
-          </button>
+          {!collapsed && <span className="min-w-0 flex-1 text-[12.5px] font-semibold uppercase tracking-[0.12em] text-ink-muted">空间创作导航</span>}
+          {collapsed && (
+            <button
+              type="button"
+              onClick={handleCreate}
+              className="relative mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-card text-primary transition hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              title="新建项目"
+              aria-label="新建项目"
+            >
+              <svg className="h-[17px] w-[17px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.9} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              <span aria-hidden="true" className={`pmo-shimmer ${shimmering ? 'pmo-shimmer-fire' : ''}`} />
+            </button>
+          )}
         </div>
 
         {collapsed ? (
@@ -186,6 +207,17 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                 setSidebarCollapsed(false)
               }}
               icon="projects"
+            />
+            <CollapsedNavigationButton
+              active={effectiveView === 'scenes'}
+              disabled={!canBrowseFiles}
+              label={canBrowseFiles ? `场景，共 ${spatialScenes.scenes.length} 个` : '请先打开项目'}
+              count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
+              onClick={() => {
+                openScenes()
+                setSidebarCollapsed(false)
+              }}
+              icon="scenes"
             />
             <CollapsedNavigationButton
               active={effectiveView === 'files'}
@@ -203,11 +235,18 @@ export function AppSidebar({ className = '' }: { className?: string }) {
         ) : (
           <>
             <div className="shrink-0 px-4 pb-2">
-              <div role="tablist" aria-label="导航模式" className="grid grid-cols-2 gap-1 rounded-card bg-surface-low/65 p-1">
+              <div role="tablist" aria-label="导航模式" className="grid grid-cols-3 gap-1 rounded-card bg-surface-low/65 p-1">
                 <SidebarModeTab
                   selected={effectiveView === 'projects'}
                   label="项目"
                   onClick={() => setSidebarView('projects')}
+                />
+                <SidebarModeTab
+                  selected={effectiveView === 'scenes'}
+                  disabled={!canBrowseFiles}
+                  label="场景"
+                  count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
+                  onClick={openScenes}
                 />
                 <SidebarModeTab
                   selected={effectiveView === 'files'}
@@ -217,6 +256,9 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                   onClick={() => setSidebarView('files')}
                 />
               </div>
+              {!canBrowseFiles && (
+                <p className="px-1 pt-2 text-[11px] leading-4 text-ink-muted">创建或打开项目后，可在“场景”查看空间版本，在“文件”查看生成产物。</p>
+              )}
             </div>
 
             {effectiveView === 'projects' ? (
@@ -224,7 +266,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                 <button
                   type="button"
                   onClick={handleCreate}
-                  className="pmo-btn-primary relative mb-5 mt-1 flex h-10 w-full items-center justify-center rounded-ctrl px-3 text-[12px]"
+                  className="pmo-btn-primary relative mb-5 mt-1 flex h-10 w-full items-center justify-center rounded-ctrl px-3 text-[13px]"
                   style={{ boxShadow: '0 4px 16px -5px color-mix(in srgb, var(--primary) 32%, transparent)' }}
                 >
                   <span className="relative z-10 inline-flex items-center gap-2">
@@ -242,13 +284,26 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                   onDeleteConversation={handleDeleteConversation}
                 />
               </div>
+            ) : effectiveView === 'scenes' ? (
+              <div role="tabpanel" aria-label="场景" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                <SpatialSceneList
+                  scenes={spatialScenes.scenes}
+                  activeSceneId={activeSceneId}
+                  isLoading={spatialScenes.isLoading}
+                  error={spatialScenes.error}
+                  onSelect={sceneId => {
+                    setActiveSceneId(sceneId)
+                    setSidebarView('scenes')
+                  }}
+                />
+              </div>
             ) : (
               <div role="tabpanel" aria-label="文件" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                <div className="mx-4 mb-2 mt-1 rounded-card border border-outline-variant/10 bg-white/35 px-3 py-2.5">
-                  <p className="truncate text-[11.5px] font-semibold text-ink" title={activeProjectTitle ?? '当前研究项目'}>{activeProjectTitle ?? '当前研究项目'}</p>
+                <div className="mx-4 mb-2 mt-1 rounded-card border border-outline-variant/10 bg-white/35 px-3 py-2.5 dark:bg-white/[0.025]">
+                  <p className="truncate text-[13px] font-semibold text-ink" title={activeProjectTitle ?? '当前研究项目'}>{activeProjectTitle ?? '当前研究项目'}</p>
                   <div className="mt-1 flex items-center justify-between gap-2">
-                    <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-faint">Workspace</span>
-                    <span className="font-mono text-[9px] tabular-nums text-ink-faint">{artifacts.length} files</span>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">Workspace</span>
+                    <span className="font-mono text-[10px] tabular-nums text-ink-faint">{artifacts.length} files</span>
                   </div>
                 </div>
                 {conversationId && (
@@ -281,7 +336,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              {!collapsed && <span className="text-[12.5px] tracking-tight">设置与帮助</span>}
+              {!collapsed && <span className="text-[13.5px] tracking-tight">设置与帮助</span>}
             </button>
 
             {showMenu && (
