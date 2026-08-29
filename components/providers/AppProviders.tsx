@@ -1,6 +1,7 @@
 'use client'
 
 import { ThemeProvider } from 'next-themes'
+import { WorkspaceLayoutProvider } from '@/contexts/WorkspaceLayoutContext'
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
   return (
@@ -11,7 +12,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       enableSystem={false}
       disableTransitionOnChange
     >
-      {children}
+      <WorkspaceLayoutProvider>{children}</WorkspaceLayoutProvider>
     </ThemeProvider>
   )
 }
