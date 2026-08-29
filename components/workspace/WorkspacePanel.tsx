@@ -10,12 +10,15 @@ import { useGridFSContent } from '@/hooks/useGridFSContent'
 import { useConversationTitle } from '@/hooks/useConversation'
 import { ShimmerBlock } from '@/components/loading/Skeleton'
 import { SpatialStage } from '@/components/spatial-stage/SpatialStage'
+import { SpatialModelEntityViewer } from '@/components/spatial-stage/SpatialModelEntityViewer'
+import { useSpatialModels } from '@/hooks/useSpatialModels'
 import { ArtifactLoadingOverlay } from './ArtifactLoadingOverlay'
 import { LiteraturePaperReader } from './LiteraturePaperReader'
 import { parseLiteratureArtifactPath } from './literature-paper-model'
 import {
   SpatialImageViewer,
   SpatialModelViewer,
+  SpatialPointCloudFileViewer,
   SpatialWorldViewer,
 } from './SpatialArtifactViewers'
 
@@ -30,8 +33,11 @@ export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection }: Wor
   const {
     activeArtifactPath,
     activeSceneId,
+    activeModelId,
     conversationId,
   } = useChatContext()
+  const spatialModels = useSpatialModels(conversationId, Boolean(activeModelId && conversationId))
+  const activeModel = spatialModels.models.find(model => model.job_id === activeModelId) ?? null
   const { title: projectTitle } = useConversationTitle(conversationId)
   const active = artifacts.find(item => item.path === activeArtifactPath) ?? artifacts[0]
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -54,6 +60,29 @@ export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection }: Wor
           artifacts={artifacts}
           isProjectLoading={isStreaming}
         />
+      </section>
+    )
+  }
+
+  if (activeModelId && conversationId) {
+    return (
+      <section
+        className="relative h-full min-h-0 min-w-0 overflow-hidden border-r border-[var(--glass-panel-border)]"
+        data-workspace-model-entity-container
+      >
+        {activeModel ? (
+          <SpatialModelEntityViewer conversationId={conversationId} entity={activeModel} />
+        ) : (
+          <div className="flex h-full items-center justify-center bg-[#05070a] p-6 text-center text-white">
+            <div role={spatialModels.error ? 'alert' : 'status'}>
+              {!spatialModels.error && <span className="mx-auto block h-8 w-8 animate-spin rounded-full border border-white/15 border-t-primary motion-reduce:animate-none" />}
+              <p className="mt-4 text-sm font-medium text-white/75">
+                {spatialModels.error ? '模型实体读取失败' : '正在载入模型实体…'}
+              </p>
+              {spatialModels.error && <p className="mt-2 max-w-sm text-xs leading-5 text-white/45">{spatialModels.error}</p>}
+            </div>
+          </div>
+        )}
       </section>
     )
   }
@@ -108,6 +137,11 @@ function ArtifactBody({ artifact, onQuoteSelection }: {
     return conversationId
       ? <SpatialModelViewer artifact={artifact} conversationId={conversationId} />
       : <div className="p-8 text-sm text-error">3D 资产所属项目尚未加载。</div>
+  }
+  if (artifact.type === 'pointcloud3d') {
+    return conversationId
+      ? <SpatialPointCloudFileViewer artifact={artifact} conversationId={conversationId} />
+      : <div className="p-8 text-sm text-error">PLY 文件所属项目尚未加载。</div>
   }
   if (artifact.type === 'world') {
     return conversationId

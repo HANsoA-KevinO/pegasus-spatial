@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Readable } from 'node:stream'
 import sharp from 'sharp'
 import { getConversation } from '@/lib/db/repository'
-import { getGridFSFileInfo, readFileFromGridFSAsBuffer } from '@/lib/db/gridfs'
+import {
+  getGridFSFileInfo,
+  openFileFromGridFSStream,
+  readFileFromGridFSAsBuffer,
+} from '@/lib/db/gridfs'
 import { resolveLocalOwner } from '@/lib/local-owner'
 import { getOwnedImageAsset, readImageAsset } from '@/lib/media/storage'
 import { toRasterAssetRef } from '@/lib/media/reference'
@@ -195,13 +200,14 @@ export async function GET(
         })
       }
 
-      const buffer = await readFileFromGridFSAsBuffer(entry.gridfs_id, range || undefined)
-      if (buffer === null) {
+      const downloadStream = await openFileFromGridFSStream(entry.gridfs_id, range || undefined)
+      if (!downloadStream) {
         return NextResponse.json({ error: `GridFS entry missing for ${path}` }, { status: 404 })
       }
+      const contentLength = range ? range.endExclusive - range.start : entry.size_bytes
       const headers: Record<string, string> = {
         'Content-Type': entry.mime_type,
-        'Content-Length': String(buffer.length),
+        'Content-Length': String(contentLength),
         'Content-Disposition': contentDisposition(entry.filename, wantsDownload),
         'Accept-Ranges': 'bytes',
         'Cache-Control': requestedVersion ? 'private, max-age=31536000, immutable' : 'private, no-cache',
@@ -212,7 +218,11 @@ export async function GET(
       if (range) {
         headers['Content-Range'] = `bytes ${range.start}-${range.endExclusive - 1}/${entry.size_bytes}`
       }
-      return new NextResponse(new Uint8Array(buffer), { status: range ? 206 : 200, headers })
+      const stopDownload = () => downloadStream.destroy()
+      req.signal.addEventListener('abort', stopDownload, { once: true })
+      downloadStream.once('close', () => req.signal.removeEventListener('abort', stopDownload))
+      const body = Readable.toWeb(downloadStream) as unknown as ReadableStream<Uint8Array>
+      return new NextResponse(body, { status: range ? 206 : 200, headers })
     }
 
     const gridfsId = entry?.gridfs_id

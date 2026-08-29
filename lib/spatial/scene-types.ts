@@ -53,6 +53,21 @@ export interface SceneObjectInstance {
   transform: SceneTransform3D
 }
 
+/**
+ * User-safe projection of one published standalone object build. Storage
+ * locators and provider credentials deliberately stay behind the API boundary.
+ */
+export interface SpatialObjectModelEntity {
+  job_id: string
+  label: string
+  provider: string
+  status: 'published'
+  updated_at: string
+  glb_artifact: SceneSourceArtifact
+  ply_artifact: SceneSourceArtifact
+  normalization: SceneObjectNormalization
+}
+
 export interface SpatialSceneRecord {
   scene_id: string
   project_id: string

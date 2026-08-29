@@ -94,7 +94,7 @@ export function SpatialImageViewer({ artifact, conversationId }: {
             <ProgressiveImage
               src={src}
               alt={artifact.label}
-              frameClassName="pmo-progressive-image--unframed pointer-events-none h-full w-full"
+              frameClassName="pmo-progressive-image--unframed pmo-progressive-image--workspace pointer-events-none h-full w-full"
               imageClassName="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.006]"
               onLoad={event => {
                 const { naturalWidth, naturalHeight } = event.currentTarget
@@ -133,7 +133,7 @@ export function SpatialImageViewer({ artifact, conversationId }: {
             <ProgressiveImage
               src={src}
               alt={artifact.label}
-              frameClassName="h-full w-full"
+              frameClassName="pmo-progressive-image--workspace h-full w-full"
               imageClassName="h-full w-full object-contain"
             />
           </div>
@@ -270,6 +270,41 @@ export function SpatialModelViewer({ artifact, conversationId }: {
         document.body,
       )}
     </>
+  )
+}
+
+/**
+ * A PLY entry in “文件” is the concrete binary file, not a second model
+ * entity. Its paired, aligned GLB/PLY visualization lives in the “模型” tab.
+ */
+export function SpatialPointCloudFileViewer({ artifact, conversationId }: {
+  artifact: WorkspaceArtifact
+  conversationId: string
+}) {
+  return (
+    <section className="flex h-full min-h-[28rem] items-center justify-center px-6 py-10 text-center" data-workspace-content="unframed">
+      <div className="max-w-md">
+        <span aria-hidden="true" className="mx-auto grid h-14 w-14 place-items-center rounded-[18px] border border-primary/15 bg-primary/[0.07] text-primary shadow-[0_14px_36px_color-mix(in_srgb,var(--primary)_10%,transparent)]">
+          <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.35">
+            <circle cx="7" cy="8" r="1.25" /><circle cx="15.8" cy="6.2" r="1.1" /><circle cx="17.2" cy="15.7" r="1.35" /><circle cx="8.8" cy="17" r="1" /><circle cx="12" cy="11.5" r="1.5" />
+          </svg>
+        </span>
+        <h2 className="mt-5 text-base font-semibold text-ink">{artifact.label}</h2>
+        <p className="mt-2 text-xs leading-6 text-ink-muted">
+          这是模型实体的 PLY 点云表现文件。请在“模型”中打开对应实体，即可在空间舞台切换 GLB 与 PLY。
+        </p>
+        <p className="mt-3 font-mono text-[10px] text-ink-faint">
+          {[artifact.mimeType ?? 'application/ply', artifact.sizeBytes ? `${(artifact.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : null].filter(Boolean).join(' · ')}
+        </p>
+        <a
+          href={fileUrl(conversationId, artifact, '&download=1')}
+          download
+          className="mt-6 inline-flex h-9 items-center justify-center rounded-ctrl bg-primary px-4 text-xs font-semibold text-on-primary transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        >
+          下载 PLY 文件
+        </a>
+      </div>
+    </section>
   )
 }
 

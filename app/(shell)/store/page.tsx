@@ -132,7 +132,7 @@ function PreferenceEditor({ initial, onSave, onClose }: {
           <div>
             <p className="text-label text-primary">长期画像</p>
             <h2 id="memory-preference-editor-title" className="mt-1 text-heading font-semibold text-ink">
-              {initial ? '调整一条记忆' : '告诉 Pegasus Spatial 一件值得长期记住的事'}
+              {initial ? '调整一条记忆' : '告诉 Spatial Pegasus 一件值得长期记住的事'}
             </h2>
             <p className="mt-2 max-w-lg text-caption text-ink-muted">
               只保存能跨任务稳定成立的偏好；单次项目的临时风格更适合留在当前对话。
@@ -180,7 +180,7 @@ function PreferenceEditor({ initial, onSave, onClose }: {
             />
           </label>
           <label className="text-label text-ink-secondary sm:col-span-2">
-            希望 Pegasus Spatial 记住什么
+            希望 Spatial Pegasus 记住什么
             <textarea
               value={statement}
               onChange={event => setStatement(event.target.value)}
@@ -623,7 +623,7 @@ export default function StorePage() {
                     item={item}
                     onEdit={() => setEditor(item)}
                     onDelete={() => {
-                      if (confirm('删除这条偏好？Pegasus Spatial 会避免根据旧证据把它自动重建。')) {
+                      if (confirm('删除这条偏好？Spatial Pegasus 会避免根据旧证据把它自动重建。')) {
                         void memory.deletePreference(item.preference_id)
                       }
                     }}

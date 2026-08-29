@@ -143,22 +143,17 @@ function WorkspaceSkeleton() {
 
 function LibrarySkeleton() {
   return (
-    <div className="px-8 py-10">
+    <div className="mx-auto max-w-[1440px] px-6 py-8 lg:px-10 lg:py-10">
       <Block className="w-48 mb-3" h={28} />
-      <Block className="w-72 mb-10" h={14} />
-      {/* Mirror real Library page grid + ProjectCard layout (thumb flush, info p-4) */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+      <Block className="w-72 mb-8" h={14} />
+      {/* Mirror the real 16:10 cover cards and their responsive project grid. */}
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:gap-6 2xl:grid-cols-4">
         {Array.from({ length: 8 }).map((_, i) => (
           <div
             key={i}
-            className="bg-surface-lowest rounded-card overflow-hidden ghost-border flex flex-col"
-            style={{ boxShadow: 'var(--shadow-ambient)' }}
+            className="relative aspect-[16/10] overflow-hidden rounded-[18px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] shadow-[var(--shadow-glass)]"
           >
-            <Block className="aspect-[4/3]" />
-            <div className="p-4">
-              <Block className="w-3/4 mb-1.5" h={14} />
-              <Block className="w-1/2" h={10} />
-            </div>
+            <Block className="h-full w-full rounded-none" />
           </div>
         ))}
       </div>

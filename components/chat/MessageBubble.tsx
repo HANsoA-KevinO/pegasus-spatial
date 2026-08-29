@@ -575,7 +575,7 @@ function ProcessBubble({
       className={`pmo-msg pmo-msg-ai ${isStreaming ? 'generating' : 'completed'}${terminalFail ? ' pmo-fail' : ''}`}
     >
       <div className="pmo-msg-meta">
-        PEGASUS SPATIAL{' '}<span className="pmo-time">{formatTime(message.timestamp)}</span>
+        SPATIAL PEGASUS{' '}<span className="pmo-time">{formatTime(message.timestamp)}</span>
         {isStreaming && <span className="pmo-generating">· GENERATING</span>}
         {!isStreaming && (
           <span className={`pmo-completed-badge${terminalFail ? ' pmo-badge-fail' : ''}`}>
@@ -666,7 +666,7 @@ function FinalResponse({
   return (
     <div className="pmo-msg pmo-msg-ai-final">
       <div className="pmo-msg-meta">
-        PEGASUS SPATIAL{' '}<span className="pmo-time">{formatTime(message.timestamp)}</span>
+        SPATIAL PEGASUS{' '}<span className="pmo-time">{formatTime(message.timestamp)}</span>
       </div>
       <div className="pmo-msg-body">
         {parts.length === 0 && isStreaming && (

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { selectProjectCoverAssets, type ProjectCoverJob } from '../../../lib/projects/project-cover'
 import { conciseSceneDisplayName } from '../../../lib/spatial/presentation-name'
+import type { FileEntry, RasterAssetFileEntry } from '../../../lib/workspace/types'
 
 function source(...segments: string[]): string {
   return readFileSync(join(process.cwd(), ...segments), 'utf8')
@@ -39,14 +41,17 @@ const resizeHandle = source('components', 'shell', 'PanelResizeHandle.tsx')
 const workspaceLayout = source('contexts', 'WorkspaceLayoutContext.tsx')
 const literatureReader = source('components', 'workspace', 'LiteraturePaperReader.tsx')
 const sceneList = source('components', 'spatial-stage', 'SpatialSceneList.tsx')
+const modelCatalog = source('components', 'spatial-stage', 'SpatialModelCatalog.tsx')
+const modelEntityViewer = source('components', 'spatial-stage', 'SpatialModelEntityViewer.tsx')
 const imageViewer = viewers.match(/export function SpatialImageViewer[\s\S]*?(?=export function SpatialModelViewer)/)?.[0] ?? ''
 const modelViewer = viewers.match(/export function SpatialModelViewer[\s\S]*?(?=type WorldManifest)/)?.[0] ?? ''
 
-assert.match(artifacts, /'image' \| 'model3d' \| 'world'/)
+assert.match(artifacts, /'image' \| 'model3d' \| 'pointcloud3d' \| 'world'/)
 assert.match(artifacts, /entry\.storage === 'asset' && entry\.kind === 'raster'/)
 assert.match(artifacts, /glb\|gltf/)
+assert.match(artifacts, /\\\.ply/)
 assert.match(artifacts, /output\\\/spatial\\\/worlds|output\/spatial\/worlds/)
-assert.match(artifacts, /type === 'model3d' \|\| type === 'world'/, 'immutable World manifests must keep their semantic viewer type')
+assert.match(artifacts, /type === 'model3d' \|\| type === 'pointcloud3d' \|\| type === 'world'/, 'immutable 3D binaries and World manifests must keep their semantic viewer type')
 assert.match(artifacts, /gridfsPending: type === 'world'/, 'immutable World manifests must lazily load their JSON content')
 assert.doesNotMatch(
   artifacts,
@@ -54,7 +59,7 @@ assert.doesNotMatch(
   'durable job receipts must not shadow authoritative Workspace artifacts',
 )
 
-for (const component of ['SpatialImageViewer', 'SpatialModelViewer', 'SpatialWorldViewer']) {
+for (const component of ['SpatialImageViewer', 'SpatialModelViewer', 'SpatialPointCloudFileViewer', 'SpatialWorldViewer']) {
   assert.match(panel, new RegExp(component))
   assert.match(viewers, new RegExp(`export function ${component}`))
 }
@@ -65,7 +70,10 @@ assert.match(imageViewer, /data-workspace-image-stage/)
 assert.match(imageViewer, /max-h-\[min\(100%,48rem\)\]/)
 assert.match(imageViewer, /max-w-5xl/)
 assert.match(imageViewer, /pmo-progressive-image--unframed/)
+assert.equal((imageViewer.match(/pmo-progressive-image--workspace/g) ?? []).length, 2, 'workspace and fullscreen image loading artwork both use the larger responsive treatment')
 assert.match(imageViewer, /object-contain/)
+assert.match(globals, /\.pmo-progressive-image--workspace \.pmo-progressive-image-loader-composition\s*\{[\s\S]*?width: clamp\(224px, 26cqi, 304px\)/, 'large image loading artwork scales with the workspace width')
+assert.match(globals, /\.pmo-progressive-image--workspace \.pmo-progressive-image-loader-composition\s*\{[\s\S]*?aspect-ratio: 23 \/ 16/, 'responsive loading artwork keeps its intended composition')
 assert.doesNotMatch(imageViewer, /var\(--surface\)_52%,transparent/)
 assert.doesNotMatch(imageViewer, /rounded-2xl border border-outline-variant\/15 bg-surface-lowest shadow-/)
 assert.doesNotMatch(imageViewer, /backdrop-blur-sm/)
@@ -129,7 +137,21 @@ assert.doesNotMatch(messageBubble, /past: 'SUBMITTED'/)
 assert.match(sidebar, /空间创作导航/)
 assert.match(sidebar, /label="模型"/)
 assert.doesNotMatch(sidebar, /label="场景"/)
-assert.match(sidebar, /SpatialSceneList/)
+assert.match(sidebar, /SpatialModelCatalog/)
+assert.match(sidebar, /useSpatialModels/)
+assert.match(sidebar, /spatialScenes\.scenes\.length \+ spatialModels\.models\.length/)
+assert.match(sidebar, /models=\{spatialModels\.models\}/)
+assert.match(sidebar, /onSelectModel=\{modelId => \{[\s\S]{0,120}setActiveModelId\(modelId\)/)
+assert.match(modelCatalog, /场景模型/)
+assert.match(modelCatalog, /物体模型/)
+assert.match(modelCatalog, /data-model-kind="scene"/)
+assert.match(modelCatalog, /data-model-kind="object"/)
+assert.match(modelCatalog, /onSelectScene\(scene\.scene_id\)/)
+assert.match(modelCatalog, /onSelectModel\(model\.job_id\)/)
+assert.match(modelCatalog, /key=\{model\.job_id\}/, 'one published Object Job owns one stable model-entity card')
+assert.match(modelCatalog, /GLB \+ PLY/)
+assert.doesNotMatch(modelCatalog, /WorkspaceArtifact/, 'model cards consume model entities rather than raw Workspace files')
+assert.doesNotMatch(modelCatalog, /\{model\.path\}/, 'raw model paths are not rendered as catalog copy')
 assert.doesNotMatch(sceneList, /空间场景|\{scenes\.length\} scenes|Scene 是可反复观察和修改的空间版本。/)
 assert.doesNotMatch(sceneList, /AUTO REVISION|每次空间修改都会自动保留版本/)
 assert.match(sceneList, /暂无模型/)
@@ -139,10 +161,21 @@ assert.doesNotMatch(sceneList, /scene\.current_version|>v\{scene\.|\{scene\.scen
 assert.match(explorer, /kind === 'object'/)
 assert.equal(conciseSceneDisplayName('龙族海边夕阳（组装预览）'), '龙族海边夕阳')
 assert.equal(conciseSceneDisplayName('庭院（黄昏）'), '庭院（黄昏）')
+assert.equal(conciseSceneDisplayName('Cyberpunk Hongyadong Modules'), '赛博朋克洪崖洞组合场景')
+assert.doesNotMatch(conciseSceneDisplayName('Quantum Flux Habitat'), /[a-z]/i)
 assert.match(context, /SidebarView = 'projects' \| 'scenes' \| 'files'/)
+assert.match(context, /activeModelId/)
+assert.match(context, /pegasus_spatial_workspace_active_model:/)
 assert.match(context, /SpatialObservationDraft/)
+assert.match(context, /refreshConversationArtifacts\(activeConversationId, controller\.signal\)/)
+assert.match(context, /window\.setInterval\(\(\) => void refresh\(\), 2_500\)/)
+assert.match(context, /sidebarView === 'scenes'/, 'the visible model catalog watches background Workspace publications')
 assert.match(panel, /<SpatialStage[\s\S]{0,80}embedded/)
 assert.match(panel, /activeSceneId/)
+assert.match(panel, /<SpatialModelEntityViewer/)
+assert.match(panel, /activeModelId/)
+assert.match(modelEntityViewer, /qualityMode=\{qualityMode\}/)
+assert.match(modelEntityViewer, /ply_artifact/)
 assert.match(workspacePage, /!isLoading && !showWorkspace/, 'projects with durable artifacts or an active Scene must open the workspace instead of the empty-project launcher')
 assert.match(chatInput, /id="pegasus-chat-input"/)
 assert.match(chatInput, /data-fluid-interaction="ignore" className="pmo-input-shell"/)
@@ -236,23 +269,165 @@ assert.match(sidebar, /label: '浅色'/)
 assert.match(sidebar, /label: '深色'/)
 assert.match(sidebar, /setTheme\(option\.value\)/)
 assert.match(workspaceLayout, /LEFT_SIDEBAR_LIMITS = \{ min: 232, max: 400, default: 280 \}/)
-assert.match(workspaceLayout, /RIGHT_PANEL_LIMITS = \{ min: 420, max: 760, default: 560 \}/)
+assert.match(workspaceLayout, /RIGHT_PANEL_LIMITS = \{ min: 480, max: 760, default: 560 \}/)
 assert.match(workspaceLayout, /localStorage\.setItem\(LEFT_SIDEBAR_STORAGE_KEY/)
 assert.match(workspaceLayout, /localStorage\.setItem\(RIGHT_PANEL_STORAGE_KEY/)
+assert.match(workspacePage, /width: rightPanelWidth, minWidth: RIGHT_PANEL_LIMITS\.min/)
 assert.match(resizeHandle, /role="separator"/)
 assert.match(resizeHandle, /aria-orientation="vertical"/)
 assert.match(resizeHandle, /onDoubleClick=\{onReset\}/)
+assert.match(chatInput, /className="pmo-toolbar-tools"/)
+assert.match(chatInput, /className="pmo-toolbar-actions"/)
+assert.match(chatInput, /className="pmo-toolbar-model"/)
+assert.doesNotMatch(chatInput, /pmo-toolbar-spacer/)
+assert.match(globals, /container: chat-composer \/ inline-size/)
+assert.match(globals, /@container chat-composer \(max-width: 480px\)/)
+assert.match(globals, /\.pmo-input-toolbar\s*\{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) auto/)
+assert.match(globals, /\.pmo-toolbar-actions\s*\{[\s\S]*?justify-content: flex-end/)
+assert.match(globals, /\.pmo-tool-btn\s*\{[\s\S]*?white-space: nowrap/)
+assert.match(globals, /\.pmo-toolbar-model \.pmo-popover\.model-picker\s*\{[\s\S]*?width: min\(340px, calc\(100cqw - 20px\)\)/)
 assert.match(sidebar, /label="调整左侧导航栏宽度"/)
 assert.match(workspacePage, /label="调整右侧对话栏宽度"/)
 
-assert.match(libraryPage, /max-w-6xl/)
-assert.match(libraryPage, /sm:grid-cols-2 xl:grid-cols-3/)
+assert.match(libraryPage, /max-w-\[1440px\]/)
+assert.match(libraryPage, /grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:gap-6 2xl:grid-cols-4/)
+assert.match(libraryPage, /data-project-grid/)
 assert.doesNotMatch(libraryPage, /handleNewChat|handleCreate/)
 assert.doesNotMatch(libraryPage, /新建项目|创建第一个项目/)
 assert.doesNotMatch(libraryPage, /搜索项目|type="search"|setSearch/)
-assert.match(projectCard, /min-h-\[176px\]/)
-assert.match(projectCard, /fileCount/)
-assert.match(projectCard, /更新于/)
+assert.match(useProjects, /cover_kind\?: ProjectCoverKind/)
+assert.match(useProjects, /cover_images\?: ProjectCoverAsset\[\]/)
+assert.match(projectCard, /data-project-cover-count=\{images\.length\}/)
+assert.match(projectCard, /data-project-cover-fallback/)
+assert.match(projectCard, /data-cover-kind=\{project\.cover_kind \?\? 'empty'\}/)
+assert.match(projectCard, /buildBrowserMediaUrl\(image\.asset_id, 'thumbnail'\)/)
+assert.match(projectCard, /aspect-\[16\/10\]/)
+assert.match(projectCard, /aria-label=\{`打开项目：\$\{project\.title\}`\}/)
+assert.match(projectCard, /aria-label=\{`项目操作：\$\{project\.title\}`\}/)
+assert.match(projectCard, /aria-haspopup="dialog"/)
+assert.match(projectCard, /role=\{confirmingDelete \? 'alertdialog' : 'dialog'\}/)
+assert.match(projectCard, /<time/)
+assert.match(projectCard, /dateTime=\{project\.created_at\}/)
+assert.match(projectCard, /创建于/)
+assert.match(projectCard, /确认删除这个项目/)
+assert.match(projectCard, /disabled=\{editing \|\| menuOpen\}/)
+assert.match(projectCard, /key=\{`\$\{image\.asset_id\}:\$\{image\.path\}`\}/)
+assert.match(projectCard, /role="alert"/)
+assert.match(libraryPage, /data-project-grid-loading role="status" aria-label="正在加载项目" aria-busy="true"/)
+assert.match(libraryPage, /重新加载/)
+assert.match(useProjects, /error: string \| null/)
+assert.doesNotMatch(projectCard, /fileCount|更新于/)
+
+const coverAssetId = (seed: string): string => seed.repeat(43).slice(0, 43)
+const rasterCover = (
+  assetId: string,
+  createdAt = '2026-08-28T08:00:00.000Z',
+  mimeType = 'image/webp',
+): RasterAssetFileEntry => ({
+  storage: 'asset',
+  kind: 'raster',
+  asset_id: assetId,
+  mime_type: mimeType,
+  width: 1600,
+  height: 1000,
+  size_bytes: 320_000,
+  created_at: createdAt,
+})
+
+const sceneAssetId = coverAssetId('s')
+const objectAssetId = coverAssetId('o')
+const scenePath = 'output/spatial/images/coastal_scene.webp'
+const objectPath = 'output/spatial/images/coastal_object.webp'
+const sceneFiles: Record<string, FileEntry> = {
+  [scenePath]: rasterCover(sceneAssetId, '2026-08-28T08:00:00.000Z'),
+  [objectPath]: rasterCover(objectAssetId, '2026-08-28T09:00:00.000Z'),
+}
+const sceneJobs: ProjectCoverJob[] = [
+  {
+    conversation_id: 'project-cover-scene',
+    kind: 'object',
+    request_snapshot: { provider_options: { source_asset_ids: [objectAssetId] } },
+    updated_at: '2026-08-28T10:00:00.000Z',
+  },
+  {
+    conversation_id: 'project-cover-scene',
+    kind: 'world',
+    request_snapshot: { provider_options: { source_asset_id: sceneAssetId } },
+    updated_at: '2026-08-28T07:00:00.000Z',
+  },
+]
+assert.deepEqual(
+  selectProjectCoverAssets(sceneFiles, sceneJobs),
+  {
+    kind: 'scene',
+    images: [{
+      path: scenePath,
+      asset_id: sceneAssetId,
+      mime_type: 'image/webp',
+      width: 1600,
+      height: 1000,
+    }],
+  },
+  'a published Scene source image must take precedence over newer object references',
+)
+
+const objectAssetIds = ['a', 'b', 'c', 'd', 'e'].map(coverAssetId)
+const objectPaths = objectAssetIds.map((_, index) => `output/spatial/images/object-${index + 1}.webp`)
+const objectFiles = Object.fromEntries(objectPaths.map((path, index) => [
+  path,
+  rasterCover(objectAssetIds[index], `2026-08-28T0${index + 1}:00:00.000Z`),
+])) satisfies Record<string, FileEntry>
+const objectJobs: ProjectCoverJob[] = [{
+  conversation_id: 'project-cover-objects',
+  kind: 'object',
+  request_snapshot: {
+    input_image_paths: [objectPaths[4]],
+    provider_options: {
+      source_asset_ids: [
+        objectAssetIds[0],
+        objectAssetIds[1],
+        objectAssetIds[0],
+        objectAssetIds[2],
+        objectAssetIds[3],
+        objectAssetIds[4],
+      ],
+    },
+  },
+}]
+const objectSelection = selectProjectCoverAssets(objectFiles, objectJobs)
+assert.equal(objectSelection.kind, 'objects')
+assert.deepEqual(
+  objectSelection.images.map(image => image.asset_id),
+  objectAssetIds.slice(0, 4),
+  'object covers must be deduplicated, preserve reference order, and cap the mosaic at four images',
+)
+
+const validAssetId = coverAssetId('v')
+const validPath = 'output/spatial/images/reference.webp'
+const invalidCoverFiles: Record<string, FileEntry> = {
+  [validPath]: rasterCover(validAssetId),
+  'uploads/outside-spatial-root.webp': rasterCover(coverAssetId('x')),
+  'output/spatial/images/legacy.png': { gridfs_id: 'legacy-gridfs-image', mime_type: 'image/png' },
+  'output/spatial/images/not-an-image.bin': rasterCover(coverAssetId('m'), undefined, 'application/octet-stream'),
+  'output/spatial/images/invalid-asset-id.webp': rasterCover('too-short'),
+}
+assert.deepEqual(
+  selectProjectCoverAssets(invalidCoverFiles),
+  {
+    kind: 'images',
+    images: [{
+      path: validPath,
+      asset_id: validAssetId,
+      mime_type: 'image/webp',
+      width: 1600,
+      height: 1000,
+    }],
+  },
+  'cover selection must ignore legacy, non-image, malformed, and out-of-root files',
+)
+const invalidOnlyCoverFiles = { ...invalidCoverFiles }
+delete invalidOnlyCoverFiles[validPath]
+assert.deepEqual(selectProjectCoverAssets(invalidOnlyCoverFiles), { kind: 'empty', images: [] })
 
 assert.match(agentTeamPanel, /snapshot\.agents\.some\(agent => !agent\.is_root\)/)
 assert.match(agentTeamPanel, /if \(!hasMemberAgents\) return null/)

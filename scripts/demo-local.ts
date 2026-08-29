@@ -198,7 +198,7 @@ async function probeApp(): Promise<AppProbe> {
       signal: AbortSignal.timeout(1_500),
     })
     const text = await response.text()
-    if (response.status === 200 && text.includes('Pegasus Spatial')) return 'pegasus-spatial'
+    if (response.status === 200 && text.includes('Spatial Pegasus')) return 'pegasus-spatial'
     return 'occupied'
   } catch {
     return 'offline'

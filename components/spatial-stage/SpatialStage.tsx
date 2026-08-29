@@ -15,13 +15,84 @@ import styles from './SpatialStage.module.css'
 
 interface SceneSummary { scene_id: string; title: string; current_version: number; current_revision_id: string; agent_viewpoint: SceneViewpoint | null }
 interface SceneRevision { revision_id: string; version: number; change_summary: string; world: { up_axis: 'Y' | 'Z'; artifacts: Array<{ workspace_path: string; sha256: string }> } | null; instances: SceneObjectInstance[] }
-interface SceneResponse { scene: SceneSummary; revision: SceneRevision; history?: Array<{ revision_id: string; version: number; change_summary: string }> }
+interface SceneHistorySummary { revision_id: string; version: number; change_summary: string }
+interface SceneResponse { scene: SceneSummary; revision: SceneRevision; history?: SceneHistorySummary[] }
 interface RenderSession { session_id: string; lease_token: string }
 interface RenderCommand { command_id: string; observation_id: string; viewpoint: SceneViewpoint; lease: { token: string } }
 
+const SCENE_LIST_POLL_MS = 2_500
+const SCENE_DETAIL_POLL_MS = 1_800
 const RENDER_COMMAND_IDLE_POLL_MS = 2_500
 const RENDER_COMMAND_ACTIVE_POLL_MS = 250
 const EMBEDDED_NAVIGATION_HINT_DISMISSED_KEY = 'pegasus-spatial-embedded-navigation-hint-dismissed'
+const EMPTY_SCENE_INSTANCES: SceneObjectInstance[] = []
+const INITIAL_QUALITY_RENDER_STATE: SpatialQualityRenderState = {
+  status: 'glb',
+  instanceId: null,
+  loadedCount: 0,
+  totalCount: 0,
+}
+
+function isAbortError(value: unknown): boolean {
+  return value instanceof DOMException && value.name === 'AbortError'
+}
+
+function sceneSummaryFingerprint(scene: SceneSummary): string {
+  return JSON.stringify([
+    scene.scene_id,
+    scene.title,
+    scene.current_version,
+    scene.current_revision_id,
+    scene.agent_viewpoint,
+  ])
+}
+
+function sameSceneSummaries(current: readonly SceneSummary[], incoming: readonly SceneSummary[]): boolean {
+  return current.length === incoming.length
+    && current.every((scene, index) => sceneSummaryFingerprint(scene) === sceneSummaryFingerprint(incoming[index]!))
+}
+
+function compactHistory(history: readonly SceneHistorySummary[] | undefined): SceneHistorySummary[] | undefined {
+  return history?.map(item => ({
+    revision_id: item.revision_id,
+    version: item.version,
+    change_summary: item.change_summary,
+  }))
+}
+
+function sceneResponseFingerprint(value: SceneResponse): string {
+  return JSON.stringify({
+    scene: [
+      value.scene.scene_id,
+      value.scene.title,
+      value.scene.current_version,
+      value.scene.current_revision_id,
+      value.scene.agent_viewpoint,
+    ],
+    revision: [
+      value.revision.revision_id,
+      value.revision.version,
+      value.revision.change_summary,
+      value.revision.world,
+      value.revision.instances,
+    ],
+    history: value.history?.map(item => [item.revision_id, item.version, item.change_summary]) ?? null,
+  })
+}
+
+function reconcileSceneResponse(current: SceneResponse | null, incoming: SceneResponse): SceneResponse {
+  const incomingHistory = compactHistory(incoming.history)
+  const next: SceneResponse = {
+    scene: incoming.scene,
+    revision: incoming.revision,
+    ...(incomingHistory
+      ? { history: incomingHistory }
+      : current?.history
+        ? { history: current.history }
+        : {}),
+  }
+  return current && sceneResponseFingerprint(current) === sceneResponseFingerprint(next) ? current : next
+}
 
 function shortId(value: string | null | undefined): string {
   if (!value) return '—'
@@ -51,6 +122,8 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
 }) {
   const { sendMessage } = useChatContext()
   const canvasRef = useRef<SpatialCanvasHandle>(null)
+  const sceneListEpochRef = useRef(0)
+  const sceneDetailEpochRef = useRef(0)
   const manifests = useMemo(() => listWorldManifests(artifacts), [artifacts])
   const [scenes, setScenes] = useState<SceneSummary[]>([])
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(sceneId)
@@ -62,7 +135,7 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null)
   const [qualityMode, setQualityMode] = useState<'glb' | 'ply'>('glb')
   const [qualityReloadToken, setQualityReloadToken] = useState(0)
-  const [qualityRenderState, setQualityRenderState] = useState<SpatialQualityRenderState>({ status: 'glb', instanceId: null, loadedCount: 0, totalCount: 0 })
+  const [qualityRenderState, setQualityRenderState] = useState<SpatialQualityRenderState>(INITIAL_QUALITY_RENDER_STATE)
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -81,26 +154,138 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
     return `/spatial/${encodeURIComponent(conversationId)}${search ? `?${search}` : ''}`
   }, [conversationId, manifestPreviewPath, selectedSceneId])
 
-  const refreshScenes = useCallback(async () => {
-    const list = await json<{ scenes: SceneSummary[] }>(`/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes`)
-    setScenes(list.scenes)
-    setSelectedSceneId(current => {
-      if (sceneId && list.scenes.some(scene => scene.scene_id === sceneId)) return sceneId
-      return current && list.scenes.some(scene => scene.scene_id === current) ? current : list.scenes[0]?.scene_id ?? null
-    })
-  }, [conversationId, sceneId])
-  const refreshScene = useCallback(async () => {
-    if (!selectedSceneId) { setSceneData(null); return }
-    const query = new URLSearchParams({ history: '1' }); if (previewVersion) query.set('version', String(previewVersion))
-    setSceneData(await json<SceneResponse>(`/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes/${encodeURIComponent(selectedSceneId)}?${query}`))
-  }, [conversationId, previewVersion, selectedSceneId])
-  useEffect(() => { void refreshScenes().catch(() => undefined); const timer = setInterval(() => void refreshScenes().catch(() => undefined), 2500); return () => clearInterval(timer) }, [refreshScenes])
-  useEffect(() => { void refreshScene().catch(errorValue => setError(String(errorValue))); const timer = setInterval(() => void refreshScene().catch(() => undefined), 1800); return () => clearInterval(timer) }, [refreshScene])
+  useEffect(() => {
+    // The embedded Stage already receives an authoritative Scene id from the
+    // application sidebar. Avoid mounting a second copy of the same list poll.
+    if (embedded) return
+
+    const requestEpoch = ++sceneListEpochRef.current
+    const controller = new AbortController()
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const poll = async () => {
+      try {
+        const list = await json<{ scenes: SceneSummary[] }>(
+          `/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes`,
+          { signal: controller.signal },
+        )
+        if (stopped || controller.signal.aborted || sceneListEpochRef.current !== requestEpoch) return
+        setScenes(current => sameSceneSummaries(current, list.scenes) ? current : list.scenes)
+        setSelectedSceneId(current => {
+          if (sceneId && list.scenes.some(scene => scene.scene_id === sceneId)) return sceneId
+          return current && list.scenes.some(scene => scene.scene_id === current)
+            ? current
+            : list.scenes[0]?.scene_id ?? null
+        })
+      } catch (cause) {
+        if (!stopped && !controller.signal.aborted && !isAbortError(cause)) {
+          // The standalone Stage keeps its last good catalog through transient
+          // failures and retries only after this request has settled.
+        }
+      } finally {
+        if (!stopped && !controller.signal.aborted && sceneListEpochRef.current === requestEpoch) {
+          timer = setTimeout(() => void poll(), SCENE_LIST_POLL_MS)
+        }
+      }
+    }
+    void poll()
+    return () => {
+      stopped = true
+      controller.abort()
+      if (timer) clearTimeout(timer)
+      if (sceneListEpochRef.current === requestEpoch) sceneListEpochRef.current += 1
+    }
+  }, [conversationId, embedded, sceneId])
+
+  useEffect(() => {
+    if (!selectedSceneId || isManifestPreview) {
+      setSceneData(null)
+      return
+    }
+
+    const requestEpoch = ++sceneDetailEpochRef.current
+    const controller = new AbortController()
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let needsHistoryRefresh = true
+    let acceptedRevisionId: string | null = null
+    let hasAcceptedResponse = false
+    const poll = async () => {
+      const includeHistory = previewVersion !== null || needsHistoryRefresh
+      const query = new URLSearchParams()
+      if (includeHistory) query.set('history', '1')
+      if (previewVersion !== null) query.set('version', String(previewVersion))
+      const search = query.toString()
+      const suffix = search ? `?${search}` : ''
+      try {
+        const incoming = await json<SceneResponse>(
+          `/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes/${encodeURIComponent(selectedSceneId)}${suffix}`,
+          { signal: controller.signal },
+        )
+        if (stopped || controller.signal.aborted || sceneDetailEpochRef.current !== requestEpoch) return
+
+        const revisionChanged = acceptedRevisionId !== null
+          && acceptedRevisionId !== incoming.revision.revision_id
+        acceptedRevisionId = incoming.revision.revision_id
+        hasAcceptedResponse = true
+        needsHistoryRefresh = incoming.history ? false : revisionChanged
+        setError(null)
+        setSceneData(current => reconcileSceneResponse(current, incoming))
+      } catch (cause) {
+        if (
+          !hasAcceptedResponse
+          && !stopped
+          && !controller.signal.aborted
+          && sceneDetailEpochRef.current === requestEpoch
+          && !isAbortError(cause)
+        ) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      } finally {
+        // Historical revisions are immutable. Fetch a preview once; current
+        // revisions use a serial poll and request full history only initially
+        // or immediately after the current revision id changes.
+        if (
+          previewVersion === null
+          && !stopped
+          && !controller.signal.aborted
+          && sceneDetailEpochRef.current === requestEpoch
+        ) {
+          timer = setTimeout(() => void poll(), SCENE_DETAIL_POLL_MS)
+        }
+      }
+    }
+    void poll()
+    return () => {
+      stopped = true
+      controller.abort()
+      if (timer) clearTimeout(timer)
+      if (sceneDetailEpochRef.current === requestEpoch) sceneDetailEpochRef.current += 1
+    }
+  }, [conversationId, isManifestPreview, previewVersion, selectedSceneId])
   useEffect(() => {
     if (manifestPreviewPath) return
     setLegacyPath(current => current && manifests.some(item => item.path === current) ? current : manifests[0]?.path ?? '')
   }, [manifestPreviewPath, manifests])
-  useEffect(() => { setPreviewVersion(null) }, [selectedSceneId])
+  useEffect(() => {
+    setPreviewVersion(null)
+    setQualityMode('glb')
+    setQualityReloadToken(0)
+    setQualityRenderState(current => (
+      current.status === 'glb'
+      && current.instanceId === null
+      && (current.loadedCount ?? 0) === 0
+      && (current.totalCount ?? 0) === 0
+        ? current
+        : INITIAL_QUALITY_RENDER_STATE
+    ))
+    setSelectedInstanceId(null)
+    setCameraPose(null)
+    // Never display or continue loading the previous Scene while the newly
+    // selected revision is in flight. Passing no instances also lets the canvas
+    // release any old PLY quality substitutes before the next Scene arrives.
+    setSceneData(current => current?.scene.scene_id === selectedSceneId ? current : null)
+  }, [selectedSceneId])
   useEffect(() => { if (sceneId) setSelectedSceneId(sceneId) }, [sceneId])
   useEffect(() => {
     if (!embedded) { setShowEmbeddedNavigationHint(false); return }
@@ -308,7 +493,7 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
         assetUrl={assetUrl}
         format={renderFormat}
         upAxis={upAxis}
-        instances={displayedSceneData?.revision.instances ?? []}
+        instances={displayedSceneData?.revision.instances ?? EMPTY_SCENE_INSTANCES}
         objectUrl={objectUrl}
         agentViewpoint={displayedSceneData?.scene.agent_viewpoint}
         agentMarkers={agentMarkers}

@@ -5,7 +5,8 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useChatContext } from '@/contexts/ChatContext'
 import { WorkspaceFileExplorer } from '@/components/workspace/WorkspaceFileExplorer'
-import { SpatialSceneList } from '@/components/spatial-stage/SpatialSceneList'
+import { SpatialModelCatalog } from '@/components/spatial-stage/SpatialModelCatalog'
+import { useSpatialModels } from '@/hooks/useSpatialModels'
 import { useSpatialScenes } from '@/hooks/useSpatialScenes'
 import {
   LEFT_SIDEBAR_LIMITS,
@@ -89,6 +90,8 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     setActiveArtifactPath,
     activeSceneId,
     setActiveSceneId,
+    activeModelId,
+    setActiveModelId,
     inFlightPaths,
     runningConversationIds,
     waitingForUserIds,
@@ -110,10 +113,34 @@ export function AppSidebar({ className = '' }: { className?: string }) {
   const canBrowseFiles = pathname === '/' && Boolean(conversationId)
   const effectiveView = canBrowseFiles ? sidebarView : 'projects'
   const spatialScenes = useSpatialScenes(canBrowseFiles ? conversationId : null, canBrowseFiles)
+  const spatialModels = useSpatialModels(canBrowseFiles ? conversationId : null, canBrowseFiles)
   const openableArtifacts = useMemo(
-    () => artifacts.filter(artifact => artifact.type === 'image' || artifact.type === 'model3d'),
+    () => artifacts.filter(artifact => (
+      artifact.type === 'image'
+      || artifact.type === 'model3d'
+      || artifact.type === 'pointcloud3d'
+    )),
     [artifacts],
   )
+  const modelCatalogCount = spatialScenes.scenes.length + spatialModels.models.length
+  const resolvedWorkspaceArtifact = useMemo(
+    () => activeSceneId || activeModelId
+      ? null
+      : (artifacts.find(artifact => artifact.path === activeArtifactPath) ?? artifacts[0] ?? null),
+    [activeArtifactPath, activeModelId, activeSceneId, artifacts],
+  )
+  const selectedAssetGroup = activeSceneId || activeModelId
+    ? 'models'
+    : resolvedWorkspaceArtifact?.type === 'image'
+      ? 'images'
+      : resolvedWorkspaceArtifact?.type === 'model3d' || resolvedWorkspaceArtifact?.type === 'pointcloud3d'
+        ? 'models'
+        : null
+  const explorerActivePath = resolvedWorkspaceArtifact?.type === 'image'
+    || resolvedWorkspaceArtifact?.type === 'model3d'
+    || resolvedWorkspaceArtifact?.type === 'pointcloud3d'
+    ? resolvedWorkspaceArtifact.path
+    : null
 
   const handleCreate = () => {
     setShimmering(true)
@@ -127,16 +154,20 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     loadConversation(id)
   }
 
-  const openScenes = () => {
+  const openModels = () => {
     if (!canBrowseFiles) return
     setSidebarView('scenes')
-    if (!activeSceneId && spatialScenes.scenes[0]) setActiveSceneId(spatialScenes.scenes[0].scene_id)
   }
 
   useEffect(() => {
     if (!spatialScenes.hasLoaded || !activeSceneId) return
     if (!spatialScenes.scenes.some(scene => scene.scene_id === activeSceneId)) setActiveSceneId(null)
   }, [activeSceneId, setActiveSceneId, spatialScenes.hasLoaded, spatialScenes.scenes])
+
+  useEffect(() => {
+    if (!spatialModels.hasLoaded || !activeModelId) return
+    if (!spatialModels.models.some(model => model.job_id === activeModelId)) setActiveModelId(null)
+  }, [activeModelId, setActiveModelId, spatialModels.hasLoaded, spatialModels.models])
 
   useEffect(() => {
     if (effectiveView !== 'files' || openableArtifacts.length === 0) return
@@ -213,10 +244,10 @@ export function AppSidebar({ className = '' }: { className?: string }) {
             <CollapsedNavigationButton
               active={effectiveView === 'scenes'}
               disabled={!canBrowseFiles}
-              label={canBrowseFiles ? `模型，共 ${spatialScenes.scenes.length} 个` : '请先打开项目'}
-              count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
+              label={canBrowseFiles ? `模型，共 ${modelCatalogCount} 个` : '请先打开项目'}
+              count={canBrowseFiles ? modelCatalogCount : undefined}
               onClick={() => {
-                openScenes()
+                openModels()
                 setSidebarCollapsed(false)
               }}
               icon="scenes"
@@ -247,8 +278,8 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                   selected={effectiveView === 'scenes'}
                   disabled={!canBrowseFiles}
                   label="模型"
-                  count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
-                  onClick={openScenes}
+                  count={canBrowseFiles ? modelCatalogCount : undefined}
+                  onClick={openModels}
                 />
                 <SidebarModeTab
                   selected={effectiveView === 'files'}
@@ -285,13 +316,21 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               </div>
             ) : effectiveView === 'scenes' ? (
               <div role="tabpanel" aria-label="模型" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                <SpatialSceneList
+                <SpatialModelCatalog
                   scenes={spatialScenes.scenes}
+                  models={spatialModels.models}
                   activeSceneId={activeSceneId}
-                  isLoading={spatialScenes.isLoading}
-                  error={spatialScenes.error}
-                  onSelect={sceneId => {
+                  activeModelId={activeModelId}
+                  isLoadingScenes={spatialScenes.isLoading}
+                  isLoadingModels={spatialModels.isLoading}
+                  sceneError={spatialScenes.error}
+                  modelError={spatialModels.error}
+                  onSelectScene={sceneId => {
                     setActiveSceneId(sceneId)
+                    setSidebarView('scenes')
+                  }}
+                  onSelectModel={modelId => {
+                    setActiveModelId(modelId)
                     setSidebarView('scenes')
                   }}
                 />
@@ -300,8 +339,10 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               <div role="tabpanel" aria-label="文件" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 {conversationId && (
                   <WorkspaceFileExplorer
+                    key={conversationId}
                     artifacts={openableArtifacts}
-                    activePath={activeArtifactPath}
+                    activePath={explorerActivePath}
+                    selectedGroup={selectedAssetGroup}
                     inFlightPaths={inFlightPaths}
                     onSelect={setActiveArtifactPath}
                   />

@@ -21,7 +21,7 @@ export function TopNavBar() {
       <div className="flex items-center gap-9">
         <Link href="/" className="group flex items-center gap-2.5">
           <BrandMark className="h-8 w-8 transition-transform group-hover:scale-105" />
-          <span className="text-lg font-bold tracking-tight text-ink">Pegasus Spatial</span>
+          <span className="text-lg font-bold tracking-tight text-ink">Spatial Pegasus</span>
         </Link>
         <div className="hidden items-center gap-6 md:flex">
           {STATIC_NAV_LINKS.map(link => {

@@ -10,6 +10,7 @@ import {
   SpatialSceneRevisionModel,
 } from './models'
 import { normalizeViewpoint } from './scene-math'
+import { spatialArtifactDisplayName } from './presentation-name'
 import type {
   SceneCommandScope,
   SceneMutationIdentity,
@@ -21,6 +22,7 @@ import type {
   SpatialObservationRecord,
   SpatialRenderCommandRecord,
   SpatialRenderSessionRecord,
+  SpatialObjectModelEntity,
   SpatialSceneRecord,
   SpatialSceneRevisionRecord,
 } from './scene-types'
@@ -145,6 +147,7 @@ async function publishedJobWithArtifacts(
   if (!job) throw new SpatialSceneAssetRejectedError(`${kind === 'world' ? 'World' : 'Object'} Job 未发布或不属于当前项目。`)
   const records = await SpatialArtifactNodeModel.find({
     job_id: job.job_id, project_id: job.project_id, user_id: job.user_id, state: 'published',
+    ...(job.publication_token ? { publication_token: job.publication_token } : {}),
   }).sort({ created_at: 1 }).lean<SpatialArtifactNodeRecord[]>()
   return { job, artifacts: records.map(sourceArtifact) }
 }
@@ -166,6 +169,13 @@ export async function resolvePublishedObjectSource(
   scope: SceneCommandScope,
 ): Promise<Pick<SceneObjectInstance, 'source_job_id' | 'glb_artifact' | 'optional_ply_artifact' | 'normalization'>> {
   const { job, artifacts } = await publishedJobWithArtifacts(jobId, scope, 'object')
+  return objectSourceFromPublishedArtifacts(job, artifacts)
+}
+
+function objectSourceFromPublishedArtifacts(
+  job: SpatialBuildJobRecord,
+  artifacts: readonly SceneSourceArtifact[],
+): Pick<SceneObjectInstance, 'source_job_id' | 'glb_artifact' | 'optional_ply_artifact' | 'normalization'> {
   const glb = artifacts.find(artifact => artifact.workspace_path.toLowerCase().endsWith('.glb'))
   if (!glb) throw new SpatialSceneAssetRejectedError('Object Job 没有已发布的 standalone GLB。')
   const ply = artifacts.find(artifact => artifact.workspace_path.toLowerCase().endsWith('.ply'))
@@ -193,6 +203,91 @@ export async function resolvePublishedObjectSource(
       ...(parsedBounds ? { bounds: parsedBounds } : {}),
     },
   }
+}
+
+function modelEntityLabel(job: SpatialBuildJobRecord, glb: SceneSourceArtifact): string {
+  const configuredName = job.request_snapshot.provider_options?.name
+  if (typeof configuredName === 'string' && configuredName.trim()) {
+    return configuredName.trim().slice(0, 160)
+  }
+  return spatialArtifactDisplayName(glb.workspace_path, 'model3d')
+}
+
+/**
+ * Pure projection seam used by the list API and contract tests. Records from a
+ * different owner, generation, or publication token are ignored defensively.
+ */
+export function projectPublishedObjectModel(
+  job: SpatialBuildJobRecord,
+  records: readonly SpatialArtifactNodeRecord[],
+): SpatialObjectModelEntity {
+  if (job.kind !== 'object' || job.status !== 'published') {
+    throw new SpatialSceneAssetRejectedError('Object Job 尚未发布。')
+  }
+  const artifacts = records
+    .filter(record => (
+      record.job_id === job.job_id
+      && record.project_id === job.project_id
+      && record.user_id === job.user_id
+      && record.state === 'published'
+      && (!job.publication_token || record.publication_token === job.publication_token)
+    ))
+    .sort((left, right) => left.created_at.getTime() - right.created_at.getTime())
+    .map(sourceArtifact)
+  const source = objectSourceFromPublishedArtifacts(job, artifacts)
+  if (!source.optional_ply_artifact) {
+    throw new SpatialSceneAssetRejectedError('模型实体需要同时发布 GLB 与 PLY。')
+  }
+  return {
+    job_id: job.job_id,
+    label: modelEntityLabel(job, source.glb_artifact),
+    provider: job.provider,
+    status: 'published',
+    updated_at: job.updated_at.toISOString(),
+    glb_artifact: source.glb_artifact,
+    ply_artifact: source.optional_ply_artifact,
+    normalization: source.normalization,
+  }
+}
+
+/** List published object Jobs owned by one project/user as safe model entities. */
+export async function listPublishedSpatialObjectModels(
+  scope: SceneCommandScope,
+): Promise<SpatialObjectModelEntity[]> {
+  await connectDB()
+  const projectId = requireText('projectId', scope.projectId)
+  const userId = requireText('userId', scope.userId)
+  const jobs = await SpatialBuildJobModel.find({
+    project_id: projectId,
+    user_id: userId,
+    kind: 'object',
+    status: 'published',
+  }).sort({ updated_at: -1, created_at: -1 }).lean<SpatialBuildJobRecord[]>()
+  if (jobs.length === 0) return []
+
+  const records = await SpatialArtifactNodeModel.find({
+    project_id: projectId,
+    user_id: userId,
+    job_id: { $in: jobs.map(job => job.job_id) },
+    state: 'published',
+  }).sort({ created_at: 1 }).lean<SpatialArtifactNodeRecord[]>()
+  const recordsByJob = new Map<string, SpatialArtifactNodeRecord[]>()
+  for (const record of records) {
+    const grouped = recordsByJob.get(record.job_id) ?? []
+    grouped.push(record)
+    recordsByJob.set(record.job_id, grouped)
+  }
+
+  return jobs.flatMap(job => {
+    try {
+      return [projectPublishedObjectModel(job, recordsByJob.get(job.job_id) ?? [])]
+    } catch (error) {
+      // A corrupt or partially recovered publication must not hide other valid
+      // model entities. It remains unavailable until its GLB contract is whole.
+      if (error instanceof SpatialSceneAssetRejectedError) return []
+      throw error
+    }
+  })
 }
 
 export async function createSpatialScene(input: {

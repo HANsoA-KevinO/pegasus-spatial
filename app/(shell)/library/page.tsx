@@ -6,6 +6,8 @@ import { useProjects } from '@/hooks/useProjects'
 import { ProjectCard } from '@/components/library/ProjectCard'
 import { ShimmerBlock } from '@/components/loading/Skeleton'
 
+const PROJECT_GRID_CLASS = 'grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:gap-6 2xl:grid-cols-4'
+
 export default function LibraryPage() {
   const router = useRouter()
   const { loadConversation } = useChatContext()
@@ -14,9 +16,11 @@ export default function LibraryPage() {
     page,
     totalPages,
     isLoading,
+    error,
     loadMore,
     deleteProject,
     renameProject,
+    refresh,
   } = useProjects()
 
   const handleSelect = (id: string) => {
@@ -26,8 +30,8 @@ export default function LibraryPage() {
 
   return (
     <div className="h-full flex-1 overflow-y-auto bg-surface">
-      <div className="mx-auto max-w-6xl px-6 py-8 lg:px-10 lg:py-10">
-        <header className="mb-7">
+      <div className="mx-auto max-w-[1440px] px-6 py-8 lg:px-10 lg:py-10">
+        <header className="mb-8">
           <div>
             <h1 className="text-title font-semibold tracking-tight text-ink">空间创作项目库</h1>
             <p className="mt-2 text-sm text-ink-secondary">
@@ -36,8 +40,15 @@ export default function LibraryPage() {
           </div>
         </header>
 
+        {error && projects.length > 0 && (
+          <div role="alert" className="mb-5 flex items-center justify-between gap-4 rounded-[12px] border border-error/25 bg-error/8 px-4 py-3 text-sm text-error">
+            <span>{error}</span>
+            <button type="button" onClick={refresh} className="shrink-0 rounded-lg px-3 py-1.5 font-semibold transition hover:bg-error/10">重试</button>
+          </div>
+        )}
+
         {projects.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className={PROJECT_GRID_CLASS} data-project-grid>
             {projects.map(project => (
               <ProjectCard
                 key={project.conversation_id}
@@ -49,20 +60,23 @@ export default function LibraryPage() {
             ))}
           </div>
         ) : isLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
+          <div className={PROJECT_GRID_CLASS} data-project-grid-loading role="status" aria-label="正在加载项目" aria-busy="true">
+            {Array.from({ length: 8 }).map((_, i) => (
               <div
                 key={i}
-                className="flex min-h-[176px] flex-col rounded-[14px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] p-5"
-                style={{ boxShadow: 'var(--shadow-ambient)' }}
+                data-project-card-skeleton
+                className="relative aspect-[16/10] overflow-hidden rounded-[18px] border border-[var(--glass-panel-border)] bg-[var(--glass-panel-bg)] shadow-[var(--shadow-glass)]"
               >
-                <ShimmerBlock className="mb-5 h-10 w-10 rounded-xl" />
-                <div className="mt-auto">
-                  <ShimmerBlock className="mb-2 w-3/4" h={15} />
-                  <ShimmerBlock className="w-1/2" h={11} />
-                </div>
+                <ShimmerBlock className="h-full w-full rounded-none" />
+                <div className="absolute left-4 top-4 w-2/5"><ShimmerBlock className="w-full bg-white/20" h={16} /></div>
+                <div className="absolute bottom-4 right-4 w-1/4"><ShimmerBlock className="w-full rounded-full bg-white/15" h={20} /></div>
               </div>
             ))}
+          </div>
+        ) : error ? (
+          <div role="alert" className="rounded-[16px] border border-error/25 bg-error/8 py-16 text-center">
+            <p className="text-sm font-medium text-error">{error}</p>
+            <button type="button" onClick={refresh} className="mt-4 rounded-ctrl border border-error/25 px-5 py-2 text-sm font-semibold text-error transition hover:bg-error/10">重新加载</button>
           </div>
         ) : (
           <div className="rounded-[16px] border border-dashed border-ghost-border/75 bg-surface-lowest/55 py-20 text-center">

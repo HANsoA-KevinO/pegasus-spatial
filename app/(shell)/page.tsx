@@ -64,7 +64,7 @@ export default function WorkspacePage() {
       <main
         data-resizable-panel={showWorkspace ? 'right-conversation' : undefined}
         className={`${showWorkspace ? 'pmo-resizable-panel relative shrink-0' : 'min-w-0 flex-1'} flex min-h-0 flex-col`}
-        style={showWorkspace ? { width: rightPanelWidth } : undefined}
+        style={showWorkspace ? { width: rightPanelWidth, minWidth: RIGHT_PANEL_LIMITS.min } : undefined}
       >
         {showWorkspace && (
           <PanelResizeHandle

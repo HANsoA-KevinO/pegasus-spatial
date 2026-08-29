@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { Object3D, PerspectiveCamera, Splat, Vector3, Viewer } from '@manycore/aholo-viewer'
-import type { SceneObjectInstance, SceneViewpoint } from '@/lib/spatial/scene-types'
+import type { SceneObjectInstance, SceneSourceArtifact, SceneViewpoint } from '@/lib/spatial/scene-types'
 import { cameraDistanceForBoundingSphere } from './camera-framing'
 import type { WorldRenderFormat } from './world-stage-model'
 import { computeGlbObjectAlignment, computeLuxPlyAlignment } from './object-alignment'
@@ -13,11 +13,79 @@ type AholoViewerSdk = typeof import('@manycore/aholo-viewer')
 
 let aholoViewerSdkPromise: Promise<AholoViewerSdk> | null = null
 const QUALITY_ALIGNMENT_VERSION = 'lux-ply-x-minus-90-v3'
+const MAX_GLB_CONTENT_BYTES = 256 * 1024 * 1024
+const MAX_PLY_CONTENT_BYTES = 512 * 1024 * 1024
 
 function loadAholoViewerSdk(): Promise<AholoViewerSdk> {
   if (aholoViewerSdkPromise) return aholoViewerSdkPromise
-  aholoViewerSdkPromise = import('@manycore/aholo-viewer')
+  aholoViewerSdkPromise = import('@manycore/aholo-viewer').catch(cause => {
+    // A transient chunk/worker failure must not poison every subsequent Stage
+    // mount for the rest of the page session.
+    aholoViewerSdkPromise = null
+    throw cause
+  })
   return aholoViewerSdkPromise
+}
+
+function assertArtifactWithinBudget(
+  artifact: SceneSourceArtifact,
+  response: Response,
+  maximumBytes: number,
+  label: 'GLB' | 'PLY',
+): number {
+  const declaredBytes = Number.isFinite(artifact.size_bytes) && artifact.size_bytes > 0
+    ? artifact.size_bytes
+    : null
+  const rawContentLength = response.headers.get('content-length')
+  const responseBytes = rawContentLength && /^\d+$/.test(rawContentLength)
+    ? Number(rawContentLength)
+    : null
+  for (const bytes of [declaredBytes, responseBytes]) {
+    if (bytes !== null && bytes > maximumBytes) {
+      throw new Error(`${label} 文件过大（最大允许 ${Math.round(maximumBytes / 1024 / 1024)} MB）`)
+    }
+  }
+  const contentLength = responseBytes ?? declaredBytes
+  if (contentLength === null) throw new Error(`${label} 文件缺少可信的内容长度。`)
+  return contentLength
+}
+
+function streamWithinBudget(
+  input: ReadableStream<Uint8Array>,
+  maximumBytes: number,
+  label: string,
+): ReadableStream<Uint8Array> {
+  const reader = input.getReader()
+  let receivedBytes = 0
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const result = await reader.read()
+        if (result.done) {
+          controller.close()
+          return
+        }
+        receivedBytes += result.value.byteLength
+        if (receivedBytes > maximumBytes) {
+          await reader.cancel()
+          controller.error(new Error(`${label} 响应超过浏览器加载预算。`))
+          return
+        }
+        controller.enqueue(result.value)
+      } catch (cause) {
+        controller.error(cause)
+      }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason)
+    },
+  })
+}
+
+function destroyObjectTree(root: Object3D): void {
+  const nodes: Object3D[] = []
+  root.traverse(node => { nodes.push(node) })
+  for (let index = nodes.length - 1; index >= 0; index -= 1) nodes[index].destroy()
 }
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, message: string): Promise<T> {
@@ -47,12 +115,22 @@ export interface SpatialQualityRenderState {
   totalCount?: number
 }
 
+export interface SpatialObjectLoadState {
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  instanceIds: string[]
+  failedInstanceIds: string[]
+  error?: string
+}
+
 export interface SpatialAgentMarker {
   id: string
   label: string
   color: string
   viewpoint: SceneViewpoint
 }
+
+const EMPTY_SCENE_INSTANCES: SceneObjectInstance[] = []
+const EMPTY_AGENT_MARKERS: SpatialAgentMarker[] = []
 
 async function pixelsToPng(pixels: Uint8Array, width: number, height: number): Promise<Blob> {
   // A newly mounted/stale SDK session can expose an allocated Composite
@@ -89,24 +167,31 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   qualityReloadToken?: number
   selectedInstanceId?: string | null
   framingKey?: string | null
+  captureEnabled?: boolean
+  onObjectLoadStateChange?: (state: SpatialObjectLoadState) => void
   onQualityStateChange?: (state: SpatialQualityRenderState) => void
   onSelectInstance?: (instanceId: string | null) => void
   onCameraChange?: (pose: StageCameraPose) => void
 }>(function AholoWorldCanvas({
-  assetUrl, format, upAxis, instances = [], objectUrl, agentViewpoint, agentMarkers = [], cameraMode = 'user', qualityMode = 'glb', selectedInstanceId,
+  assetUrl, format, upAxis, instances = EMPTY_SCENE_INSTANCES, objectUrl, agentViewpoint, agentMarkers = EMPTY_AGENT_MARKERS, cameraMode = 'user', qualityMode = 'glb', selectedInstanceId,
   qualityReloadToken = 0,
   framingKey = null,
-  onQualityStateChange, onSelectInstance, onCameraChange,
+  captureEnabled = true,
+  onObjectLoadStateChange, onQualityStateChange, onSelectInstance, onCameraChange,
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const captureQueueRef = useRef<Promise<void>>(Promise.resolve())
   const cameraModeRef = useRef(cameraMode)
+  const qualityModeRef = useRef(qualityMode)
   const agentViewpointRef = useRef(agentViewpoint)
+  const objectLoadStateCallbackRef = useRef(onObjectLoadStateChange)
   const qualityStateCallbackRef = useRef(onQualityStateChange)
   const instancesRef = useRef(instances)
   const framingKeyRef = useRef(framingKey)
   cameraModeRef.current = cameraMode
+  qualityModeRef.current = qualityMode
   agentViewpointRef.current = agentViewpoint
+  objectLoadStateCallbackRef.current = onObjectLoadStateChange
   qualityStateCallbackRef.current = onQualityStateChange
   instancesRef.current = instances
   framingKeyRef.current = framingKey
@@ -116,6 +201,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
     frameLoadedObjects(frameKey: string): void
   } | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(assetUrl ? 'loading' : 'idle')
+  const [objectLoadRevision, setObjectLoadRevision] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const qualityCandidates = useMemo(
     () => instances.filter(candidate => candidate.optional_ply_artifact),
@@ -135,17 +221,31 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
     splat: Splat
     editable: Object3D
     viewer: Viewer
+    disposed: boolean
   }>())
+  const objectRequestRef = useRef<AbortController | null>(null)
   const qualityRequestRef = useRef<AbortController | null>(null)
+  const qualityParseTailRef = useRef<Promise<void>>(Promise.resolve())
+  const objectLoadGenerationRef = useRef(0)
+  const qualityLoadGenerationRef = useRef(0)
   const agentObjectsRef = useRef(new Map<string, Object3D>())
-  const disposeQualityCaches = useCallback(() => {
-    for (const cache of qualityCacheRef.current.values()) {
-      cache.editable.visible = true
-      if (!cache.viewer.isDestroyed) cache.viewer.getScene().remove(cache.root)
-      cache.splat.freeGPU()
-    }
-    qualityCacheRef.current.clear()
+  const disposeQualityCache = useCallback((instanceId: string, restoreEditable = true) => {
+    const cache = qualityCacheRef.current.get(instanceId)
+    if (!cache) return
+    qualityCacheRef.current.delete(instanceId)
+    if (cache.disposed) return
+    cache.disposed = true
+    const currentEditable = runtimeRef.current?.objects.get(instanceId)
+    if (restoreEditable && currentEditable === cache.editable) currentEditable.visible = true
+    if (!cache.viewer.isDestroyed) cache.viewer.getScene().remove(cache.root)
+    cache.splat.freeGPU()
+    destroyObjectTree(cache.root)
   }, [])
+  const disposeQualityCaches = useCallback((restoreEditable = true) => {
+    for (const instanceId of [...qualityCacheRef.current.keys()]) {
+      disposeQualityCache(instanceId, restoreEditable)
+    }
+  }, [disposeQualityCache])
 
   useImperativeHandle(ref, () => ({
     currentViewpoint: () => runtimeRef.current?.viewpoint() ?? null,
@@ -153,6 +253,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
     resetUserView: () => runtimeRef.current?.resetUser(),
     capture(value) {
       const operation = async () => {
+        if (!captureEnabled) throw new Error('当前查看器未启用截图读取。')
         const runtime = runtimeRef.current; const container = containerRef.current
         if (!runtime || !container) throw new Error('空间舞台尚未就绪。')
         const prior = runtime.viewpoint(); const originalSize = runtime.viewer.getSize(); const originalAspect = runtime.camera.aspect
@@ -177,7 +278,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       captureQueueRef.current = result.then(() => undefined, () => undefined)
       return result
     },
-  }), [])
+  }), [captureEnabled])
 
   useEffect(() => {
     const runtime = runtimeRef.current; if (!runtime) return
@@ -188,27 +289,79 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
     const runtime = runtimeRef.current
     if (!runtime || !objectUrl || status !== 'ready') return
     let cancelled = false
-    void (async () => {
+    objectRequestRef.current?.abort()
+    const controller = new AbortController()
+    objectRequestRef.current = controller
+    const generation = objectLoadGenerationRef.current + 1
+    objectLoadGenerationRef.current = generation
+    const isStale = () => (
+      cancelled
+      || controller.signal.aborted
+      || objectLoadGenerationRef.current !== generation
+      || runtimeRef.current !== runtime
+      || runtime.viewer.isDestroyed
+    )
+    const requestedInstanceIds = instances.map(instance => instance.instance_id)
+    objectLoadStateCallbackRef.current?.({
+      status: requestedInstanceIds.length ? 'loading' : 'idle',
+      instanceIds: [],
+      failedInstanceIds: [],
+    })
+    const loadObjects = async () => {
       const sdk = await loadAholoViewerSdk()
+      if (isStale()) return
       const desired = new Set(instances.map(instance => instance.instance_id))
+      const failures = new Map<string, string>()
       for (const [instanceId, object] of runtime.objects) {
-        if (!desired.has(instanceId)) { runtime.viewer.getScene().remove(object); object.destroy(); runtime.objects.delete(instanceId) }
+        if (!desired.has(instanceId)) {
+          disposeQualityCache(instanceId, false)
+          runtime.objects.delete(instanceId)
+          runtime.viewer.getScene().remove(object)
+          destroyObjectTree(object)
+        }
       }
       for (const instance of instances) {
+        if (isStale()) return
         let outer = runtime.objects.get(instance.instance_id)
-        if (!outer) {
-          const response = await fetch(objectUrl(instance, 'glb'), { redirect: 'error' }); if (!response.ok || cancelled) continue
-          const parsed = await sdk.GLTFLoader.loadGLTF(await response.arrayBuffer(), { textureLoader: url => sdk.downloadTexture(url, { context: runtime.viewer }) })
-          if (cancelled) { parsed.scene.destroy(); continue }
-          outer = new sdk.Object3D(); outer.name = instance.label; outer.userData.instanceId = instance.instance_id
-          const glbAlignment = computeGlbObjectAlignment(instance.normalization)
-          const basis = new sdk.Object3D()
-          basis.rotation = new sdk.Euler(...glbAlignment.rotationRadians)
-          basis.position.set(...glbAlignment.pivot)
-          basis.add(parsed.scene); outer.add(basis); runtime.viewer.getScene().add(outer); runtime.objects.set(instance.instance_id, outer)
+        const assetKey = `${instance.glb_artifact.sha256}:${instance.glb_artifact.workspace_path}`
+        if (outer && outer.userData.assetKey !== assetKey) {
+          disposeQualityCache(instance.instance_id, false)
+          runtime.objects.delete(instance.instance_id)
+          runtime.viewer.getScene().remove(outer)
+          destroyObjectTree(outer)
+          outer = undefined
         }
-        outer.position.set(...instance.transform.position); outer.quaternion = new sdk.Quaternion(...instance.transform.rotation_quaternion); outer.scale.set(...instance.transform.scale); outer.updateMatrixWorld(true)
+        try {
+          if (!outer) {
+            const response = await fetch(objectUrl(instance, 'glb'), { redirect: 'error', signal: controller.signal })
+            if (isStale()) return
+            if (!response.ok) throw new Error(`GLB 下载失败（HTTP ${response.status}）`)
+            assertArtifactWithinBudget(instance.glb_artifact, response, MAX_GLB_CONTENT_BYTES, 'GLB')
+            const glbBytes = await response.arrayBuffer()
+            if (isStale()) return
+            if (glbBytes.byteLength > MAX_GLB_CONTENT_BYTES) throw new Error('GLB 响应超过浏览器加载预算。')
+            const parsed = await sdk.GLTFLoader.loadGLTF(glbBytes, { textureLoader: url => sdk.downloadTexture(url, { context: runtime.viewer }) })
+            if (isStale()) { destroyObjectTree(parsed.scene); return }
+            outer = new sdk.Object3D(); outer.name = instance.label; outer.userData.instanceId = instance.instance_id; outer.userData.assetKey = assetKey
+            const glbAlignment = computeGlbObjectAlignment(instance.normalization)
+            const basis = new sdk.Object3D()
+            basis.rotation = new sdk.Euler(...glbAlignment.rotationRadians)
+            basis.position.set(...glbAlignment.pivot)
+            basis.add(parsed.scene); outer.add(basis)
+            if (isStale()) { destroyObjectTree(outer); return }
+            runtime.viewer.getScene().add(outer); runtime.objects.set(instance.instance_id, outer)
+          }
+          if (isStale()) return
+          outer.position.set(...instance.transform.position); outer.quaternion = new sdk.Quaternion(...instance.transform.rotation_quaternion); outer.scale.set(...instance.transform.scale); outer.updateMatrixWorld(true)
+        } catch (cause) {
+          if (isStale()) return
+          failures.set(
+            instance.instance_id,
+            cause instanceof Error ? cause.message.replace(/https?:\/\/\S+/g, '[asset]') : 'GLB 加载失败。',
+          )
+        }
       }
+      if (isStale()) return
       const sceneExtent = instances.reduce((maximum, instance) => {
         const centerDistance = Math.hypot(...instance.transform.position)
         const localSize = instance.normalization.bounds
@@ -228,9 +381,39 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       ]).join('|')
       runtime.frameLoadedObjects(frameKey)
       runtime.viewer.render()
-    })().catch(() => undefined)
-    return () => { cancelled = true }
-  }, [instances, objectUrl, status])
+      const instanceIds = requestedInstanceIds.filter(instanceId => runtime.objects.has(instanceId))
+      const failedInstanceIds = requestedInstanceIds.filter(instanceId => !runtime.objects.has(instanceId))
+      objectLoadStateCallbackRef.current?.({
+        status: failedInstanceIds.length ? 'error' : requestedInstanceIds.length ? 'ready' : 'idle',
+        instanceIds,
+        failedInstanceIds,
+        ...(failedInstanceIds.length ? {
+          error: failedInstanceIds.map(instanceId => failures.get(instanceId) ?? 'GLB 加载失败。').join('；'),
+        } : {}),
+      })
+      // PLY quality loading depends on an editable GLB root. A user can select
+      // PLY while that root is still downloading; advancing this revision makes
+      // the quality effect retry against the newly committed object map.
+      if (qualityModeRef.current === 'ply') setObjectLoadRevision(revision => revision + 1)
+    }
+    void loadObjects().catch(cause => {
+      if (isStale()) return
+      const message = cause instanceof Error ? cause.message.replace(/https?:\/\/\S+/g, '[asset]') : 'GLB 加载失败。'
+      objectLoadStateCallbackRef.current?.({
+        status: 'error',
+        instanceIds: [],
+        failedInstanceIds: requestedInstanceIds,
+        error: message,
+      })
+      if (qualityModeRef.current === 'ply') setObjectLoadRevision(revision => revision + 1)
+    })
+    return () => {
+      cancelled = true
+      controller.abort()
+      if (objectRequestRef.current === controller) objectRequestRef.current = null
+      if (objectLoadGenerationRef.current === generation) objectLoadGenerationRef.current += 1
+    }
+  }, [disposeQualityCache, instances, objectUrl, status])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -285,65 +468,130 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
     qualityRequestRef.current?.abort()
     const controller = new AbortController()
     qualityRequestRef.current = controller
+    const generation = qualityLoadGenerationRef.current + 1
+    qualityLoadGenerationRef.current = generation
+    const isStale = () => (
+      controller.signal.aborted
+      || qualityLoadGenerationRef.current !== generation
+      || runtimeRef.current !== runtime
+      || runtime.viewer.isDestroyed
+    )
+    const invalidate = () => {
+      controller.abort()
+      if (qualityRequestRef.current === controller) qualityRequestRef.current = null
+      if (qualityLoadGenerationRef.current === generation) qualityLoadGenerationRef.current += 1
+    }
     const candidates = qualityCandidatesRef.current
     const totalCount = candidates.length
+    const desiredInstanceIds = new Set(candidates.map(candidate => candidate.instance_id))
+    for (const instanceId of [...qualityCacheRef.current.keys()]) {
+      if (desiredInstanceIds.has(instanceId)) continue
+      disposeQualityCache(instanceId)
+    }
 
     if (qualityMode === 'glb' || totalCount === 0) {
-      for (const cache of qualityCacheRef.current.values()) { cache.root.visible = false; cache.editable.visible = true }
+      for (const [instanceId, cache] of qualityCacheRef.current) {
+        if (runtime.objects.get(instanceId) !== cache.editable) {
+          disposeQualityCache(instanceId, false)
+          continue
+        }
+        cache.root.visible = false
+        cache.editable.visible = true
+      }
       runtime.viewer.render()
       qualityStateCallbackRef.current?.({ status: 'glb', instanceId: null, loadedCount: 0, totalCount })
-      return () => controller.abort()
+      return invalidate
     }
 
     qualityStateCallbackRef.current?.({ status: 'loading', instanceId: null, loadedCount: 0, totalCount })
-    void (async () => {
+    const loadQuality = async () => {
       const sdk = await loadAholoViewerSdk()
+      if (isStale()) return
       let loadedCount = 0
       const failures: string[] = []
       for (const instance of candidates) {
-        if (controller.signal.aborted) return
+        if (isStale()) return
+        const artifact = instance.optional_ply_artifact
+        if (!artifact) continue
         const instanceKey = `${instance.instance_id}:${instance.optional_ply_artifact?.sha256}:${QUALITY_ALIGNMENT_VERSION}`
         let cache = qualityCacheRef.current.get(instance.instance_id)
+        let pendingSplat: Splat | null = null
+        let pendingRoot: Object3D | null = null
         try {
-          if (!cache || cache.assetKey !== instanceKey) {
-            if (cache) {
-              cache.editable.visible = true
-              if (!cache.viewer.isDestroyed) cache.viewer.getScene().remove(cache.root)
-              cache.splat.freeGPU()
-              qualityCacheRef.current.delete(instance.instance_id)
-            }
+          if (cache && (cache.assetKey !== instanceKey || runtime.objects.get(instance.instance_id) !== cache.editable)) {
+            disposeQualityCache(instance.instance_id, runtime.objects.get(instance.instance_id) === cache.editable)
+            cache = undefined
+          }
+          if (!cache) {
             const response = await fetch(objectUrl(instance, 'ply'), { redirect: 'error', signal: controller.signal })
+            if (isStale()) return
             if (!response.ok) throw new Error(`PLY 下载失败（HTTP ${response.status}）`)
-            const data = await sdk.SplatLoader.parseSplatData(sdk.SplatLoader.SplatFileType.PLY, new Uint8Array(await response.arrayBuffer()))
+            const contentLength = assertArtifactWithinBudget(artifact, response, MAX_PLY_CONTENT_BYTES, 'PLY')
+            if (!response.body) throw new Error('PLY 响应不支持流式读取。')
+            const data = await sdk.SplatLoader.parseSplatData(
+              sdk.SplatLoader.SplatFileType.PLY,
+              {
+                stream: streamWithinBudget(response.body, MAX_PLY_CONTENT_BYTES, 'PLY'),
+                contentLength,
+              },
+            )
+            if (isStale()) return
             const qualitySplat = await sdk.SplatUtils.createSplat(data)
-            if (controller.signal.aborted) { qualitySplat.freeGPU(); return }
+            pendingSplat = qualitySplat
+            if (isStale()) { qualitySplat.freeGPU(); qualitySplat.destroy(); pendingSplat = null; return }
             const dense = sdk.SplatUtils.computeDenseBox(new sdk.SplatUtils.SplatOperator(qualitySplat, data), 0.995)
+            if (isStale()) { qualitySplat.freeGPU(); qualitySplat.destroy(); pendingSplat = null; return }
             const alignment = computeLuxPlyAlignment(instance.normalization, { min: dense.boxMin as [number, number, number], max: dense.boxMax as [number, number, number] })
             const root = new sdk.Object3D(); const fit = new sdk.Object3D(); const basis = new sdk.Object3D()
+            pendingRoot = root
             root.userData.instanceId = instance.instance_id
             fit.scale.set(...alignment.scale); basis.rotation = new sdk.Euler(...alignment.rotationRadians); basis.position.set(...alignment.pivot)
             basis.add(qualitySplat); fit.add(basis); root.add(fit)
             const editable = runtime.objects.get(instance.instance_id)
-            if (!editable || runtime.viewer.isDestroyed) { qualitySplat.freeGPU(); continue }
+            if (!editable || isStale()) {
+              qualitySplat.freeGPU()
+              destroyObjectTree(root)
+              pendingSplat = null
+              pendingRoot = null
+              if (isStale()) return
+              throw new Error('GLB 尚未就绪，正在等待后重试。')
+            }
             runtime.viewer.getScene().add(root)
-            cache = { assetKey: instanceKey, instanceId: instance.instance_id, root, splat: qualitySplat, editable, viewer: runtime.viewer }
+            cache = { assetKey: instanceKey, instanceId: instance.instance_id, root, splat: qualitySplat, editable, viewer: runtime.viewer, disposed: false }
             qualityCacheRef.current.set(instance.instance_id, cache)
+            pendingSplat = null
+            pendingRoot = null
           }
+          if (isStale()) return
           cache.root.position.set(...instance.transform.position); cache.root.quaternion = new sdk.Quaternion(...instance.transform.rotation_quaternion); cache.root.scale.set(...instance.transform.scale); cache.root.visible = true; cache.root.updateMatrixWorld(true)
           cache.editable.visible = false
           loadedCount += 1
           runtime.viewer.render()
           qualityStateCallbackRef.current?.({ status: loadedCount === totalCount ? 'ply' : 'loading', instanceId: null, loadedCount, totalCount })
         } catch (cause) {
-          if (controller.signal.aborted) return
+          if (pendingRoot) {
+            pendingSplat?.freeGPU()
+            destroyObjectTree(pendingRoot)
+          } else if (pendingSplat) {
+            pendingSplat.freeGPU()
+            pendingSplat.destroy()
+          }
+          if (isStale()) return
           const editable = runtime.objects.get(instance.instance_id); if (editable) editable.visible = true
           failures.push(cause instanceof Error ? cause.message.replace(/https?:\/\/\S+/g, '[asset]') : 'PLY 加载失败。')
         }
       }
-      if (failures.length) qualityStateCallbackRef.current?.({ status: 'error', instanceId: null, loadedCount, totalCount, error: `${failures.length} 个 PLY 加载失败，已自动保留 GLB。` })
-    })()
-    return () => controller.abort()
-  }, [objectUrl, qualityAssetKey, qualityMode, qualityReloadToken, status])
+      if (!isStale() && failures.length) qualityStateCallbackRef.current?.({ status: 'error', instanceId: null, loadedCount, totalCount, error: `${failures.length} 个 PLY 加载失败，已自动保留 GLB。` })
+    }
+    const queuedLoad = qualityParseTailRef.current.then(loadQuality, loadQuality)
+    qualityParseTailRef.current = queuedLoad.then(() => undefined, () => undefined)
+    void queuedLoad.catch(cause => {
+      if (isStale()) return
+      const message = cause instanceof Error ? cause.message.replace(/https?:\/\/\S+/g, '[asset]') : 'PLY 加载失败。'
+      qualityStateCallbackRef.current?.({ status: 'error', instanceId: null, loadedCount: 0, totalCount, error: message })
+    })
+    return invalidate
+  }, [disposeQualityCache, objectLoadRevision, objectUrl, qualityAssetKey, qualityMode, qualityReloadToken, status])
 
   useEffect(() => {
     const caches = qualityCacheRef.current
@@ -358,8 +606,13 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
   }, [qualityTransformKey])
 
   useEffect(() => () => {
+    objectLoadGenerationRef.current += 1
+    qualityLoadGenerationRef.current += 1
+    objectRequestRef.current?.abort()
+    objectRequestRef.current = null
     qualityRequestRef.current?.abort()
-    disposeQualityCaches()
+    qualityRequestRef.current = null
+    disposeQualityCaches(false)
   }, [disposeQualityCaches])
 
   useEffect(() => {
@@ -439,6 +692,12 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       userHasAdjustedView = false
       applyUser()
     }
+    const updateCameraClipPlanes = (distance: number, radius: number) => {
+      if (!camera) return
+      camera.near = Math.max(Math.min(distance / 5_000, radius / 50), 0.001)
+      camera.far = Math.max(distance + radius * 8, camera.near * 1_000, 500)
+      camera.updateProjectionMatrix()
+    }
     const frameLoadedObjects = (frameKey: string) => {
       if (!viewerSdk || !camera || objects.size === 0 || framedObjectKey === frameKey) return
       if (worldFrameState === 'pending' || worldFrameState === 'ready') return
@@ -484,6 +743,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       orbit.pitch = nextHome.pitch
       orbit.distance = nextHome.distance
       orbit.target = [...nextHome.target]
+      updateCameraClipPlanes(nextHome.distance, radius)
       applyUser()
     }
     let lastNavigationTime = 0
@@ -541,7 +801,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
         // Aholo's async pixel readback is intentionally opt-in because it adds
         // an extra framebuffer copy. Agent/User observations depend on real
         // rendered pixels, so enable it only for this interactive Stage.
-        viewer.config.isExtraCopyBeforeScreenEnabled.set(true)
+        if (captureEnabled) viewer.config.isExtraCopyBeforeScreenEnabled.set(true)
         camera = new sdk.PerspectiveCamera(56, Math.max(container.clientWidth / Math.max(container.clientHeight, 1), 0.1), 0.02, 5000); target = new sdk.Vector3(); viewer.setCamera(camera)
         sdk.setViewerConfig(viewer, { pipeline: { Background: { background: { active: sdk.BackgroundMode.BasicBackground, basic: { color: new sdk.Color(0.018, 0.025, 0.035) } }, ground: { enabled: false } }, Splatting: { enabled: true }, TAA: { enabled: false } } }); viewer.requestRenderHandler = render
         fitEditableObjects()
@@ -608,6 +868,7 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
           verticalFovDeg: camera.fov,
           aspect: camera.aspect,
         })
+        updateCameraClipPlanes(distance, loadedObjectFrame.radius)
         orbit.home = {
           yaw: loadedObjectFrame.yaw,
           pitch: loadedObjectFrame.pitch,
@@ -684,8 +945,8 @@ export const AholoWorldCanvas = forwardRef<SpatialCanvasHandle, {
       while (node) { if (typeof node.userData.instanceId === 'string') { instanceId = node.userData.instanceId; break } node = node.parent }
       onSelectInstance?.(instanceId)
     })
-    return () => { cancelled = true; controller.abort(); resize.disconnect(); removers.forEach(remove => remove()); if (raf !== null) cancelAnimationFrame(raf); if (navigationRaf !== null) cancelAnimationFrame(navigationRaf); pressedKeys.clear(); runtimeRef.current = null; disposeQualityCaches(); for (const object of agentObjects.values()) object.destroy(); agentObjects.clear(); if (viewer && !viewer.isDestroyed) { if (splat) { viewer.getScene().remove(splat); splat.freeGPU() } viewer.destroy() } }
-  }, [assetUrl, disposeQualityCaches, format, upAxis, onCameraChange, onSelectInstance])
+    return () => { cancelled = true; controller.abort(); objectLoadGenerationRef.current += 1; qualityLoadGenerationRef.current += 1; objectRequestRef.current?.abort(); objectRequestRef.current = null; qualityRequestRef.current?.abort(); qualityRequestRef.current = null; resize.disconnect(); removers.forEach(remove => remove()); if (raf !== null) cancelAnimationFrame(raf); if (navigationRaf !== null) cancelAnimationFrame(navigationRaf); pressedKeys.clear(); runtimeRef.current = null; disposeQualityCaches(false); for (const object of agentObjects.values()) destroyObjectTree(object); agentObjects.clear(); if (viewer && !viewer.isDestroyed) { if (splat) { viewer.getScene().remove(splat); splat.freeGPU() } viewer.destroy() } }
+  }, [assetUrl, captureEnabled, disposeQualityCaches, format, upAxis, onCameraChange, onSelectInstance])
 
   return <div className={styles.viewerRoot}>
     <div

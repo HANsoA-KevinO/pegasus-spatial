@@ -29,7 +29,7 @@ export function getMediaPublicBaseUrl(): string {
   if (!raw) {
     throw new Error(
       '图片 URL 模式尚未配置：请设置 MEDIA_PUBLIC_BASE_URL。' +
-      '本地开发可使用安全的公网隧道，生产环境填写 Pegasus Spatial 公网 HTTPS 地址。',
+      '本地开发可使用安全的公网隧道，生产环境填写 Spatial Pegasus 公网 HTTPS 地址。',
     )
   }
 

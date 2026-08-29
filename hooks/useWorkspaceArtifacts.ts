@@ -13,7 +13,7 @@ import type {
 export interface WorkspaceArtifact {
   path: string
   label: string
-  type: 'markdown' | 'text' | 'document' | 'image' | 'model3d' | 'world'
+  type: 'markdown' | 'text' | 'document' | 'image' | 'model3d' | 'pointcloud3d' | 'world'
   content: string
   mimeType?: string
   gridfsPending?: boolean
@@ -51,6 +51,7 @@ function inferType(path: string): WorkspaceArtifact['type'] {
   const lower = path.toLowerCase()
   if (/\.(?:png|jpe?g|webp|gif|avif)$/.test(lower)) return 'image'
   if (/\.(?:glb|gltf)$/.test(lower)) return 'model3d'
+  if (/\.ply$/.test(lower)) return 'pointcloud3d'
   if (/^output\/spatial\/worlds\/[^/]+\/manifest\.json$/.test(lower)) return 'world'
   return lower.endsWith('.md') ? 'markdown' : 'text'
 }
@@ -66,7 +67,9 @@ const LITERATURE_FILE_LABELS: Readonly<Record<string, string>> = {
 }
 
 function labelFor(path: string, type: WorkspaceArtifact['type'] = inferType(path)): string {
-  if (type === 'image' || type === 'model3d') return spatialArtifactDisplayName(path, type)
+  if (type === 'image') return spatialArtifactDisplayName(path, type)
+  if (type === 'model3d') return `${spatialArtifactDisplayName(path, type)} · GLB`
+  if (type === 'pointcloud3d') return `${spatialArtifactDisplayName(path, 'model3d')} · PLY`
   if (path.startsWith('references/papers/')) {
     const directoryRelative = path.split('/').slice(3).join('/')
     const literatureLabel = LITERATURE_FILE_LABELS[directoryRelative]
@@ -76,7 +79,7 @@ function labelFor(path: string, type: WorkspaceArtifact['type'] = inferType(path
 }
 
 function artifactRank(type: WorkspaceArtifact['type']): number {
-  if (type === 'image' || type === 'model3d' || type === 'world') return 0
+  if (type === 'image' || type === 'model3d' || type === 'pointcloud3d' || type === 'world') return 0
   if (type === 'markdown') return 0
   if (type === 'document') return 1
   return 2
@@ -165,8 +168,8 @@ export function buildArtifactsFromDB(doc: ConversationArtifactFields): Workspace
         const type = inferType(path)
         return [{
           path,
-          label: type === 'model3d' ? labelFor(path, type) : (entry.filename || labelFor(path, type)),
-          type: type === 'model3d' || type === 'world' ? type : 'document',
+          label: type === 'model3d' || type === 'pointcloud3d' ? labelFor(path, type) : (entry.filename || labelFor(path, type)),
+          type: type === 'model3d' || type === 'pointcloud3d' || type === 'world' ? type : 'document',
           content: '',
           mimeType: entry.mime_type,
           gridfsPending: type === 'world' ? true : undefined,

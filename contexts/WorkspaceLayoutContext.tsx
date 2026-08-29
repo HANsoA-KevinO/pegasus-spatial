@@ -11,7 +11,7 @@ import {
 } from 'react'
 
 export const LEFT_SIDEBAR_LIMITS = { min: 232, max: 400, default: 280 } as const
-export const RIGHT_PANEL_LIMITS = { min: 420, max: 760, default: 560 } as const
+export const RIGHT_PANEL_LIMITS = { min: 480, max: 760, default: 560 } as const
 
 const LEFT_SIDEBAR_STORAGE_KEY = 'pegasus-spatial:left-sidebar-width'
 const RIGHT_PANEL_STORAGE_KEY = 'pegasus-spatial:right-panel-width'

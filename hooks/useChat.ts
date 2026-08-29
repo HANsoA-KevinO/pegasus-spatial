@@ -1674,6 +1674,59 @@ export function useChat(options: UseChatOptions) {
     [],
   )
 
+  // Refresh only the authoritative Workspace projection without rebuilding the
+  // message timeline or reconnecting the active Run. Spatial jobs materialize
+  // in a background worker, so their newly published GLB files can appear
+  // after the chat stream that submitted them has already gone idle.
+  const refreshConversationArtifacts = useCallback(async (
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    if (!id || id === '_new') return false
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+        cache: 'no-store',
+        signal,
+      })
+      if (!response.ok) return false
+      const data = await response.json() as {
+        output?: ConversationArtifactFields['output']
+      }
+      const fields: ConversationArtifactFields = {
+        output: {
+          files: data.output?.files,
+          manifest: data.output?.manifest,
+        },
+      }
+      const cached = cacheRef.current.get(id)
+      const previousFiles = cached?.dbArtifactFields?.output?.files ?? {}
+      const nextFiles = fields.output?.files ?? {}
+      for (const [path, nextEntry] of Object.entries(nextFiles)) {
+        const previousEntry = previousFiles[path]
+        const previousStorageId = previousEntry
+          ? ('gridfs_id' in previousEntry
+              ? previousEntry.gridfs_id
+              : ('asset_id' in previousEntry ? previousEntry.asset_id : undefined))
+          : undefined
+        const nextStorageId = 'gridfs_id' in nextEntry
+          ? nextEntry.gridfs_id
+          : ('asset_id' in nextEntry ? nextEntry.asset_id : undefined)
+        if (
+          !previousEntry
+          || previousStorageId !== nextStorageId
+        ) {
+          invalidateGridFSCache(id, path)
+        }
+      }
+      if (cached) cached.dbArtifactFields = fields
+      if (activeKeyRef.current === id) setDbArtifactFields(fields)
+      return true
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') return false
+      return false
+    }
+  }, [])
+
   // ==================== resetChat (new chat without page reload) ====================
 
   const resetChat = useCallback(() => {
@@ -1710,5 +1763,6 @@ export function useChat(options: UseChatOptions) {
     answerQuestion,
     resetChat,
     updateCachedSettings,
+    refreshConversationArtifacts,
   }
 }

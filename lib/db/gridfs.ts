@@ -12,6 +12,7 @@ import type {
 
 // Use mongoose's bundled mongodb types
 type GridFSBucket = ReturnType<typeof createBucket>
+export type GridFSDownloadStream = ReturnType<GridFSBucket['openDownloadStream']>
 function createBucket(db: mongoose.mongo.Db) {
   return new mongoose.mongo.GridFSBucket(db, { bucketName: 'workspace_files' })
 }
@@ -214,6 +215,36 @@ export async function readFileFromGridFSAsBuffer(
         else reject(err)
       })
     })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Open a bounded GridFS download without buffering the complete file in the
+ * Next.js process. Large spatial assets (PLY/GLB) can be hundreds of MiB, so
+ * the binary HTTP route must preserve backpressure all the way to the browser.
+ */
+export async function openFileFromGridFSStream(
+  fileId: string,
+  range?: { start: number; endExclusive: number },
+): Promise<GridFSDownloadStream | null> {
+  const b = await getBucket()
+
+  try {
+    const objectId = new mongoose.Types.ObjectId(fileId)
+    if (range && (
+      !Number.isSafeInteger(range.start)
+      || !Number.isSafeInteger(range.endExclusive)
+      || range.start < 0
+      || range.endExclusive <= range.start
+    )) return null
+
+    const exists = await b.find({ _id: objectId }).limit(1).hasNext()
+    if (!exists) return null
+    return b.openDownloadStream(objectId, range
+      ? { start: range.start, end: range.endExclusive }
+      : undefined)
   } catch {
     return null
   }

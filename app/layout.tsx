@@ -5,8 +5,8 @@ import { ChatProvider } from '@/contexts/ChatContext'
 
 export const metadata: Metadata = {
   title: {
-    default: 'Pegasus Spatial',
-    template: '%s · Pegasus Spatial',
+    default: 'Spatial Pegasus',
+    template: '%s · Spatial Pegasus',
   },
   description: '用自然语言驱动图像生成、3D 造物、世界生成与现实重建的空间创作 Agent',
 }

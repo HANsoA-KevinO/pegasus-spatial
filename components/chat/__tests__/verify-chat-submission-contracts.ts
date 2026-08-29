@@ -105,7 +105,7 @@ assert.match(runStreamSource, /resolvePublicCompactionCapacity\(job, getAliasCap
 assert.match(routeSource, /context_window: modelCapabilities\.contextWindow/)
 assert.match(routeSource, /input_limit_tokens: Math\.max/)
 assert.match(routeSource, /max_output_tokens: modelCapabilities\.maxOutputTokens/)
-assert.match(chatInputSource, /PEGASUS SPATIAL · \{APP_VERSION\}/)
+assert.match(chatInputSource, /SPATIAL PEGASUS · \{APP_VERSION\}/)
 assert.match(chatInputSource, /className="px-4 pb-2 pt-2"/)
 assert.doesNotMatch(chatInputSource, /Press|for commands|CONTEXT —|pmo-kbd|pmo-tokens/)
 assert.match(

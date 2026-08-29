@@ -349,6 +349,25 @@ export async function getSpatialBuildJob(
   }).lean<SpatialBuildJobRecord>()
 }
 
+export async function listPublishedSpatialCoverJobs(
+  userIdValue: string,
+  conversationIds: readonly string[],
+): Promise<Array<Pick<SpatialBuildJobRecord, 'conversation_id' | 'kind' | 'request_snapshot' | 'created_at' | 'updated_at'>>> {
+  const userId = requireText('userId', userIdValue)
+  const scopedConversationIds = [...new Set(conversationIds.map(value => value.trim()).filter(Boolean))]
+  if (scopedConversationIds.length === 0) return []
+  await connectDB()
+  return SpatialBuildJobModel.find({
+    user_id: userId,
+    conversation_id: { $in: scopedConversationIds },
+    kind: { $in: ['object', 'world'] },
+    status: 'published',
+  })
+    .select('conversation_id kind request_snapshot created_at updated_at')
+    .sort({ updated_at: -1, created_at: -1 })
+    .lean<Array<Pick<SpatialBuildJobRecord, 'conversation_id' | 'kind' | 'request_snapshot' | 'created_at' | 'updated_at'>>>()
+}
+
 export async function countActiveSpatialJobs(scope: SpatialCommandScope): Promise<number> {
   await connectDB()
   return SpatialBuildJobModel.countDocuments({

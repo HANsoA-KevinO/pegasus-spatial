@@ -78,8 +78,8 @@ def main() -> None:
             if response.status >= 400 else None,
         )
         page.goto(f"{base_url}/", wait_until="networkidle")
-        assert page.title().startswith("Pegasus Spatial"), page.title()
-        page.get_by_text("Pegasus Spatial", exact=True).first.wait_for(state="visible")
+        assert page.title().startswith("Spatial Pegasus"), page.title()
+        page.get_by_text("Spatial Pegasus", exact=True).first.wait_for(state="visible")
         page.get_by_text("本地演示", exact=True).wait_for(state="visible")
         page.get_by_role("button", name="新项目").first.wait_for(state="visible")
         desktop_overflow = page.evaluate(

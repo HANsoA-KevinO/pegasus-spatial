@@ -71,7 +71,7 @@ function manifestArtifacts(
   const options = claim.job.request_snapshot.provider_options ?? {}
   const name = typeof options.name === 'string' && options.name.trim()
     ? options.name.trim()
-    : claim.job.kind === 'world' ? 'Pegasus Spatial World' : 'Pegasus Spatial Object'
+    : claim.job.kind === 'world' ? 'Spatial Pegasus World' : 'Spatial Pegasus Object'
   const timestamp = claim.job.created_at.toISOString()
   const manifest = {
     schema_version: 1,

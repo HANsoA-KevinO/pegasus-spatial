@@ -423,149 +423,151 @@ export function ChatInput({ onSend, isLoading, onStop, quotedSelection, onClearQ
               specific buttons (image upload) use the same class so they sit
               flush with model / memory controls. */}
           <div className="pmo-input-toolbar">
-            {/* Image upload — opens hidden picker restricted to ACCEPTED_TYPES */}
-            {supportsVision && (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading || uploadingImages > 0 || pendingImages.length >= MAX_IMAGES}
-                className="pmo-tool-btn"
-                title="添加参考文件"
-              >
-                <span className="pmo-tool-btn-icon" aria-hidden>
-                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
-                  </svg>
-                </span>
-                参考文件
-              </button>
-            )}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={ACCEPTED_TYPES.join(',')}
-              multiple
-              onChange={handleFileChange}
-              className="hidden"
-            />
-
-            <button
-              type="button"
-              onClick={() => setMemoryEnabled(!memoryEnabled)}
-              className={`pmo-tool-btn ${memoryEnabled ? 'active' : ''}`}
-              title={memoryEnabled ? '跨对话记忆已开启' : '跨对话记忆已关闭'}
-            >
-              <span className="pmo-tool-btn-icon">⌬</span>
-              记忆 {memoryEnabled ? 'ON' : 'OFF'}
-            </button>
-
-            {/* Model picker — inline popover (same UX as TaskWorkbench) */}
-            <div ref={modelRef} style={{ position: 'relative' }}>
-              <button
-                type="button"
-                className={`pmo-tool-btn model ${modelOpen ? 'open' : ''}`}
-                onClick={() => setModelOpen(o => !o)}
-                title="选择模型"
-              >
-                <span className="pmo-tool-btn-icon">◐</span>
-                <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {selectedModelName}
-                </span>
-                <span className="pmo-tool-btn-caret">{modelOpen ? '∧' : '⌄'}</span>
-              </button>
-              {modelOpen && (
-                <div className="pmo-popover model-picker">
-                  <div className="pmo-popover-search-wrap">
-                    <input
-                      ref={modelSearchInputRef}
-                      type="text"
-                      value={modelSearch}
-                      onChange={e => setModelSearch(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Escape') {
-                          setModelOpen(false)
-                          setModelSearch('')
-                        }
-                      }}
-                      placeholder="搜索模型…"
-                      className="pmo-popover-search"
-                    />
-                  </div>
-                  <div className="pmo-popover-list">
-                    {modelsLoading ? (
-                      <div style={{ padding: '14px', fontSize: 12, color: 'var(--ink-muted)', textAlign: 'center' }}>
-                        加载中…
-                      </div>
-                    ) : filteredModels.length === 0 ? (
-                      <div style={{ padding: '14px', fontSize: 12, color: 'var(--ink-muted)', textAlign: 'center' }}>
-                        无匹配
-                      </div>
-                    ) : (
-                      filteredModels.map(m => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          className={`pmo-popover-model-item ${model === m.id ? 'selected' : ''}`}
-                          onClick={() => handleModelSelect(m.id)}
-                        >
-                          <div className="pmo-popover-model-item-body">
-                            <div className="pmo-popover-model-item-name">{m.name}</div>
-                            {m.description && (
-                              <div className="pmo-popover-model-item-desc">{m.description}</div>
-                            )}
-                          </div>
-                          <span className="pmo-popover-model-item-check">✓</span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <span className="pmo-toolbar-spacer" />
-
-            {/* Right side — send/append/stop trio.
-                When isLoading: show "追加" (if input has text) + "停止" (red).
-                When idle: single send arrow. */}
-            {isLoading ? (
-              <>
-                {input.trim() && (
-                  <button
-                    type="button"
-                    onClick={() => void handleSend()}
-                    disabled={submittingObservation}
-                    className={`pmo-send-btn append ${shimmering ? 'fire' : ''}`}
-                    title="追加"
-                  >
-                    追加
-                  </button>
-                )}
+            <div className="pmo-toolbar-tools">
+              {/* Image upload — opens hidden picker restricted to ACCEPTED_TYPES */}
+              {supportsVision && (
                 <button
                   type="button"
-                  onClick={onStop}
-                  className="pmo-send-btn stop append"
-                  title="停止"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading || uploadingImages > 0 || pendingImages.length >= MAX_IMAGES}
+                  className="pmo-tool-btn"
+                  title="添加参考文件"
                 >
-                  停止
+                  <span className="pmo-tool-btn-icon" aria-hidden>
+                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                    </svg>
+                  </span>
+                  参考文件
                 </button>
-              </>
-            ) : (
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ACCEPTED_TYPES.join(',')}
+                multiple
+                onChange={handleFileChange}
+                className="hidden"
+              />
+
               <button
                 type="button"
-                onClick={() => void handleSend()}
-                disabled={!canSend}
-                className={`pmo-send-btn ${shimmering ? 'fire' : ''}`}
-                title={submittingObservation ? '正在提交空间观察' : '发送'}
+                onClick={() => setMemoryEnabled(!memoryEnabled)}
+                className={`pmo-tool-btn ${memoryEnabled ? 'active' : ''}`}
+                title={memoryEnabled ? '跨对话记忆已开启' : '跨对话记忆已关闭'}
               >
-                {submittingObservation ? '…' : '↑'}
+                <span className="pmo-tool-btn-icon">⌬</span>
+                记忆 {memoryEnabled ? 'ON' : 'OFF'}
               </button>
-            )}
+
+              {/* Model picker — inline popover (same UX as TaskWorkbench) */}
+              <div ref={modelRef} className="pmo-toolbar-model">
+                <button
+                  type="button"
+                  className={`pmo-tool-btn model ${modelOpen ? 'open' : ''}`}
+                  onClick={() => setModelOpen(o => !o)}
+                  title="选择模型"
+                >
+                  <span className="pmo-tool-btn-icon">◐</span>
+                  <span className="pmo-tool-btn-label">
+                    {selectedModelName}
+                  </span>
+                  <span className="pmo-tool-btn-caret">{modelOpen ? '∧' : '⌄'}</span>
+                </button>
+                {modelOpen && (
+                  <div className="pmo-popover model-picker">
+                    <div className="pmo-popover-search-wrap">
+                      <input
+                        ref={modelSearchInputRef}
+                        type="text"
+                        value={modelSearch}
+                        onChange={e => setModelSearch(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') {
+                            setModelOpen(false)
+                            setModelSearch('')
+                          }
+                        }}
+                        placeholder="搜索模型…"
+                        className="pmo-popover-search"
+                      />
+                    </div>
+                    <div className="pmo-popover-list">
+                      {modelsLoading ? (
+                        <div style={{ padding: '14px', fontSize: 12, color: 'var(--ink-muted)', textAlign: 'center' }}>
+                          加载中…
+                        </div>
+                      ) : filteredModels.length === 0 ? (
+                        <div style={{ padding: '14px', fontSize: 12, color: 'var(--ink-muted)', textAlign: 'center' }}>
+                          无匹配
+                        </div>
+                      ) : (
+                        filteredModels.map(m => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            className={`pmo-popover-model-item ${model === m.id ? 'selected' : ''}`}
+                            onClick={() => handleModelSelect(m.id)}
+                          >
+                            <div className="pmo-popover-model-item-body">
+                              <div className="pmo-popover-model-item-name">{m.name}</div>
+                              {m.description && (
+                                <div className="pmo-popover-model-item-desc">{m.description}</div>
+                              )}
+                            </div>
+                            <span className="pmo-popover-model-item-check">✓</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="pmo-toolbar-actions">
+              {/* Right side — send/append/stop trio.
+                  When isLoading: show "追加" (if input has text) + "停止" (red).
+                  When idle: single send arrow. */}
+              {isLoading ? (
+                <>
+                  {input.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => void handleSend()}
+                      disabled={submittingObservation}
+                      className={`pmo-send-btn append ${shimmering ? 'fire' : ''}`}
+                      title="追加"
+                    >
+                      追加
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    className="pmo-send-btn stop append"
+                    title="停止"
+                  >
+                    停止
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handleSend()}
+                  disabled={!canSend}
+                  className={`pmo-send-btn ${shimmering ? 'fire' : ''}`}
+                  title={submittingObservation ? '正在提交空间观察' : '发送'}
+                >
+                  {submittingObservation ? '…' : '↑'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         <div className="pmo-input-meta" aria-label="产品版本">
-          <span>PEGASUS SPATIAL · {APP_VERSION}</span>
+          <span>SPATIAL PEGASUS · {APP_VERSION}</span>
         </div>
       </div>
     </div>

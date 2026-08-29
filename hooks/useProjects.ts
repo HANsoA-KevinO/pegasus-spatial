@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import type { FileEntry } from '@/lib/workspace/types'
 import { cleanConversationTitle } from '@/lib/chat/conversation-title'
+import type { ProjectCoverAsset, ProjectCoverKind } from '@/lib/projects/project-cover'
 
 export interface ProjectSummary {
   conversation_id: string
@@ -10,9 +10,9 @@ export interface ProjectSummary {
   settings?: {
     research_domain?: string
   }
-  output?: {
-    files?: Record<string, FileEntry>
-  }
+  file_count?: number
+  cover_kind?: ProjectCoverKind
+  cover_images?: ProjectCoverAsset[]
   created_at: string
   updated_at: string
 }
@@ -23,6 +23,7 @@ interface UseProjectsResult {
   page: number
   totalPages: number
   isLoading: boolean
+  error: string | null
   search: string
   setSearch: (s: string) => void
   loadMore: () => void
@@ -37,27 +38,28 @@ export function useProjects(): UseProjectsResult {
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
   const fetchPage = useCallback(async (pageNum: number, query: string, append: boolean) => {
     setIsLoading(true)
+    setError(null)
     try {
       const params = new URLSearchParams({ page: String(pageNum), limit: '20' })
       if (query.trim()) params.set('search', query.trim())
       const res = await fetch(`/api/projects?${params}`)
-      if (res.ok) {
-        const data = await res.json()
-        const normalizedProjects = (data.projects as ProjectSummary[]).map(project => ({
-          ...project,
-          title: cleanConversationTitle(project.title),
-        }))
-        setProjects(prev => append ? [...prev, ...normalizedProjects] : normalizedProjects)
-        setTotal(data.total)
-        setPage(data.page)
-        setTotalPages(data.totalPages)
-      }
+      if (!res.ok) throw new Error('projects request failed')
+      const data = await res.json()
+      const normalizedProjects = (data.projects as ProjectSummary[]).map(project => ({
+        ...project,
+        title: cleanConversationTitle(project.title),
+      }))
+      setProjects(prev => append ? [...prev, ...normalizedProjects] : normalizedProjects)
+      setTotal(data.total)
+      setPage(data.page)
+      setTotalPages(data.totalPages)
     } catch {
-      // ignore
+      setError('项目加载失败，请检查连接后重试。')
     } finally {
       setIsLoading(false)
     }
@@ -121,5 +123,5 @@ export function useProjects(): UseProjectsResult {
     fetchPage(1, search, false)
   }, [search, fetchPage])
 
-  return { projects, total, page, totalPages, isLoading, search, setSearch, loadMore, deleteProject, renameProject, refresh }
+  return { projects, total, page, totalPages, isLoading, error, search, setSearch, loadMore, deleteProject, renameProject, refresh }
 }

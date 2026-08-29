@@ -14,6 +14,7 @@ import type { SceneViewpoint } from '@/lib/spatial/scene-types'
 const ACTIVE_CONVERSATION_KEY = 'pegasus_spatial_active_conversation_id'
 const ACTIVE_ARTIFACT_KEY_PREFIX = 'pegasus_spatial_workspace_active_file:'
 const ACTIVE_SCENE_KEY_PREFIX = 'pegasus_spatial_workspace_active_scene:'
+const ACTIVE_MODEL_KEY_PREFIX = 'pegasus_spatial_workspace_active_model:'
 
 export type SidebarView = 'projects' | 'scenes' | 'files'
 
@@ -59,6 +60,8 @@ interface ChatContextValue {
   setActiveArtifactPath: (path: string | null) => void
   activeSceneId: string | null
   setActiveSceneId: (sceneId: string | null) => void
+  activeModelId: string | null
+  setActiveModelId: (modelId: string | null) => void
   spatialObservationDraft: SpatialObservationDraft | null
   setSpatialObservationDraft: (draft: SpatialObservationDraft | null) => void
   clearSpatialObservationDraft: () => void
@@ -84,6 +87,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [sidebarView, setSidebarView] = useState<SidebarView>('projects')
   const [activeArtifactPath, setActiveArtifactPathState] = useState<string | null>(null)
   const [activeSceneId, setActiveSceneIdState] = useState<string | null>(null)
+  const [activeModelId, setActiveModelIdState] = useState<string | null>(null)
   const [spatialObservationDraft, setSpatialObservationDraft] = useState<SpatialObservationDraft | null>(null)
   const previousConversationIdRef = useRef<string | null>(null)
   const handleConversationLoaded = useCallback((settings: {
@@ -100,6 +104,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const activeConversationId = chat.conversationId
   const reconnectConversation = chat.loadConversation
   const updateCachedSettings = chat.updateCachedSettings
+  const refreshConversationArtifacts = chat.refreshConversationArtifacts
 
   const handleMemoryToggle = useCallback((enabled: boolean) => {
     setMemoryEnabled(enabled)
@@ -140,10 +145,54 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return Array.from(merged.values())
   }, [dbArtifacts, timelineArtifacts])
 
+  const shouldWatchWorkspaceArtifacts = Boolean(
+    activeConversationId
+    && (
+      sidebarView === 'scenes'
+      || sidebarView === 'files'
+      || chat.isLoading
+      || chat.runningConversationIds.has(activeConversationId)
+    ),
+  )
+
+  // Background spatial workers publish their files outside the chat SSE
+  // process. Keep the currently visible asset catalog synchronized with the
+  // authoritative Workspace projection, and refresh immediately when the tab
+  // regains focus. This lets each completed model card appear without a manual
+  // page reload while avoiding a heavyweight message re-hydration.
+  useEffect(() => {
+    if (!activeConversationId || !shouldWatchWorkspaceArtifacts) return
+    const controller = new AbortController()
+    let refreshing = false
+    const refresh = async () => {
+      if (refreshing || controller.signal.aborted) return
+      refreshing = true
+      try {
+        await refreshConversationArtifacts(activeConversationId, controller.signal)
+      } finally {
+        refreshing = false
+      }
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 2_500)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      controller.abort()
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [activeConversationId, refreshConversationArtifacts, shouldWatchWorkspaceArtifacts])
+
   const setActiveArtifactPath = useCallback((path: string | null) => {
     setActiveArtifactPathState(path)
     if (path) {
       setActiveSceneIdState(null)
+      setActiveModelIdState(null)
       setSpatialObservationDraft(null)
     }
     if (!chat.conversationId) return
@@ -152,18 +201,45 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (path) localStorage.setItem(key, path)
       else localStorage.removeItem(key)
       if (path) localStorage.removeItem(`${ACTIVE_SCENE_KEY_PREFIX}${chat.conversationId}`)
+      if (path) localStorage.removeItem(`${ACTIVE_MODEL_KEY_PREFIX}${chat.conversationId}`)
     } catch { /* localStorage may be unavailable in privacy modes */ }
   }, [chat.conversationId])
 
   const setActiveSceneId = useCallback((sceneId: string | null) => {
     setActiveSceneIdState(sceneId)
     setSpatialObservationDraft(null)
-    if (sceneId) setActiveArtifactPathState(null)
+    if (sceneId) {
+      setActiveArtifactPathState(null)
+      setActiveModelIdState(null)
+    }
     if (!chat.conversationId) return
     try {
       const key = `${ACTIVE_SCENE_KEY_PREFIX}${chat.conversationId}`
       if (sceneId) localStorage.setItem(key, sceneId)
       else localStorage.removeItem(key)
+      if (sceneId) {
+        localStorage.removeItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${chat.conversationId}`)
+        localStorage.removeItem(`${ACTIVE_MODEL_KEY_PREFIX}${chat.conversationId}`)
+      }
+    } catch { /* localStorage may be unavailable in privacy modes */ }
+  }, [chat.conversationId])
+
+  const setActiveModelId = useCallback((modelId: string | null) => {
+    setActiveModelIdState(modelId)
+    setSpatialObservationDraft(null)
+    if (modelId) {
+      setActiveArtifactPathState(null)
+      setActiveSceneIdState(null)
+    }
+    if (!chat.conversationId) return
+    try {
+      const key = `${ACTIVE_MODEL_KEY_PREFIX}${chat.conversationId}`
+      if (modelId) localStorage.setItem(key, modelId)
+      else localStorage.removeItem(key)
+      if (modelId) {
+        localStorage.removeItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${chat.conversationId}`)
+        localStorage.removeItem(`${ACTIVE_SCENE_KEY_PREFIX}${chat.conversationId}`)
+      }
     } catch { /* localStorage may be unavailable in privacy modes */ }
   }, [chat.conversationId])
 
@@ -180,6 +256,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (!nextConversationId) {
       setActiveArtifactPathState(null)
       setActiveSceneIdState(null)
+      setActiveModelIdState(null)
       setSpatialObservationDraft(null)
       setSidebarView('projects')
       return
@@ -190,16 +267,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setSpatialObservationDraft(null)
       let savedPath: string | null = null
       let savedSceneId: string | null = null
+      let savedModelId: string | null = null
       try { savedPath = localStorage.getItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${nextConversationId}`) } catch { /* ignore */ }
       try { savedSceneId = localStorage.getItem(`${ACTIVE_SCENE_KEY_PREFIX}${nextConversationId}`) } catch { /* ignore */ }
+      try { savedModelId = localStorage.getItem(`${ACTIVE_MODEL_KEY_PREFIX}${nextConversationId}`) } catch { /* ignore */ }
       setActiveSceneIdState(savedSceneId)
-      setActiveArtifactPathState(savedSceneId ? null : savedPath)
-      setSidebarView(savedSceneId ? 'scenes' : 'files')
+      setActiveModelIdState(savedSceneId ? null : savedModelId)
+      setActiveArtifactPathState(savedSceneId || savedModelId ? null : savedPath)
+      setSidebarView(savedSceneId || savedModelId ? 'scenes' : 'files')
     }
   }, [chat.conversationId])
 
   useEffect(() => {
     if (!chat.conversationId) return
+    if (activeSceneId || activeModelId) {
+      setActiveArtifactPathState(null)
+      return
+    }
     if (artifacts.length === 0) {
       setActiveArtifactPathState(null)
       return
@@ -216,8 +300,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       try { localStorage.setItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${chat.conversationId}`, preferred.path) } catch { /* ignore */ }
       return preferred.path
     })
-  }, [artifacts, chat.conversationId])
-  const showWorkspace = Boolean(activeSceneId) || artifacts.length > 0 || (chat.isLoading && chat.hasMutatorStarted)
+  }, [activeModelId, activeSceneId, artifacts, chat.conversationId])
+  const showWorkspace = Boolean(activeSceneId || activeModelId) || artifacts.length > 0 || (chat.isLoading && chat.hasMutatorStarted)
   const inFlightPaths = useMemo(() => {
     const result = new Set<string>()
     for (const part of assistantParts) {
@@ -230,6 +314,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setQuotedSelection(null)
     setActiveArtifactPathState(null)
     setActiveSceneIdState(null)
+    setActiveModelIdState(null)
     setSpatialObservationDraft(null)
     setSidebarView('projects')
     chat.resetChat()
@@ -280,6 +365,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setActiveArtifactPath,
     activeSceneId,
     setActiveSceneId,
+    activeModelId,
+    setActiveModelId,
     spatialObservationDraft,
     setSpatialObservationDraft,
     clearSpatialObservationDraft,
@@ -298,7 +385,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     chat.waitingForUserIds, chat.sendMessage, chat.stopGeneration,
     chat.loadConversation, chat.answerQuestion, chat.resetChat,
     artifacts, showWorkspace, activeArtifactPath, setActiveArtifactPath,
-    activeSceneId, setActiveSceneId, spatialObservationDraft, clearSpatialObservationDraft,
+    activeSceneId, setActiveSceneId, activeModelId, setActiveModelId, spatialObservationDraft, clearSpatialObservationDraft,
     inFlightPaths, quotedSelection, sidebarCollapsed, sidebarView,
     handleNewChat, handleDeleteConversation,
   ])
