@@ -59,8 +59,8 @@ async function uploadPng(conversationId: string, blob: Blob): Promise<{ assetId:
   return body.image
 }
 
-export function SpatialStage({ conversationId, projectTitle, artifacts, isProjectLoading, initialManifestPath = null, embedded = false }: {
-  conversationId: string; projectTitle: string | null; artifacts: WorkspaceArtifact[]; isProjectLoading: boolean; initialManifestPath?: string | null; embedded?: boolean
+export function SpatialStage({ conversationId, projectTitle, artifacts, isProjectLoading, initialManifestPath = null, sceneId = null, embedded = false }: {
+  conversationId: string; projectTitle: string | null; artifacts: WorkspaceArtifact[]; isProjectLoading: boolean; initialManifestPath?: string | null; sceneId?: string | null; embedded?: boolean
 }) {
   const { sendMessage } = useChatContext()
   const canvasRef = useRef<SpatialCanvasHandle>(null)
@@ -90,14 +90,19 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
 
   const refreshScenes = useCallback(async () => {
     const list = await json<{ scenes: SceneSummary[] }>(`/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes`)
-    setScenes(list.scenes); setSelectedSceneId(current => current && list.scenes.some(scene => scene.scene_id === current) ? current : list.scenes[0]?.scene_id ?? null)
-  }, [conversationId])
+    setScenes(list.scenes)
+    setSelectedSceneId(current => {
+      if (sceneId && list.scenes.some(scene => scene.scene_id === sceneId)) return sceneId
+      return current && list.scenes.some(scene => scene.scene_id === current) ? current : list.scenes[0]?.scene_id ?? null
+    })
+  }, [conversationId, sceneId])
   const refreshScene = useCallback(async () => {
     if (!selectedSceneId) { setSceneData(null); return }
     const query = new URLSearchParams({ history: '1' }); if (previewVersion) query.set('version', String(previewVersion))
     setSceneData(await json<SceneResponse>(`/api/conversations/${encodeURIComponent(conversationId)}/spatial/scenes/${encodeURIComponent(selectedSceneId)}?${query}`))
   }, [conversationId, previewVersion, selectedSceneId])
   useEffect(() => { void refreshScenes().catch(() => undefined); const timer = setInterval(() => void refreshScenes().catch(() => undefined), 2500); return () => clearInterval(timer) }, [refreshScenes])
+  useEffect(() => { if (sceneId) setSelectedSceneId(sceneId) }, [sceneId])
   useEffect(() => { void refreshScene().catch(errorValue => setError(String(errorValue))); const timer = setInterval(() => void refreshScene().catch(() => undefined), 1800); return () => clearInterval(timer) }, [refreshScene])
   useEffect(() => {
     if (manifestPreviewPath) return
@@ -374,7 +379,10 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
         onCameraChange={setCameraPose}
       />
 
-      <header className={styles.stageHeader}>
+      {embedded ? <div className={styles.embeddedStageBar}>
+        <div><span className={styles.liveMark} /><p><strong>{displayedSceneData?.scene.title ?? projectTitle ?? '空间 Scene'}</strong><small>v{displayedSceneData?.revision.version ?? '—'} · {displayedSceneData?.revision.instances.length ?? 0} 个物体</small></p></div>
+        <Link className={styles.embeddedFullscreenButton} href={`/spatial/${encodeURIComponent(conversationId)}?scene=${encodeURIComponent(selectedSceneId ?? '')}`}>全屏编辑 <span>↗</span></Link>
+      </div> : <header className={styles.stageHeader}>
         <div className={styles.stageIdentity}>
           <Link href="/" className={styles.backButton} aria-label="返回对话">←</Link>
           <span className={styles.liveMark} />
@@ -411,7 +419,7 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
           <button type="button" className={activeDrawer === 'library' ? styles.actionActive : ''} aria-controls="spatial-library-drawer" aria-expanded={activeDrawer === 'library'} onClick={() => setActiveDrawer(current => current === 'library' ? null : 'library')}>资产</button>
           <button type="button" className={activeDrawer === 'inspector' ? styles.actionActive : ''} aria-controls="spatial-inspector-drawer" aria-expanded={activeDrawer === 'inspector'} onClick={() => setActiveDrawer(current => current === 'inspector' ? null : 'inspector')}>观察</button>
         </div>
-      </header>
+      </header>}
 
       <div className={styles.viewportToolbar}>
         <div><span className={styles.toolBadge}>{cameraMode === 'agent' ? 'AGENT CAMERA' : 'FREE CAMERA'}</span><strong>{cameraMode === 'agent' ? '正在查看 Agent 的观察点' : 'WASD / Q E 自由移动 · 左键环视'}</strong></div>
@@ -466,7 +474,7 @@ export function SpatialStage({ conversationId, projectTitle, artifacts, isProjec
 
       {libraryTab === 'scenes' && <section id="spatial-scenes-panel" role="tabpanel" aria-labelledby="spatial-scenes-tab" className={styles.railSection}>
         <div className={styles.sectionLabel}><span>项目场景</span><em>{scenes.length}</em></div>
-        <div className={styles.buildList}>{scenes.map(scene => <button key={scene.scene_id} type="button" className={`${styles.buildItem} ${scene.scene_id === selectedSceneId ? styles.buildItemActive : ''}`} onClick={() => setSelectedSceneId(scene.scene_id)}><span className={styles.buildIndex}>v{scene.current_version}</span><span className={styles.buildCopy}><strong>{scene.title}</strong><small>{shortId(scene.scene_id)}</small></span><i /></button>)}</div>
+        <div className={styles.buildList}>{scenes.map(scene => <button key={scene.scene_id} type="button" disabled={Boolean(sceneId)} className={`${styles.buildItem} ${scene.scene_id === selectedSceneId ? styles.buildItemActive : ''}`} onClick={() => setSelectedSceneId(scene.scene_id)}><span className={styles.buildIndex}>v{scene.current_version}</span><span className={styles.buildCopy}><strong>{scene.title}</strong><small>{shortId(scene.scene_id)}</small></span><i /></button>)}</div>
       </section>}
 
       {libraryTab === 'history' && <section id="spatial-history-panel" role="tabpanel" aria-labelledby="spatial-history-tab" className={styles.historySection}>

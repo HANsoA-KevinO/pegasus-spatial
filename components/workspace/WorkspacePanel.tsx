@@ -6,7 +6,9 @@ import remarkGfm from 'remark-gfm'
 import type { WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
 import type { QuotedSelection } from '@/components/chat/ChatContainer'
 import { useChatContext } from '@/contexts/ChatContext'
+import { useConversationTitle } from '@/hooks/useConversation'
 import { useGridFSContent } from '@/hooks/useGridFSContent'
+import { SpatialStage } from '@/components/spatial-stage/SpatialStage'
 import { ShimmerBlock } from '@/components/loading/Skeleton'
 import { ArtifactLoadingOverlay } from './ArtifactLoadingOverlay'
 import { LiteraturePaperReader } from './LiteraturePaperReader'
@@ -27,15 +29,31 @@ interface WorkspacePanelProps {
 export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection, quotedSelection }: WorkspacePanelProps) {
   const {
     activeArtifactPath,
+    activeSceneId,
+    conversationId,
     setSidebarCollapsed,
     setSidebarView,
   } = useChatContext()
+  const { title: projectTitle } = useConversationTitle(conversationId)
   const active = artifacts.find(item => item.path === activeArtifactPath) ?? artifacts[0]
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [active?.path])
+
+  if (activeSceneId && conversationId) {
+    return <section className="relative h-full min-w-0 overflow-hidden border-r border-[var(--glass-panel-border)] bg-[#ddd8ce]">
+      <SpatialStage
+        conversationId={conversationId}
+        projectTitle={projectTitle}
+        artifacts={artifacts}
+        isProjectLoading={false}
+        sceneId={activeSceneId}
+        embedded
+      />
+    </section>
+  }
 
   if (!active) {
     return (

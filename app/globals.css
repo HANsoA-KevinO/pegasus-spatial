@@ -3126,3 +3126,48 @@ button.pmo-memory-node:hover {
   .pmo-spatial-home-footer { align-items: flex-start; flex-direction: column; }
   .pmo-spatial-recents { display: none; }
 }
+
+/* Workspace panel geometry. Drag handles live in the seams, so the canvas,
+ * navigation and conversation remain one continuous editing surface. */
+.pmo-resizable-panel,
+.pmo-resizable-offset {
+  transition: width 220ms var(--ease-develop), margin-left 220ms var(--ease-develop);
+}
+html[data-panel-resizing='true'],
+html[data-panel-resizing='true'] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+html[data-panel-resizing='true'] .pmo-resizable-panel,
+html[data-panel-resizing='true'] .pmo-resizable-offset {
+  transition: none !important;
+}
+.pmo-panel-resize-handle {
+  position: absolute;
+  inset-block: 0;
+  z-index: 60;
+  width: 12px;
+  border: 0;
+  padding: 0;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  outline: none;
+}
+.pmo-panel-resize-handle[data-resize-edge='right'] { right: -6px; }
+.pmo-panel-resize-handle[data-resize-edge='left'] { left: -6px; }
+.pmo-panel-resize-handle > span {
+  position: absolute;
+  inset-block: 12px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 150ms ease, box-shadow 150ms ease;
+}
+.pmo-panel-resize-handle:hover > span,
+.pmo-panel-resize-handle:focus-visible > span,
+.pmo-panel-resize-handle[data-active='true'] > span {
+  background: color-mix(in srgb, var(--primary) 68%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 9%, transparent);
+}

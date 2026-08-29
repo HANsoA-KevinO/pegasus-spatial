@@ -12,8 +12,9 @@ import type { QuotedSelection } from '@/components/chat/ChatContainer'
 
 const ACTIVE_CONVERSATION_KEY = 'pegasus_spatial_active_conversation_id'
 const ACTIVE_ARTIFACT_KEY_PREFIX = 'pegasus_spatial_workspace_active_file:'
+const ACTIVE_SCENE_KEY_PREFIX = 'pegasus_spatial_workspace_active_scene:'
 
-export type SidebarView = 'projects' | 'files'
+export type SidebarView = 'projects' | 'scenes' | 'files'
 
 interface ChatContextValue {
   model: ModelProvider
@@ -41,6 +42,8 @@ interface ChatContextValue {
   showWorkspace: boolean
   activeArtifactPath: string | null
   setActiveArtifactPath: (path: string | null) => void
+  activeSceneId: string | null
+  setActiveSceneId: (sceneId: string | null) => void
   inFlightPaths: Set<string>
   quotedSelection: QuotedSelection | null
   setQuotedSelection: (selection: QuotedSelection | null) => void
@@ -63,6 +66,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarView, setSidebarView] = useState<SidebarView>('projects')
   const [activeArtifactPath, setActiveArtifactPathState] = useState<string | null>(null)
+  const [activeSceneId, setActiveSceneIdState] = useState<string | null>(null)
   const previousConversationIdRef = useRef<string | null>(null)
   const handleConversationLoaded = useCallback((settings: {
     orchestrator_model?: string
@@ -107,11 +111,25 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   const setActiveArtifactPath = useCallback((path: string | null) => {
     setActiveArtifactPathState(path)
+    if (path) setActiveSceneIdState(null)
     if (!chat.conversationId) return
     try {
       const key = `${ACTIVE_ARTIFACT_KEY_PREFIX}${chat.conversationId}`
       if (path) localStorage.setItem(key, path)
       else localStorage.removeItem(key)
+      if (path) localStorage.removeItem(`${ACTIVE_SCENE_KEY_PREFIX}${chat.conversationId}`)
+    } catch { /* localStorage may be unavailable in privacy modes */ }
+  }, [chat.conversationId])
+
+  const setActiveSceneId = useCallback((sceneId: string | null) => {
+    setActiveSceneIdState(sceneId)
+    if (sceneId) setActiveArtifactPathState(null)
+    if (!chat.conversationId) return
+    try {
+      const key = `${ACTIVE_SCENE_KEY_PREFIX}${chat.conversationId}`
+      if (sceneId) localStorage.setItem(key, sceneId)
+      else localStorage.removeItem(key)
+      if (sceneId) localStorage.removeItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${chat.conversationId}`)
     } catch { /* localStorage may be unavailable in privacy modes */ }
   }, [chat.conversationId])
 
@@ -125,6 +143,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     if (!nextConversationId) {
       setActiveArtifactPathState(null)
+      setActiveSceneIdState(null)
       setSidebarView('projects')
       return
     }
@@ -132,14 +151,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (changedProject) {
       setQuotedSelection(null)
       let savedPath: string | null = null
-      try { savedPath = localStorage.getItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${nextConversationId}`) } catch { /* ignore */ }
-      setActiveArtifactPathState(savedPath)
-      setSidebarView('files')
+      let savedSceneId: string | null = null
+      try {
+        savedPath = localStorage.getItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${nextConversationId}`)
+        savedSceneId = localStorage.getItem(`${ACTIVE_SCENE_KEY_PREFIX}${nextConversationId}`)
+      } catch { /* ignore */ }
+      setActiveSceneIdState(savedSceneId)
+      setActiveArtifactPathState(savedSceneId ? null : savedPath)
+      setSidebarView(savedSceneId ? 'scenes' : 'files')
     }
   }, [chat.conversationId])
 
   useEffect(() => {
     if (!chat.conversationId) return
+    if (activeSceneId) return
     if (artifacts.length === 0) {
       setActiveArtifactPathState(null)
       return
@@ -156,8 +181,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       try { localStorage.setItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${chat.conversationId}`, preferred.path) } catch { /* ignore */ }
       return preferred.path
     })
-  }, [artifacts, chat.conversationId])
-  const showWorkspace = artifacts.length > 0 || (chat.isLoading && chat.hasMutatorStarted)
+  }, [activeSceneId, artifacts, chat.conversationId])
+  const showWorkspace = Boolean(activeSceneId) || artifacts.length > 0 || (chat.isLoading && chat.hasMutatorStarted)
   const inFlightPaths = useMemo(() => {
     const result = new Set<string>()
     for (const part of assistantParts) {
@@ -169,6 +194,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const handleNewChat = useCallback(() => {
     setQuotedSelection(null)
     setActiveArtifactPathState(null)
+    setActiveSceneIdState(null)
     setSidebarView('projects')
     chat.resetChat()
   }, [chat])
@@ -214,6 +240,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     showWorkspace,
     activeArtifactPath,
     setActiveArtifactPath,
+    activeSceneId,
+    setActiveSceneId,
     inFlightPaths,
     quotedSelection,
     setQuotedSelection,
@@ -229,6 +257,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     chat.waitingForUserIds, chat.sendMessage, chat.stopGeneration,
     chat.loadConversation, chat.answerQuestion, chat.resetChat,
     artifacts, showWorkspace, activeArtifactPath, setActiveArtifactPath,
+    activeSceneId, setActiveSceneId,
     inFlightPaths, quotedSelection, sidebarCollapsed, sidebarView,
     handleNewChat, handleDeleteConversation,
   ])

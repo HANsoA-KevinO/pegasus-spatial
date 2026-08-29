@@ -7,8 +7,12 @@ import { useConversationTitle } from '@/hooks/useConversation'
 import { useLiteraturePaperSummaries } from '@/hooks/useLiteraturePaperSummaries'
 import { parsePaperSummaryFile } from '@/lib/literature/paper-summaries'
 import { WorkspaceFileExplorer } from '@/components/workspace/WorkspaceFileExplorer'
+import { SpatialSceneList } from '@/components/spatial-stage/SpatialSceneList'
+import { useSpatialScenes } from '@/hooks/useSpatialScenes'
+import { LEFT_SIDEBAR_LIMITS, useWorkspaceLayout } from '@/contexts/WorkspaceLayoutContext'
 import { ConversationList } from './ConversationList'
 import { FeedbackDialog } from './FeedbackDialog'
+import { PanelResizeHandle } from './PanelResizeHandle'
 
 function SidebarModeTab({ selected, disabled = false, label, count, onClick }: {
   selected: boolean
@@ -36,7 +40,7 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
   active: boolean
   disabled?: boolean
   label: string
-  icon: 'projects' | 'files'
+  icon: 'projects' | 'scenes' | 'files'
   count?: number
   onClick: () => void
 }) {
@@ -51,6 +55,8 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
     >
       {icon === 'projects' ? (
         <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25A2.25 2.25 0 0 1 6 3h3.19c.6 0 1.17.24 1.59.66l.56.56c.42.42.99.66 1.59.66H18A2.25 2.25 0 0 1 20.25 7.1v10.65A2.25 2.25 0 0 1 18 20H6a2.25 2.25 0 0 1-2.25-2.25V5.25Z" /></svg>
+      ) : icon === 'scenes' ? (
+        <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 7.5 7.5-4 7.5 4-7.5 4-7.5-4Z" /><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12 7.5 4 7.5-4M4.5 16.5l7.5 4 7.5-4" /></svg>
       ) : (
         <svg className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.55} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3.75h7.69c.4 0 .78.16 1.06.44l2.31 2.31c.28.28.44.66.44 1.06v12.69h-11.5a1.5 1.5 0 0 1-1.5-1.5V5.25a1.5 1.5 0 0 1 1.5-1.5Z" /><path strokeLinecap="round" d="M14.25 3.75V7.5h3.75M8.5 12h6.5M8.5 15h6.5" /></svg>
       )}
@@ -62,11 +68,14 @@ function CollapsedNavigationButton({ active, disabled = false, label, icon, coun
 export function AppSidebar({ className = '' }: { className?: string }) {
   const router = useRouter()
   const pathname = usePathname()
+  const { leftSidebarWidth, setLeftSidebarWidth, resetLeftSidebarWidth } = useWorkspaceLayout()
   const {
     conversationId,
     artifacts,
     activeArtifactPath,
     setActiveArtifactPath,
+    activeSceneId,
+    setActiveSceneId,
     inFlightPaths,
     runningConversationIds,
     waitingForUserIds,
@@ -86,6 +95,7 @@ export function AppSidebar({ className = '' }: { className?: string }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const canBrowseFiles = pathname === '/' && Boolean(conversationId)
   const effectiveView = canBrowseFiles ? sidebarView : 'projects'
+  const spatialScenes = useSpatialScenes(canBrowseFiles ? conversationId : null, canBrowseFiles)
   const { title: activeProjectTitle } = useConversationTitle(canBrowseFiles ? conversationId : null)
   const paperFingerprint = useMemo(() => {
     const bundles = new Map<string, Set<string>>()
@@ -118,12 +128,24 @@ export function AppSidebar({ className = '' }: { className?: string }) {
     setShimmering(true)
     setTimeout(() => setShimmering(false), 850)
     handleNewChat()
+    if (pathname !== '/') router.push('/')
   }
 
   const selectConversation = (id: string) => {
     setSidebarView('files')
     loadConversation(id)
   }
+
+  const openScenes = () => {
+    if (!canBrowseFiles) return
+    setSidebarView('scenes')
+    if (!activeSceneId && spatialScenes.scenes[0]) setActiveSceneId(spatialScenes.scenes[0].scene_id)
+  }
+
+  useEffect(() => {
+    if (!spatialScenes.hasLoaded || !activeSceneId) return
+    if (!spatialScenes.scenes.some(scene => scene.scene_id === activeSceneId)) setActiveSceneId(null)
+  }, [activeSceneId, setActiveSceneId, spatialScenes.hasLoaded, spatialScenes.scenes])
 
   // Close menu on outside click
   useEffect(() => {
@@ -144,10 +166,9 @@ export function AppSidebar({ className = '' }: { className?: string }) {
           下透过;右缘 1px 硬发丝分隔线 → 极淡玻璃边。 */}
       <aside
         aria-label="项目与文件导航"
-        className={`h-screen fixed left-0 top-0 pt-16 flex flex-col bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)] backdrop-blur-[20px] backdrop-saturate-150 z-40 transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${
-          collapsed ? 'w-16' : 'w-[280px]'
-        } ${className}`}
-        style={{ boxShadow: '1px 0 0 rgba(20,26,38,0.08), 10px 0 30px -18px rgba(16,20,32,0.15)' }}
+        data-resizable-panel="left-sidebar"
+        className={`pmo-resizable-panel h-screen fixed left-0 top-0 pt-16 flex flex-col bg-[color-mix(in_srgb,var(--glass-panel-bg)_55%,transparent)] backdrop-blur-[20px] backdrop-saturate-150 z-40 ${className}`}
+        style={{ width: collapsed ? 64 : leftSidebarWidth, boxShadow: '1px 0 0 rgba(20,26,38,0.08), 10px 0 30px -18px rgba(16,20,32,0.15)' }}
       >
         <div className={`flex shrink-0 items-center gap-2 py-2 ${collapsed ? 'flex-col px-3' : 'px-4'}`}>
           <button
@@ -188,6 +209,17 @@ export function AppSidebar({ className = '' }: { className?: string }) {
               icon="projects"
             />
             <CollapsedNavigationButton
+              active={effectiveView === 'scenes'}
+              disabled={!canBrowseFiles}
+              label={canBrowseFiles ? `场景，共 ${spatialScenes.scenes.length} 个` : '请先打开项目'}
+              count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
+              onClick={() => {
+                openScenes()
+                setSidebarCollapsed(false)
+              }}
+              icon="scenes"
+            />
+            <CollapsedNavigationButton
               active={effectiveView === 'files'}
               disabled={!canBrowseFiles}
               label={canBrowseFiles ? `文件，共 ${artifacts.length} 个` : '请先打开项目'}
@@ -203,11 +235,18 @@ export function AppSidebar({ className = '' }: { className?: string }) {
         ) : (
           <>
             <div className="shrink-0 px-4 pb-2">
-              <div role="tablist" aria-label="导航模式" className="grid grid-cols-2 gap-1 rounded-card bg-surface-low/65 p-1">
+              <div role="tablist" aria-label="导航模式" className="grid grid-cols-3 gap-1 rounded-card bg-surface-low/65 p-1">
                 <SidebarModeTab
                   selected={effectiveView === 'projects'}
                   label="项目"
                   onClick={() => setSidebarView('projects')}
+                />
+                <SidebarModeTab
+                  selected={effectiveView === 'scenes'}
+                  disabled={!canBrowseFiles}
+                  label="场景"
+                  count={canBrowseFiles ? spatialScenes.scenes.length : undefined}
+                  onClick={openScenes}
                 />
                 <SidebarModeTab
                   selected={effectiveView === 'files'}
@@ -240,6 +279,19 @@ export function AppSidebar({ className = '' }: { className?: string }) {
                   waitingForUserIds={waitingForUserIds}
                   onSelectConversation={selectConversation}
                   onDeleteConversation={handleDeleteConversation}
+                />
+              </div>
+            ) : effectiveView === 'scenes' ? (
+              <div role="tabpanel" aria-label="场景" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                <SpatialSceneList
+                  scenes={spatialScenes.scenes}
+                  activeSceneId={activeSceneId}
+                  isLoading={spatialScenes.isLoading}
+                  error={spatialScenes.error}
+                  onSelect={sceneId => {
+                    setActiveSceneId(sceneId)
+                    setSidebarView('scenes')
+                  }}
                 />
               </div>
             ) : (
@@ -311,6 +363,15 @@ export function AppSidebar({ className = '' }: { className?: string }) {
             )}
           </div>
         </div>
+        {!collapsed && <PanelResizeHandle
+          edge="right"
+          label="调整左侧导航宽度"
+          value={leftSidebarWidth}
+          min={LEFT_SIDEBAR_LIMITS.min}
+          max={LEFT_SIDEBAR_LIMITS.max}
+          onChange={setLeftSidebarWidth}
+          onReset={resetLeftSidebarWidth}
+        />}
       </aside>
 
       {/* Feedback dialog — rendered outside sidebar */}

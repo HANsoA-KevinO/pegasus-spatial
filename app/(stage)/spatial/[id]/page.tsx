@@ -17,6 +17,11 @@ function safeManifestPath(value: string | null): string | null {
   }
 }
 
+function safeSceneId(value: string | null): string | null {
+  if (!value) return null
+  return /^[a-zA-Z0-9_-]{8,128}$/.test(value) ? value : null
+}
+
 export default function SpatialStagePage() {
   const { id } = useParams<{ id: string }>()
   const searchParams = useSearchParams()
@@ -36,6 +41,7 @@ export default function SpatialStagePage() {
       artifacts={conversationId === id ? artifacts : []}
       isProjectLoading={conversationId !== id || isLoadingConversation}
       initialManifestPath={safeManifestPath(searchParams.get('manifest'))}
+      sceneId={safeSceneId(searchParams.get('scene'))}
     />
   )
 }
