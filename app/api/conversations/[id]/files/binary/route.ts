@@ -129,7 +129,7 @@ export async function GET(
       const asset = await getOwnedImageAsset(entry.asset_id, userId, id)
       if (!asset) return NextResponse.json({ error: `Asset not found: ${path}` }, { status: 404 })
       const variant = width == null ? 'original' : width <= 256 ? 'thumbnail' : 'model'
-      if (req.nextUrl.searchParams.get('inline') === '1') {
+      if (asset.storageDriver === 'gridfs' || req.nextUrl.searchParams.get('inline') === '1') {
         const found = await readImageAsset(entry.asset_id, variant)
         if (!found) return NextResponse.json({ error: `Asset bytes not found: ${path}` }, { status: 404 })
         const selected = found.asset.variants[variant]

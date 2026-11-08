@@ -1,5 +1,3 @@
-import { readImageAsset } from '../../media/storage'
-import { providerRasterExtension } from '../../media/object-prefix'
 import type {
   SpatialBuildJobRecord,
   SpatialProviderAdapter,
@@ -10,7 +8,8 @@ import { ProviderDefinitelyNotAcceptedError } from './errors'
 import type { SpatialHttpAdapterOptions } from './http-contract'
 import { ContractDrivenSpatialHttpAdapter } from './http-contract'
 import { createAholoOfficialWireContract } from './official-contracts'
-import { uploadAholoWorldSource, type AholoUploadSource } from './aholo-upload'
+import { uploadAholoReferenceImage, type AholoUploadSource } from './aholo-upload'
+import { readOwnedSpatialReference } from './provider-reference-images'
 
 const OFFICIAL_CN_BASE_URL = 'https://api.aholo3d.cn'
 
@@ -29,24 +28,7 @@ class AholoHttpAdapter extends ContractDrivenSpatialHttpAdapter {
 }
 
 export interface AholoAdapterOptions extends Omit<SpatialHttpAdapterOptions, 'provider'> {
-  sourceImageLoader?: (assetId: string) => Promise<AholoUploadSource | null>
-}
-
-async function defaultSourceImageLoader(assetId: string): Promise<AholoUploadSource | null> {
-  // Aholo uses the source image to infer panorama geometry and texture. The
-  // `model` variant is intentionally optimized for LLM context transfer and
-  // can be far more compressed than the user-approved Workspace original.
-  // Keep authorization anchored to the durable asset id, but upload the
-  // immutable original bytes to the provider.
-  const found = await readImageAsset(assetId, 'original')
-  if (!found) return null
-  const mimeType = found.asset.variants.original.mimeType
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(mimeType)) return null
-  return {
-    buffer: found.buffer,
-    mimeType: mimeType as AholoUploadSource['mimeType'],
-    filename: `world-source.${providerRasterExtension(mimeType)}`,
-  }
+  sourceImageLoader?: (assetId: string, job: SpatialBuildJobRecord) => Promise<AholoUploadSource | null>
 }
 
 function sourceAssetId(job: SpatialBuildJobRecord): string | null {
@@ -64,7 +46,7 @@ export class AholoAdapter implements SpatialProviderAdapter {
   private readonly token?: string
   private readonly allowPaidCalls: boolean
   private readonly fetchImpl: typeof fetch
-  private readonly sourceImageLoader: (assetId: string) => Promise<AholoUploadSource | null>
+  private readonly sourceImageLoader: (assetId: string, job: SpatialBuildJobRecord) => Promise<AholoUploadSource | null>
 
   constructor(options: AholoAdapterOptions = {}) {
     const { sourceImageLoader, ...httpOptions } = options
@@ -72,7 +54,7 @@ export class AholoAdapter implements SpatialProviderAdapter {
     this.token = options.token
     this.allowPaidCalls = options.allowPaidCalls === true
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch
-    this.sourceImageLoader = sourceImageLoader ?? defaultSourceImageLoader
+    this.sourceImageLoader = sourceImageLoader ?? readOwnedSpatialReference
     this.delegate = new AholoHttpAdapter(httpOptions)
   }
 
@@ -93,11 +75,11 @@ export class AholoAdapter implements SpatialProviderAdapter {
     if (!apiKey) {
       throw new ProviderDefinitelyNotAcceptedError('aholo API token is not configured; no request was sent.')
     }
-    const source = await this.sourceImageLoader(assetId)
+    const source = await this.sourceImageLoader(assetId, job)
     if (!source) {
       throw new ProviderDefinitelyNotAcceptedError('Aholo source image bytes are unavailable; World was not submitted.')
     }
-    const uploadedUrl = await uploadAholoWorldSource({
+    const uploadedUrl = await uploadAholoReferenceImage({
       baseUrl: this.baseUrl,
       apiKey,
       source,

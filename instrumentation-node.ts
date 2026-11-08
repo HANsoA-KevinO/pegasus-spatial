@@ -5,6 +5,7 @@
  */
 
 import mongoose from 'mongoose'
+import { startSceneCodeWorker } from './lib/scene-code/build-worker'
 import { runStartupChecks } from './lib/startup-checks'
 import { connectDB } from './lib/db/mongodb'
 import { shouldLogDatabaseFailure } from './lib/db/retry-policy'
@@ -62,6 +63,7 @@ import {
 
 export function registerNode(): void {
   runStartupChecks()
+  const sceneCodeWorker = process.env.SCENE_CODE_WORKER_ENABLED === '0' ? null : startSceneCodeWorker()
   const backgroundRunnerConfigured =
     process.env.AGENT_RUNTIME_BACKGROUND_RUNNER === '1'
   let recoverySweepRunning = false
@@ -289,6 +291,7 @@ export function registerNode(): void {
       if (aborted > 0) console.log(`[shutdown] aborted ${aborted} agent loops`)
       clearInterval(runtimeRecoveryTimer)
       stopMemoryV2Worker()
+      await sceneCodeWorker?.stop()
       if (durableCompactionWorker) {
         await durableCompactionWorker.stop()
         durableCompactionWorker = null

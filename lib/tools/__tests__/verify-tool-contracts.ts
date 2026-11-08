@@ -19,6 +19,7 @@ import { executeSearchDocument } from '../search-document'
 import { createInMemoryWorkspace } from '../__test-utils__/in-memory-workspace'
 
 const CORE_TOOLS = [
+  'PrepareSceneCode', 'RunSceneCode', 'InspectSceneBuild', 'RenderSceneViews', 'QuerySceneGeometry', 'CheckSceneConstraints', 'PublishSceneBuild', 'ExportSceneBuild',
   'Read',
   'Write',
   'Edit',
@@ -26,13 +27,6 @@ const CORE_TOOLS = [
   'CreateObject3D',
   'CreateWorld3D',
   'CreateSpatialScene',
-  'SetSceneEnvironment',
-  'SetSceneWorld',
-  'AddSceneObject',
-  'AddSceneTerrain',
-  'TransformSceneObject',
-  'RemoveSceneObject',
-  'ApplySceneSpec',
   'InspectSpatialScene',
   'RestoreSpatialScene',
   'SetSceneViewpoint',
@@ -109,6 +103,7 @@ function verifySchemas(): void {
     'WaitForAgents',
     'SubmitAgentResult',
     'ReviewAgentResult',
+    'SetSceneEnvironment', 'SetSceneWorld', 'AddSceneTerrain', 'AddSceneObject', 'TransformSceneObject', 'RemoveSceneObject', 'ApplySceneSpec',
   ]
   for (const name of retired) assert.ok(!visionNames.includes(name), `${name} must remain retired`)
 
@@ -129,9 +124,9 @@ function verifySchemas(): void {
   const explicitlyDelegated = getToolSchemasForCapabilities({
     supportsVision: true,
     isRoot: false,
-    allowedTools: ['GenerateImage', 'AddSceneObject'],
+    allowedTools: ['GenerateImage', 'RunSceneCode', 'AddSceneObject'],
   }).map(item => item.name)
-  assert.deepEqual(explicitlyDelegated, ['GenerateImage', 'AddSceneObject'])
+  assert.deepEqual(explicitlyDelegated, ['RunSceneCode', 'GenerateImage'])
 
   const spatialNames = getToolSchemasForCapabilities({
     supportsVision: true,
@@ -165,11 +160,7 @@ function verifySchemas(): void {
   // top-level combinators out of the public schema preserves relay support.
   assert.equal(schema('CreateObject3D').anyOf, undefined)
   assert.equal(schema('CreateWorld3D').anyOf, undefined)
-  assert.equal(schema('TransformSceneObject').anyOf, undefined)
-  assert.deepEqual(schema('SetSceneEnvironment').required, ['scene_id', 'image_path'])
-  assert.deepEqual(schema('ApplySceneSpec').required, ['scene_id', 'spec_path'])
-  assert.match(String(schema('ApplySceneSpec').properties?.spec_path.pattern), /^\^output\/spatial\/scenes/)
-  assert.deepEqual(schema('AddSceneTerrain').required, ['scene_id', 'object_job_id'])
+  assert.equal(schema('CreateSpatialScene').properties?.world_job_id, undefined)
   assert.deepEqual(schema('QuerySceneSurface').required, ['scene_id', 'terrain_instance_id', 'horizontal'])
   assert.deepEqual(schema('GetSpatialJob').required, ['job_id'])
   assert.equal(schema('WaitSpatialJob').properties?.timeout_ms.maximum, 120000)

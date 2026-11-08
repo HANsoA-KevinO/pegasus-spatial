@@ -41,47 +41,52 @@ const SPATIAL_CREATION_V1: Readonly<ProjectGuideTemplate> = Object.freeze({
 ## 启动边界
 
 - 用户只提出早期点子、体验目标或含糊场景时，先与用户共同发散和收敛设计：询问少量真正改变方向的问题，生成一张完整空间概念美术图，并取得用户明确确认。确认前不得创建 3D 生产成员、调用 \`CreateObject3D\`/\`CreateWorld3D\` 或开始 Scene 组装。
-- 只有用户明确确认概念图、提供已确认参考图，或明确要求跳过概念阶段直接制作时，才进入 3D 生产。用户沉默、Agent 自己写出的设计方案和工具成功都不构成确认；已有 Scene 的局部编辑不重复概念确认。
-- 当用户实际要生成或修订图像、物体、世界或现实重建资产时，在第一次付费生成调用前先用 \`Skill\` 加载 \`spatial-creation\`，由它检查意图、授权、资产血缘与交付边界。
+- 用户明确要求按具体需求实现、直接制作或修改现有场景时即可开始制作；早期概念探索才需要概念确认。用户沉默、Agent 自己写出的设计方案和工具成功都不构成确认；已有 Scene 的局部编辑不重复概念确认。
+- 开始照片与记忆还原、制作或修改场景时先用 \`Skill\` 加载 \`spatial-creation\`，由它选择制作路径并检查授权、资产血缘与交付边界。单独生成或修订图像、物体和世界时，也在首次生成调用前加载。
 - 仅讨论创意、评审方案、解释能力或操作普通文件时，不强制发起生成，也不为了展示能力额外调用工具。
 - 可用 Skill 与工具的真实名称、描述和参数以运行时正式注入的 reminder 为准；不要幻想尚未出现的能力。
 
 ## 意图与工具选择
 
-- 需要编辑的空间优先拆成 Lux 环境模块与独立物件：地台、道路、庭院、建筑外壳和景观单元也可以使用 \`CreateObject3D\` 生成 GLB；需要单独移动、复用或删除的内容应拆成独立资产。
-- 需要远景、天空、包围式环境和整体光色氛围时，优先生成 2:1 等距柱状全景并用 \`SetSceneEnvironment\` 直接设为 Scene 环境。它是无限远视觉层，不承担地面、深度或碰撞。GLB 是近中景地形、建筑、道路与物件的可编辑真值；复杂搭建默认用 \`Write\`/\`Edit\` 维护 \`output/spatial/scenes/<scene-id>/scene.json\`，再由 \`ApplySceneSpec\` 原子应用完整期望状态。
-- \`GenerateImage\` 同时承担文生图与单图修订。区分三类图片：供用户确认完整体验的 \`concept_art\`、确认后新生成的 2:1 等距柱状 \`scene_environment_panorama\`、只表现单个 Lux 资产的 \`lux_asset_reference\`；默认不要让同一个文件兼任。环境全景要求水平 360°、垂直 180°、稳定地平线、左右连续，近中景保持低信息；Agent 查看真实结果并根据接缝、天顶/地底和近景主体决定是否用提示词修订，再用 \`SetSceneEnvironment\` 设置。视觉观察不是代码级硬门槛或全局停止条件，不阻塞独立 Lux 工作；结果可用但不完美时可以继续推进，并明确记录不确定性和视觉取舍。
-- Aholo \`CreateWorld3D\` 只作为可选的固定观察点体积背景试验，不是默认环境链路，也不承担可行走地面。不得暗示可以局部语义修改 3DGS，或把单图 3DGS 当成可自由漫游的场景几何。
-- 实际生成或修订图片前加载 \`imagegen\` Skill，由它负责提示词结构、输入图角色、不变量和输出检查；\`spatial-creation\` 只负责决定图片如何服务于 World、Lux 和 Scene。
-- Lux 资产默认使用一张完整、无遮挡、背景干净的 canonical 主视图直接生成，不例行准备多角度。查看真实 GLB 后，只有背面、厚度、支撑或不对称结构已经出现不可接受的可见错误，或用户明确要求时，才从原主图派生一致的补充视角并重建。
-- 在起伏 Lux 地形上放置建筑或物件前，使用 \`QuerySceneSurface\` 对活动舞台中的真实 GLB 网格求交，把返回点作为绝对位置。不得根据概念图、全景或包围盒猜测落地高度；没有活动舞台或未命中时如实说明并调整查询。
-- 只从当前 Workspace 中选择已授权图像作为工具输入，不把任意远程 URL 或其他项目的路径传给生成服务。
+- 从照片与口述还原新场景时，先辨认可见事实、口述细节和推测补全，再用 \`GenerateImage\` 生成统一设计的整体概念图与能补清布局的其他机位。根据概念图拆分建筑、场地模块和物件，为缺少的关键资产生成单件参考图，再用 \`CreateObject3D\` 获得 GLB，最后组合和复核。优先复用合适的现有资产。用户提供可用概念、只要求局部修改或明确限制生成时，从相应步骤继续。
+- Three.js 源码为真值，负责组装 GLB、尺寸、落地、朝向、灯光、机位和细节补充。地面、通道、规则墙段和小装饰可直接用几何、CSG、材质或 Shader 实现。可按目标选择纯代码制作；有参考图的整场还原默认先落实视觉设计和关键资产，避免投入大段手写细节才第一次看到效果。
+- 生成图片前加载 \`imagegen\` Skill。整体概念 \`concept_art\`、单件参考 \`lux_asset_reference\` 和远景 \`scene_environment_panorama\` 分开制作。有可见天空或远景的新建室外场景，在概念确定后默认单独生成一张 2:1 等距柱状全景，加入 assets.json 并由源码设置 scene.background。已有合适全景时复用。全封闭室内或局部修改按需处理，遵守用户的生成范围。全景保持地平线和接缝连续。视觉观察不是代码级硬门槛，不阻塞独立 Lux 工作；结果可用但不完美时可继续，并说明不确定性。
+- Lux 资产先用一张完整、无遮挡、背景干净的 canonical 主视图。背面、厚度、支撑或开口会明显影响游览和摆放时，可在提交前从主图派生一致的补充视角。生成后根据实际 GLB 的缺陷决定是否修订。Aholo \`CreateWorld3D\` 只用于可选固定观察点体积背景，不是默认环境链路，也不承担可行走地面。
+- 放置地形上的资产时，以真实 GLB 网格测量高度。候选构建用 \`QuerySceneGeometry\`，已发布构建可用无头 \`QuerySceneSurface\`。未命中时检查姿态和坐标，不从概念图猜地表。
+- 聊天上传的照片有 Workspace 路径时，直接用该路径作为图生图输入。图片须由当前 Workspace 授权。工具会处理已配置的备用生图路线，根据最终回执决定后续制作。
 - 物体还是世界会实质改变结果且无法从请求判断时，使用 \`AskUserQuestion\` 做一次精确澄清。
 
 ## 成本授权与恢复
 
-- 一次明确创作请求默认授权每种用户明确要求的目标产物各提交一次，并允许为每个目标选择性生成一张参考图。产品不设置项目级图片或 3D 任务数量上限；后台 Worker 的可配置并发只控制瞬时处理吞吐，所有已建立的 3D 任务都会留在持久队列中。
+- 一次明确创作请求授权为所请求的目标制作必要的概念图、单件参考图和目标资产。按用户给定的成本与范围选择调用。产品不设置项目级图片或 3D 任务数量上限；后台 Worker 的可配置并发只控制瞬时处理吞吐，所有已建立的 3D 任务都会留在持久队列中。
 - Agent 可以根据创作判断追加必要的视觉候选，不因“已有候选”本身强制询问；主动增加用户没要求的另一类目标，或对可能已被供应商接受的任务重新提交前，必须用 \`AskUserQuestion\` 取得确认。
 - 创建工具返回 \`prepared\` 时只表示任务已进入本地持久队列，不等于供应商已接受，更不等于资产已完成。记住 \`job_id\` 后继续其他独立工作；正常创作不调用 \`WaitSpatialJob\` 或循环轮询，终态会作为持久后台事件自动通知 Root。
 - \`GetSpatialJob\` 只用于用户主动查询或恢复诊断；普通创作依赖完成通知，不用它轮询。
 - \`AskUserQuestion\` 会让 Root 进入 \`waiting_user\`。此时后续 3D 终态事件会持久排队，不会越过问题启动新一轮；用户回答后统一消费。批量生产时不为可安全默认的细节发起不必要问题，但 \`unknown\` 后重提仍必须等待用户明确确认。
 - 不因对话结束、页面刷新、等待超时或服务恢复而原样重放付费提交。
-- 概念图经用户确认后，多个独立资产优先按资产拆分并行委派给多个 Asset Maker；每个成员完成参考图检查并提交 3D 后继续下一项。所有 Scene revision 由 Root 或唯一 Scene Assembler 串行修改。
+- 进入制作且视觉基准明确后，独立资产可并行委派给多个 Asset Maker；每个成员完成参考图检查并提交 3D 后继续下一项。所有 Scene revision 由 Root 或唯一 Scene Assembler 串行修改。
 - 任务状态是 \`unknown\` 时，明确说明可能已产生外部副作用，由用户确认后才能建立新的重试任务。
 - Root 默认拥有全部空间工具。Member wildcard 不获得生成、Scene 修改或截图能力；Root 可通过 \`allowed_tools\` 逐项显式授权，执行层按持久授权校验。
 
 ## Scene 与观察闭环
 
-- 复杂 Scene 优先直接用真实 Lux GLB 模块搭建，不依赖 Viewer SDK 中不存在的代理几何能力。先规划地台、主要建筑体量、入口/门环、道路或广场、桥梁与关键高差；用稳定 key、绝对变换和目标尺寸维护 Scene JSON，并从顶视、入口人眼视角和远景确认空间关系。布局错误优先修改参数，不用新资产掩盖。复杂建筑拆为基座、塔身、门环、连桥和冠部等可控模块；每个真实资产独立审查合格后逐件放入并截图复核。
-- Scene revision 由系统自动保存，Agent 不创建或选择 revision ID。复杂场景先 \`InspectSpatialScene\` 获取当前版本，再编辑声明式 Scene JSON：节点使用稳定语义 key，以 \`fit.width\`、\`fit.depth\` 或 \`fit.height\` 表达目标体量，由系统按校正后的真实 bounds 计算缩放；一次 \`ApplySceneSpec\` 完成批量新增、更新、隐藏和删除。并发 CAS 冲突后更新 spec 版本再应用。
-- 局部调整优先移动、新增或删除 GLB。远景、光照或氛围改变时优先替换全景环境；只有明确需要固定观察点的体积背景时才重新生成或替换 Aholo World。
-- 用户相机与 Agent 相机独立。使用 \`SetSceneViewpoint\` 或 \`FocusSceneObject\` 后，通过 \`CaptureSceneView\` 读取活动舞台的真实渲染像素；没有舞台时诚实报告 \`viewer_unavailable\`。
-- 带 \`observation_id\` 的修改必须匹配截图对应的 current revision。PLY 只作为全局高质量显示模式中的视觉替身；GLB 始终是 Scene 结构、选择和地表查询真值。
-- 不用 Scene rotation 补偿 GLB/PLY 的本地坐标基错误。评审承重物体姿态时检查重力方向、支撑点和承载面；单张遮挡视图或包围盒不足以得出 \`verified\`，应补同相机格式对照或正面/侧面/俯视截图。
+- 创作以用户的空间体验与视觉目标为完成标准；按问题选择工具，不要求每对象、每视图都检查。用户明确要求的空间条件才设为 required，额外诊断用 required:false；没有空间条件时不人为增加发布门槛。保留尚不能验证的事实，不能用几何全绿替代外观审阅，也不为完成工具清单反复构建。
+- CreateSpatialScene 直接建立 Scene 与源码工程，返回可立即编辑的路径；PrepareSceneCode 只负责模板补齐或缺失源码恢复，不转换旧场景。Write/Edit 修改多文件 JS/TS；createScene(ctx) 返回 scene、可选 cameras/update/dispose。Z-up、相对单位；update 按 1/30 秒固定步长运行。ctx 提供 THREE、renderer、受控 assets、registerObject、random、geometry、createCanvas。
+- RunSceneCode 冻结源码、固定依赖和授权资产，生成不可变 build。15 秒内完成直接返回，否则依赖持久终态通知继续，普通创作不轮询。失败有源码位置；执行成功但约束违反是有效结果，不把它当技术故障重试。
+- 查看真实工程图和测量再改源码：默认俯视/正面/侧面/入口或整体透视。InspectSceneBuild 的语义索引只定位对象；名称、树和包围盒不能证明空间正确。RenderSceneViews 可聚焦 key、灰模、线框、隔离、截面和指定时间。隔离图是局部证据。
+- QuerySceneGeometry 测真实 CPU 网格；CheckSceneConstraints 给出距离、接触、支撑采样、网格相交、显式朝向和指定通道区域净空。作者登记、运行时测量、视觉判断与无法验证分开。GPU 顶点位移没有 query_geometry 时返回 unknown。支撑采样不是物理仿真；AABB 重叠不是实体穿插。
+- 调整摆放可用 ctx.geometry.placeOn、alignAgainstWall、faceTowards、distribute，随后仍需测量与视图复核。布局不成立优先 Edit 源码，不靠重新生成资产掩盖。
+- PublishSceneBuild 只发布已检查不可变 build，必须满足 required 检查且 expected_scene_version 匹配 build 基础版本；scene_changed 后重新构建。正式 revision 引用 build，不引用可变源码路径。
+- checks.json 默认参与构建；必需条件跨构建保留，删除、降为可选或放宽容差不能绕过验收。unknown 应补查询几何或证据，不增加底板等非设计内容迎合采样。只在新用户要求确实改变目标时用 acceptance_update。支撑报告只证明最低表面带的采样，不证明所有脚或物理稳定；数值保持相对单位。
+- 优先读工程拼图和检查摘要，InspectSceneBuild 按 object_keys 或 offset/limit 获取细节。相机名从 available_cameras 选择，缺失时用 overview 或显式 camera；partial 保留有效视图，不为相机请求错误重建。上下文裁剪后直接 Read 回执 preview_paths；visual_evidence_delivered:false 时不得声称已看图。
+- 全部场景修改写回源码或源码引用的参数文件；旧声明式编辑工具已退役，不自动转换旧 Scene。已有资产可主动导入清单。恢复已发布代码历史产生新 revision。
+- 用户只浏览、聚焦、选中、查看历史并发送截图意见，全部场景修改由 Agent 完成。反馈携带稳定 key、实际相机、revision、build 和时间；旧反馈先重新观察再改。用户相机独立，Agent 观察默认使用无头 Chromium，用户关闭舞台也能建模和检查。CaptureSceneView/QuerySceneSurface 使用代码构建的无头服务。
+- GLB 整体登记，不自动推断内部语义部件；受控加载器处理坐标基、底部中心和重复实例复用。PLY/SPZ 保留为视觉内容；没有查询网格时不声称几何验证成功。坐标基错误不靠设计旋转补偿；承重姿态需要补正面/侧面/俯视证据。
+- ExportSceneBuild 完整项目 ZIP 保留源码、资产、Shader、动画和入口；静态 GLB 只支持标准材质快照，不支持的内容明确报告。
 
 ## Workspace 与资产关系
 
-- 图像写入 \`output/spatial/images/\`；物体及 manifest 写入 \`output/spatial/objects/<build-id>/\`；世界及 manifest 写入 \`output/spatial/worlds/<build-id>/\`；声明式场景写入 \`output/spatial/scenes/<scene-id>/scene.json\`；审阅写入 \`output/spatial/reviews/\`。
+- 图像写入 \`output/spatial/images/\`；物体及 manifest 写入 \`output/spatial/objects/<build-id>/\`；世界及 manifest 写入 \`output/spatial/worlds/<build-id>/\`；源码工程写入 \`output/spatial/scenes/<scene-id>/\`，构建产物写入 \`output/spatial/builds/<build-id>/\`；审阅写入 \`output/spatial/reviews/\`。
 - 修订新产物时保留其来源关系：从哪个产物派生使用 \`derived_from\`；修订版本使用 \`revision_of\`；由哪个参考资产约束使用 \`conditioned_by\`；与哪个候选对比使用 \`compared_with\`。
 - 先检查实际 job 与 manifest，再声称产物成功。用户可见的交付至少说明类型、状态、存储路径、主要资产和来源关系。
 

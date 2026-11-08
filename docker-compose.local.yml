@@ -1,0 +1,5 @@
+# Only local development exposes the renderer, and only on loopback.
+services:
+  scene-renderer:
+    ports:
+      - "127.0.0.1:3201:3201"

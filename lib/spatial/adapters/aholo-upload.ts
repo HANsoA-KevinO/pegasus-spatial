@@ -20,7 +20,7 @@ interface UploadCredential {
 
 function object(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new ProviderDefinitelyNotAcceptedError(`${label} returned an invalid response; World was not submitted.`)
+    throw new ProviderDefinitelyNotAcceptedError(`${label} returned an invalid response; 3D generation was not submitted.`)
   }
   return value as Record<string, unknown>
 }
@@ -28,11 +28,11 @@ function object(value: unknown, label: string): Record<string, unknown> {
 async function jsonResponse(response: Response, label: string): Promise<Record<string, unknown>> {
   const text = await response.text()
   if (text.length > MAX_RESPONSE_BYTES) {
-    throw new ProviderDefinitelyNotAcceptedError(`${label} response exceeded the safe limit; World was not submitted.`)
+    throw new ProviderDefinitelyNotAcceptedError(`${label} response exceeded the safe limit; 3D generation was not submitted.`)
   }
   let value: unknown
   try { value = JSON.parse(text) } catch {
-    throw new ProviderDefinitelyNotAcceptedError(`${label} returned invalid JSON; World was not submitted.`)
+    throw new ProviderDefinitelyNotAcceptedError(`${label} returned invalid JSON; 3D generation was not submitted.`)
   }
   return object(value, label)
 }
@@ -46,7 +46,7 @@ function cleanMessage(value: unknown): string {
 function assertOusSuccess(value: Record<string, unknown>, label: string): Record<string, unknown> {
   if (String(value.c) !== '0') {
     throw new ProviderDefinitelyNotAcceptedError(
-      `${label} failed before World submission: ${cleanMessage(value.m)}`,
+      `${label} failed before 3D submission: ${cleanMessage(value.m)}`,
     )
   }
   return object(value.d ?? {}, `${label}.d`)
@@ -55,7 +55,7 @@ function assertOusSuccess(value: Record<string, unknown>, label: string): Record
 function resolveApiUrl(baseUrl: string, path: string): URL {
   let base: URL
   try { base = new URL(baseUrl) } catch {
-    throw new ProviderDefinitelyNotAcceptedError('Aholo API base URL is invalid; World was not submitted.')
+    throw new ProviderDefinitelyNotAcceptedError('Aholo API base URL is invalid; 3D generation was not submitted.')
   }
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) {
     throw new ProviderDefinitelyNotAcceptedError('Aholo API base URL must be a credential-free HTTPS URL.')
@@ -78,7 +78,7 @@ async function uploadCredential(input: {
     })
   } catch (error) {
     throw new ProviderDefinitelyNotAcceptedError(
-      'Aholo upload credential transport failed before World submission.',
+      'Aholo upload credential transport failed before 3D submission.',
       { cause: error },
     )
   }
@@ -132,7 +132,7 @@ async function ousRequest(input: {
     })
   } catch (error) {
     throw new ProviderDefinitelyNotAcceptedError(
-      'Aholo OUS transport failed before World submission.',
+      'Aholo OUS transport failed before 3D submission.',
       { cause: error },
     )
   }
@@ -172,12 +172,12 @@ async function pollUpload(input: {
     }
     if (status === 6 || status === 8) {
       throw new ProviderDefinitelyNotAcceptedError(
-        `Aholo upload failed before World submission (status=${status}; code=${cleanMessage(data.errorCode)}).`,
+        `Aholo upload failed before 3D submission (status=${status}; code=${cleanMessage(data.errorCode)}).`,
       )
     }
     await delay(500, undefined, { signal: input.signal })
   }
-  throw new ProviderDefinitelyNotAcceptedError('Aholo upload timed out before World submission.')
+  throw new ProviderDefinitelyNotAcceptedError('Aholo upload timed out before 3D submission.')
 }
 
 function uploadForm(source: AholoUploadSource, fieldName = source.filename): FormData {
@@ -186,7 +186,23 @@ function uploadForm(source: AholoUploadSource, fieldName = source.filename): For
   return form
 }
 
-export async function uploadAholoWorldSource(input: {
+function missingUploadBlocks(value: unknown, count: number): number[] {
+  if (value == null) return Array.from({ length: count }, (_, index) => index + 1)
+  if (!Array.isArray(value)) throw new ProviderDefinitelyNotAcceptedError('Aholo returned invalid missing upload blocks.')
+  const missing = new Set<number>()
+  for (const entry of value) {
+    const match = typeof entry === 'string' ? /^(\d+)(?:-(\d+))?$/.exec(entry) : null
+    const start = Number(match?.[1])
+    const end = Number(match?.[2] ?? match?.[1])
+    if (!match || start < 1 || end < start || end > count) {
+      throw new ProviderDefinitelyNotAcceptedError('Aholo returned invalid missing upload blocks.')
+    }
+    for (let block = start; block <= end; block += 1) missing.add(block)
+  }
+  return [...missing]
+}
+
+export async function uploadAholoReferenceImage(input: {
   baseUrl: string
   apiKey: string
   source: AholoUploadSource
@@ -210,22 +226,21 @@ export async function uploadAholoWorldSource(input: {
     }), 'Aholo single upload')
   } else {
     const blocks = Math.ceil(input.source.buffer.length / credential.blockSize)
+    const query = new URLSearchParams({
+      md5,
+      blocks: String(blocks),
+      size: String(input.source.buffer.length),
+      name: input.source.filename,
+    })
     const init = assertOusSuccess(await ousRequest({
       credential,
       fetchImpl,
       signal: input.signal,
-      path: '/ous/api/v2/block/upload/init',
+      path: `/ous/api/v2/block/upload/init?${query}`,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        md5,
-        blocks,
-        size: input.source.buffer.length,
-        name: input.source.filename,
-      }),
     }), 'Aholo block upload init')
     if (init.deduplicated !== true) {
-      for (let block = 1; block <= blocks; block += 1) {
+      for (const block of missingUploadBlocks(init.lackBlocks, blocks)) {
         const start = (block - 1) * credential.blockSize
         const chunk = input.source.buffer.subarray(start, start + credential.blockSize)
         const form = uploadForm({ ...input.source, buffer: chunk }, `${input.source.filename}.part${block}`)

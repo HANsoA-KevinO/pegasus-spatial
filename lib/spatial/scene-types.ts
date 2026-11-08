@@ -92,6 +92,7 @@ export interface SceneObjectInstance {
 }
 
 export interface SpatialSceneRecord {
+  acceptance_contract?: import('../scene-code/types').SceneAcceptanceContract | null
   scene_id: string
   project_id: string
   user_id: string
@@ -105,6 +106,7 @@ export interface SpatialSceneRecord {
 }
 
 export interface SpatialSceneRevisionRecord {
+  program?: import('../scene-code/types').SceneProgramRef | null
   revision_id: string
   scene_id: string
   project_id: string
@@ -126,6 +128,8 @@ export interface SpatialSceneRevisionRecord {
 }
 
 export interface SpatialObservationRecord {
+  build_id?: string | null
+  time_s?: number
   observation_id: string
   scene_id: string
   project_id: string

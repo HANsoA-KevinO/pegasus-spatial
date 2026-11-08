@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import sharp from 'sharp'
 import type { AgentExecutionContext, ToolExecutionInvocation } from '../../agent/execution-context'
+import { uploadedImageBlock } from '../../workspace/uploaded-image'
 import type { RasterAssetRef } from '../../types'
 import { createInMemoryWorkspace } from '../../tools/__test-utils__/in-memory-workspace'
 import { executeGenerateImage, type GenerateImageInput } from '../../tools/generate-image'
@@ -88,6 +90,7 @@ class MemoryReceiptStore implements ImageGenerationReceiptStore {
     assetSha256: string,
     providerRequestId: string | undefined,
     now: Date,
+    actualModel?: string,
   ) {
     const receipt = this.required(key)
     assert.equal(receipt.status, 'submitting')
@@ -96,6 +99,7 @@ class MemoryReceiptStore implements ImageGenerationReceiptStore {
     receipt.asset = structuredClone(asset)
     receipt.assetSha256 = assetSha256
     receipt.providerRequestId = providerRequestId
+    if (actualModel) receipt.model = actualModel
     receipt.updatedAt = now
     return clone(receipt)
   }
@@ -533,14 +537,24 @@ function assertByteFree(value: unknown): void {
   assert.equal(receipt?.status, 'unknown')
 }
 
-// Single-image editing freezes the Workspace parent asset in durable lineage.
+// An uploaded image becomes an authorized source, with original bytes and durable lineage.
 {
   const workspace = createInMemoryWorkspace()
-  const parent = fakeAsset('asset_parent')
-  await workspace.writeRaster('output/spatial/images/source.png', parent)
-  workspace.readRasterBuffer = async path => path === 'output/spatial/images/source.png'
-    ? Buffer.from('workspace-parent-bytes')
-    : null
+  const original = await sharp({
+    create: { width: 64, height: 32, channels: 3, background: '#c2b19b' },
+  }).png().toBuffer()
+  const variant = { storageKey: 'fixture', mimeType: 'image/png', width: 64, height: 32, sizeBytes: original.length }
+  const upload = {
+    ...variant, assetId: 'asset_parent', sha256: 'a'.repeat(64),
+    ownerUserId: executionContext.userId, conversationId: executionContext.conversationId,
+    source: 'user_upload' as const, state: 'active' as const, storageDriver: 'gridfs' as const,
+    uploadedAt: new Date(),
+    variants: { original: variant, model: variant, thumbnail: variant },
+  }
+  const block = await uploadedImageBlock(workspace, upload)
+  assert.equal(block.workspace_path, `references/uploads/${upload.sha256}.png`)
+  assert.equal((await workspace.readRaster(block.workspace_path!))?.assetId, upload.assetId)
+  workspace.readRasterBuffer = async (path, variant) => path === block.workspace_path && variant === 'original' ? original : null
   const receipts = new MemoryReceiptStore()
   const state = setup(receipts)
   let receivedParent = ''
@@ -576,16 +590,17 @@ function assertByteFree(value: unknown): void {
     ...TEST_IMAGE_PROVIDER_IDENTITY,
     async generate(request) {
       receivedParent = request.source?.assetId || ''
-      assert.equal(request.source?.buffer.toString(), 'workspace-parent-bytes')
+      assert.deepEqual(request.source?.buffer, original)
       return {
         buffer: Buffer.from('server-only-image-bytes'),
         mimeType: 'image/png',
+        providerModel: 'nanobanana2',
       }
     },
   }
   const editInput: GenerateImageInput = {
     prompt: 'Move the chair closer to the window',
-    input_image_path: 'output/spatial/images/source.png',
+    input_image_path: block.workspace_path,
     output_path: 'output/spatial/images/revision.png',
   }
   const context = { ...executionContext, runId: 'run_edit_lineage' }
@@ -603,6 +618,8 @@ function assertByteFree(value: unknown): void {
     toolUseId: invocation.toolUseId,
   })
   assert.equal(receipt?.parentAssetId, 'asset_parent')
+  assert.equal(receipt?.model, 'nanobanana2')
+  assert.equal(registeredInput?.metadata?.model, 'nanobanana2')
   assert.equal(registeredInput?.artifactId, 'asset_generated')
   assert.equal(registeredInput?.storageUri, 'asset:asset_generated')
   assert.deepEqual(registeredInput?.relations, [{

@@ -9,6 +9,7 @@ import { createDefaultImageGenerationProvider } from '../image-generation/provid
 import { mongoImageGenerationReceiptStore } from '../image-generation/receipt-store'
 import {
   IMAGE_GENERATION_SUBMISSION_LEASE_MS,
+  MAX_IMAGE_GENERATION_SOURCE_BYTES,
   normalizeImageAspectRatio,
   receiptToolResult,
   type GenerateImageDependencies,
@@ -20,7 +21,7 @@ import {
   type ImageGenerationSource,
 } from '../image-generation/types'
 import { toRasterAssetRef } from '../media/reference'
-import { claimImageAsset, writeImageAsset } from '../media/storage'
+import { claimImageAsset, inspectRasterContent, writeImageAsset } from '../media/storage'
 import {
   registerPublishedSpatialArtifact,
   SpatialPaidCapacityError,
@@ -325,10 +326,10 @@ async function resolveSource(
   if (!sourcePath) return undefined
   const asset = await workspace.readRaster(sourcePath)
   if (!asset) throw new Error(`Workspace 中不存在可用的源图片：${sourcePath}`)
-  // Match the proven Pegasus edit path: send the bounded model variant rather
-  // than an unbounded camera original. The source is still resolved from the
-  // authorized Workspace path and never accepts a caller-supplied remote URL.
-  const buffer = await workspace.readRasterBuffer(sourcePath, 'model')
+  // Preserve the original reference pixels for edits when within the provider limit.
+  const original = await workspace.readRasterBuffer(sourcePath, 'original')
+  const useOriginal = original && original.length <= MAX_IMAGE_GENERATION_SOURCE_BYTES
+  const buffer = useOriginal ? original : await workspace.readRasterBuffer(sourcePath, 'model')
   if (!buffer) throw new Error(`无法读取源图片字节：${sourcePath}`)
   const stillCurrent = await workspace.readRaster(sourcePath)
   if (!stillCurrent || stillCurrent.assetId !== asset.assetId) {
@@ -336,7 +337,7 @@ async function resolveSource(
   }
   return {
     assetId: asset.assetId,
-    mimeType: asset.mimeType,
+    mimeType: useOriginal ? (await inspectRasterContent(buffer)).mimeType : asset.mimeType,
     buffer,
   }
 }
@@ -818,6 +819,7 @@ export async function executeGenerateImage(
       stored.sha256,
       output.providerRequestId,
       (dependencies.now ?? (() => new Date()))(),
+      output.providerModel,
     )
     // The external paid operation has completed. Remaining Workspace/artifact
     // publication is locally recoverable and must not leak scarce capacity if

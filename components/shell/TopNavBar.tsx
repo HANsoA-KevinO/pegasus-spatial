@@ -23,7 +23,7 @@ export function TopNavBar() {
     : STATIC_NAV_LINKS
 
   return (
-    <nav className="fixed top-0 z-50 flex h-16 w-full items-center justify-between border-b border-[var(--glass-panel-border)] bg-[color-mix(in_srgb,var(--glass-panel-bg)_70%,transparent)] px-8 backdrop-blur-xl">
+    <nav data-fluid-interaction="ignore" className="fixed top-0 z-50 flex h-16 w-full items-center justify-between border-b border-[var(--glass-panel-border)] bg-[color-mix(in_srgb,var(--glass-panel-bg)_70%,transparent)] px-8 backdrop-blur-xl">
       <div className="flex items-center gap-9">
         <Link href="/" className="group flex items-center gap-2.5">
           <BrandMark className="h-8 w-8 transition-transform group-hover:scale-105" />

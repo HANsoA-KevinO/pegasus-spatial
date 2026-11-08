@@ -1,0 +1,130 @@
+{
+  "date": "2026-11-06",
+  "model": "deepseek-flash",
+  "passed": true,
+  "scope": "isolated live application and Chromium renderer; synthetic text requirements, existing GLB; separate synthetic image-input probe",
+  "paid_asset_generation_calls": 0,
+  "model_calls": 69,
+  "successful_model_calls": 67,
+  "injected_transport_errors": 2,
+  "tool_calls": 63,
+  "phases": [
+    {
+      "name": "source-build-eof",
+      "fault": "eof",
+      "resumed_same_run": true,
+      "diagnostic": {
+        "code": "incomplete_message",
+        "request_id": "fault-1",
+        "elapsed_ms": 25247,
+        "bytes_received": 509690,
+        "event_counts": {
+          "message_start": 1,
+          "content_block_start": 2,
+          "ping": 1,
+          "content_block_delta": 3993,
+          "content_block_stop": 1
+        },
+        "last_event": "content_block_delta",
+        "last_delta": "input_json_delta",
+        "last_event_age_ms": 3,
+        "message_started": true,
+        "message_stopped": false,
+        "done_marker": false,
+        "transport_eof": true,
+        "stop_reason": null,
+        "open_blocks": [
+          {
+            "index": 1,
+            "type": "tool_use",
+            "tool": "Write",
+            "input_json_chars": 1
+          }
+        ],
+        "thinking_chars": 13256,
+        "text_chars": 0,
+        "reported_output_tokens": 0,
+        "usage_complete": false
+      },
+      "elapsed_ms": 382185,
+      "scene_version": 2,
+      "objects": 14
+    },
+    {
+      "name": "selected-edit-reset",
+      "fault": "reset",
+      "resumed_same_run": true,
+      "diagnostic": {
+        "code": "read_error",
+        "request_id": "fault-2",
+        "elapsed_ms": 6121,
+        "bytes_received": 76060,
+        "event_counts": {
+          "message_start": 1,
+          "content_block_start": 1,
+          "ping": 1,
+          "content_block_delta": 591
+        },
+        "last_event": "content_block_delta",
+        "last_delta": "thinking_delta",
+        "last_event_age_ms": 334,
+        "message_started": true,
+        "message_stopped": false,
+        "done_marker": false,
+        "transport_eof": false,
+        "stop_reason": null,
+        "open_blocks": [
+          {
+            "index": 0,
+            "type": "thinking",
+            "input_json_chars": 0
+          }
+        ],
+        "thinking_chars": 2163,
+        "text_chars": 0,
+        "reported_output_tokens": 0,
+        "usage_complete": false
+      },
+      "elapsed_ms": 228337,
+      "scene_version": 3,
+      "objects": 14
+    },
+    {
+      "name": "compile-error-repair",
+      "elapsed_ms": 48238,
+      "scene_version": 4,
+      "objects": 14
+    }
+  ],
+  "faults": [
+    {
+      "mode": "eof",
+      "upstream_request_id": "fault-1",
+      "event": "content_block_delta",
+      "partial_input_chars": 2
+    },
+    {
+      "mode": "reset",
+      "upstream_request_id": "fault-2",
+      "event": "content_block_delta",
+      "partial_input_chars": 2
+    }
+  ],
+  "image_probe": {
+    "model": "deepseek-flash",
+    "source": "synthetic-generated-reference",
+    "elapsed_ms": 4436,
+    "response": "1. 屋顶是瓦片。\n2. 通道口是拱形。\n3. 木长凳位于院子的左侧。",
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 530,
+      "output_tokens": 379,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  },
+  "limitations": [
+    "Does not certify upstream long-connection stability.",
+    "Scene spatial checks and image-input connectivity are not a photo reconstruction quality benchmark."
+  ]
+}

@@ -2,12 +2,12 @@
 
 ## 角色边界
 
-Scene 的默认远景层是 2:1 等距柱状全景，通过 `SetSceneEnvironment` 直接进入 Viewer。它稳定地包围相机，不随相机平移而像单视图 3DGS 那样碎裂，但没有深度、碰撞或可行走地面。
+有可见天空或远景的新建室外 Scene，概念确定后默认单独生成一张 2:1 等距柱状全景，经 assets.json 授权后，由 ctx.assets.loadTexture 加载并在源码中设置 scene.background。它稳定地包围相机，不随相机平移而像单视图 3DGS 那样碎裂，但没有深度、碰撞或可行走地面。已有合适全景时复用。全封闭室内和局部修改按需处理，遵守用户的生成范围。
 
 `CreateWorld3D` 只用于试验固定观察点附近的 Aholo 3DGS 体积背景。它不是默认 Skybox，不是可局部编辑的建筑、道路、地表模块或道具生成工具，也不承担 Lux Scene 的地面。
 
 - 需要一张完整视觉方案：使用 `GenerateImage` 生成 `concept_art`。
-- 需要稳定的天空、远景和整体氛围：另行生成 `scene_environment_panorama`，再使用 `SetSceneEnvironment`。
+- 需要稳定的天空、远景和整体氛围：另行生成 `scene_environment_panorama`，再将全景加入 assets.json 并由源码加载。
 - 需要独立可摆放的地形、建筑或物件：使用 `CreateObject3D`。
 - 明确需要固定观察点附近的体积环境试验：可以额外使用 `CreateWorld3D`。
 
@@ -15,11 +15,11 @@ Scene 的默认远景层是 2:1 等距柱状全景，通过 `SetSceneEnvironment
 
 ## 三类图片不能混用
 
-早期创作先生成完整场景概念美术图供用户确认。用户确认后，根据同一视觉基准分别制作：
+当项目需要远景或体积背景时，从场景概念美术图提取统一的视觉基准。早期探索先取得概念确认，明确的制作请求可直接推进。按用途分别制作图像。
 
 1. `scene_environment_panorama`：只负责天空、遥远山体/天际线、天气、季节和整体光色；
 2. `lux_asset_reference`：每张只负责一个地形、建筑、道路或物件的几何设计；
-3. 已确认的 `concept_art`：继续作为整体视觉目标，不直接兼任前两类生产输入。
+3. 选定的 `concept_art`：继续作为整体视觉目标，不直接兼任前两类生产输入。
 
 不要假定普通单向透视图可以定义完整 360° 环境。它没有背面视觉证据，直接环绕或重建时容易出现拉伸、重复和无关结构。
 
@@ -47,15 +47,15 @@ Scene 的默认远景层是 2:1 等距柱状全景，通过 `SetSceneEnvironment
 避免：[近中景建筑、道路、家具、车辆、树干、柱子、墙面、文字、重复太阳、鱼眼和 little-planet]。
 ```
 
-生成后用 `SetSceneEnvironment.image_path` 直接设置全景环境。`yaw_deg` 只用于水平旋转对齐，`exposure` 只用于显示亮度；不要用它们掩盖错误构图。
+生成后将图片路径加入资产清单，由源码设置 scene.background、EquirectangularReflectionMapping 和 Z-up 对齐；水平旋转只用于对齐，backgroundIntensity 只调整亮度，不用它们掩盖错误构图。
 
 ## Lux 地面与大地形
 
-全景环境不产生地面。需要完整地基、庭院、道路、坡地、近山、岛屿轮廓或大型建筑基座时，为该模块制作干净主图，并按可见性补充侧视、后视或俯视；再用 `CreateObject3D` 生成 GLB，以 `AddSceneTerrain` 加入 Scene。
+全景环境不产生地面。需要完整地基、庭院、道路、坡地、近山、岛屿轮廓或大型建筑基座时，为该模块制作干净主图，并按可见性补充侧视、后视或俯视；再用 `CreateObject3D` 生成 GLB，在源码 loadGLB 后 registerObject 并设置 role:'terrain' 加入 Scene。
 
 大型 Lux 模块不必覆盖整张地图。可以把一块完整基础地形作为主基座，再叠加道路、台地、坡面、建筑和装饰模块；资产边界由后续是否需要独立移动、替换和复用决定。
 
-在起伏地形上放置资产时，不根据全景、概念图或包围盒猜高度。活动舞台打开后，用 `QuerySceneSurface` 在目标 X/Y 位置向下命中真实 Lux GLB 网格，再把返回的绝对点用于新增或变换。没有命中时换坐标、检查地形姿态或请求新的观察，不伪造地表。
+在起伏地形上放置资产时，不根据全景、概念图或包围盒猜高度。用 geometry.placeOn 或 QuerySceneGeometry 在目标 X/Y 位置向下命中真实 Lux GLB 网格，再把返回的绝对点写回源码；无头执行不依赖用户舞台。没有命中时换坐标、检查地形姿态或请求新的观察，不伪造地表。
 
 ## 可选 Aholo World
 

@@ -9,6 +9,7 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".next-flash-test/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
@@ -17,9 +18,12 @@ const eslintConfig = defineConfig([
     // Generated / opaque outputs
     "dist/**",
     "coverage/**",
+    "output/**",
     // Local upstream/reference archives and generated scratch are not source.
     "_archive/**",
     "_temp/**",
+    // Submission packages include vendored/generated demo bundles, not app source.
+    "submission/**",
   ]),
   {
     rules: {

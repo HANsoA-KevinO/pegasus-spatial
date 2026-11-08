@@ -7,7 +7,7 @@ import { getConversation } from '../db/repository'
 import { NewApiChatImageAdapter } from '../image-generation/providers/newapi-chat-image'
 import { mongoImageGenerationReceiptStore } from '../image-generation/receipt-store'
 import { normalizeImageAspectRatio, type ImageGenerationReceipt } from '../image-generation/types'
-import { ensureProviderImageDeliveryUrl } from '../media/storage'
+import { resolveSpatialReferenceUrl } from '../media/storage'
 import {
   createDefaultGenerateImageDependencies,
   executeGenerateImage,
@@ -316,7 +316,7 @@ function spatialToolDependencies(): SpatialToolDependencies {
     getSpatialJobResult,
     waitSpatialJobResult,
     inspectSpatialArtifactResult,
-    resolveProviderRasterUrl: asset => ensureProviderImageDeliveryUrl(asset.assetId),
+    resolveProviderRasterUrl: asset => resolveSpatialReferenceUrl(asset.assetId),
     now: () => new Date(),
   }
 }

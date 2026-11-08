@@ -1,5 +1,6 @@
 node_modules
 .next
+.next-flash-test
 .git
 .env
 .env.*
@@ -10,3 +11,7 @@ pegasus-image.tar.gz
 *.log
 *.tsbuildinfo
 .DS_Store
+submission
+output
+exports
+**/__pycache__

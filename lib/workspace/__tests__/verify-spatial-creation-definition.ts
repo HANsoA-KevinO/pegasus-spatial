@@ -7,6 +7,10 @@ const SPATIAL_DECLARATIONS = [
   'output/spatial/images/<asset-id>.png',
   'output/spatial/objects/<build-id>/manifest.json',
   'output/spatial/worlds/<build-id>/manifest.json',
+  'output/spatial/scenes/<scene-id>/main.ts',
+  'output/spatial/scenes/<scene-id>/assets.json',
+  'output/spatial/scenes/<scene-id>/checks.json',
+  'output/spatial/builds/<build-id>/views/<view-id>.png',
   'output/spatial/reviews/<artifact-id>.md',
 ]
 
@@ -25,6 +29,7 @@ function main(): void {
   for (const declarationPath of SPATIAL_DECLARATIONS) {
     assert.ok(declarations.has(declarationPath), `missing spatial declaration: ${declarationPath}`)
   }
+  assert.ok(!declarations.has('output/spatial/scenes/<scene-id>/scene.json'), 'Retired Scene JSON must not be offered as the authoring entry')
 
   const workspace = createWorkspaceInstance(spatialCreationWorkspace)
   assert.deepEqual(workspace.list(), [], 'reserved paths must not pre-create files')

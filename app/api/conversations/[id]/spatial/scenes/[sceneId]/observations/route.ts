@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { resolveLocalOwner } from '@/lib/local-owner'
 import { getOwnedImageAsset } from '@/lib/media/storage'
 import { toRasterAssetRef } from '@/lib/media/reference'
-import { createSpatialObservation, normalizeViewpoint, requireSpatialScene } from '@/lib/spatial'
+import { createSpatialObservation, getCurrentSpatialSceneRevision, normalizeViewpoint, requireSpatialScene } from '@/lib/spatial'
 import { createScenePublicationWorkspace } from '@/lib/spatial/scene-workspace'
 
 export const dynamic = 'force-dynamic'
@@ -15,8 +15,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const body = await request.json() as Record<string, unknown>
     if (typeof body.asset_id !== 'string' || typeof body.comment !== 'string' || !body.comment.trim()) return NextResponse.json({ error: 'asset_id and comment required' }, { status: 400 })
     const scene = await requireSpatialScene(sceneId, { projectId: id, userId })
+    if (body.revision_id !== scene.current_revision_id) return NextResponse.json({ error: 'scene_changed' }, { status: 409 })
+    const revision = await getCurrentSpatialSceneRevision(scene)
+    if (revision.program && (body.build_id !== revision.program.build_id || typeof body.time_s !== 'number' || !Number.isFinite(body.time_s) || body.time_s < 0 || body.time_s > 120)) return NextResponse.json({ error: 'build_or_time_mismatch' }, { status: 409 })
     const viewpoint = normalizeViewpoint(body.viewpoint as Parameters<typeof normalizeViewpoint>[0])
     const selected = typeof body.selected_instance_id === 'string' ? body.selected_instance_id : null
+    if (selected && !(revision.program ? revision.program.objects.some(object => object.key === selected) : revision.instances.some(instance => instance.instance_id === selected))) return NextResponse.json({ error: 'selected_object_not_in_revision' }, { status: 400 })
     const visible = Array.isArray(body.visible_instance_ids) ? body.visible_instance_ids.filter((value): value is string => typeof value === 'string').slice(0, 500) : []
     const observationId = `observation_${createHash('sha256').update(`${scene.scene_id}\0${scene.current_revision_id}\0${body.asset_id}\0${body.comment}`).digest('hex').slice(0, 32)}`
     const asset = await getOwnedImageAsset(body.asset_id, userId, id)
@@ -27,6 +31,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const observation = await createSpatialObservation({
       observation_id: observationId, scene_id: scene.scene_id, project_id: scene.project_id, user_id: scene.user_id,
       revision_id: scene.current_revision_id, source: 'user', viewpoint,
+      build_id: revision.program?.build_id ?? null, time_s: revision.program ? Math.round(Number(body.time_s) * 30) / 30 : 0,
       screenshot_asset_id: asset.assetId, screenshot_workspace_path: workspacePath,
       selected_instance_id: selected, visible_instance_ids: visible, comment: body.comment.trim().slice(0, 4000),
     })

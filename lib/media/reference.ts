@@ -1,5 +1,5 @@
 import type { ImageBlock, RasterAssetRef, RasterAssetVariant } from '../types'
-import { buildMediaPublicUrl, buildOSSObjectPublicUrl } from './public-url'
+import { buildOSSObjectPublicUrl } from './public-url'
 import type { StoredImageAsset } from './storage'
 
 /** Convert storage metadata to the byte-free contract used by tools and SSE. */
@@ -9,7 +9,7 @@ export function toRasterAssetRef(asset: StoredImageAsset): RasterAssetRef {
     if (asset.storageDriver === 'oss') {
       return buildOSSObjectPublicUrl(asset.variants[variant].storageKey)
     }
-    return buildMediaPublicUrl(asset.assetId, variant)
+    return `/api/media/${encodeURIComponent(asset.assetId)}/${variant}`
   }
   return {
     assetId: asset.assetId,

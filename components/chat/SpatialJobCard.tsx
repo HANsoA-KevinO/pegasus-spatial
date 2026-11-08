@@ -110,7 +110,7 @@ export function SpatialJobCard({ tool, content, pending, isError }: {
   const refreshedRef = useRef<string | null>(null)
   const {
     conversationId,
-    loadConversation,
+    refreshWorkspaceArtifacts,
     setActiveArtifactPath,
     setSidebarCollapsed,
     setSidebarView,
@@ -139,7 +139,7 @@ export function SpatialJobCard({ tool, content, pending, isError }: {
             setJob(next)
             if (next.status === 'published' && refreshedRef.current !== jobId) {
               refreshedRef.current = jobId
-              void loadConversation(conversationId)
+              void refreshWorkspaceArtifacts(conversationId)
             }
           }
         }
@@ -154,7 +154,7 @@ export function SpatialJobCard({ tool, content, pending, isError }: {
       controller.abort()
       if (timer) clearTimeout(timer)
     }
-  }, [conversationId, job?.job_id, job?.status, loadConversation])
+  }, [conversationId, job?.job_id, job?.status, refreshWorkspaceArtifacts])
 
   if (!isSpatialTool(tool)) return null
   if (!job) {
@@ -180,7 +180,7 @@ export function SpatialJobCard({ tool, content, pending, isError }: {
     : []
 
   return (
-    <section className="mx-3 mb-3 overflow-hidden rounded-md border border-ghost-border/20 bg-surface-lowest text-ink shadow-[0_14px_40px_rgba(59,47,40,.10)]">
+    <section className="mx-3 mb-3 overflow-hidden rounded-md border border-ghost-border/20 bg-surface-lowest text-ink shadow-[0_14px_40px_rgba(38,49,72,.10)]">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ghost-border/20 px-3.5 py-3">
         <div className="min-w-0">
           <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-primary">{kindLabel(job.kind, tool)}</p>

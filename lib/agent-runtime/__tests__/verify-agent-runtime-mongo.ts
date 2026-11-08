@@ -38,6 +38,29 @@ async function main(): Promise<void> {
   const startedAt = new Date('2026-07-30T00:00:00.000Z')
 
   try {
+    // A truncated model response retains the preceding tool checkpoint. A
+    // resume only requeues the model action; it must not replay prior tools.
+    const streamRun = await repository.createAgentRun({
+      runId: 'run_stream_interruption', conversationId: `${conversationId}_stream`, userId,
+      request: { message: 'stream recovery fixture' }, startedMessageId: 'msg_stream_fixture',
+    })
+    const streamLease = await repository.leaseNextAgentRun('stream_owner', 30_000)
+    assert.equal(streamLease?.run_id, streamRun.run_id)
+    await repository.setRunCurrentAction(streamRun.run_id, { kind: 'tool_call', action_id: 'completed_write', attempt: 1, started_at: new Date() }, 'stream_owner')
+    await repository.advanceRunCheckpoint(streamRun.run_id, 'completed_write', 'msg_completed_tool', 'stream_owner')
+    await repository.setRunCurrentAction(streamRun.run_id, { kind: 'model_request', action_id: 'interrupted_model', attempt: 1, started_at: new Date() }, 'stream_owner')
+    assert.ok(await repository.setRunStatus(streamRun.run_id, 'recoverable', { error: 'fixture upstream stream interruption', leaseOwnerId: 'stream_owner' }))
+    const stoppedStream = await repository.getAgentRun(streamRun.run_id, userId)
+    assert.equal(stoppedStream?.checkpoint_message_id, 'msg_completed_tool')
+    assert.equal(stoppedStream?.current_action?.kind, 'model_request')
+    assert.equal(stoppedStream?.lease, null)
+    assert.equal(await repository.leaseNextAgentRun('must_not_auto_retry', 30_000), null, 'recovery waits for explicit resume')
+    assert.ok(await repository.queueRecoverableAgentRun(streamRun.run_id, userId))
+    const resumedStream = await repository.leaseNextAgentRun('stream_resume_owner', 30_000)
+    assert.equal(resumedStream?.current_action?.action_id, 'interrupted_model')
+    assert.equal(resumedStream?.checkpoint_message_id, 'msg_completed_tool')
+    await repository.setRunStatus(streamRun.run_id, 'cancelled', { leaseOwnerId: 'stream_resume_owner', releaseActive: true })
+
     const runtime = await repository.getOrCreateConversationRuntime(conversationId, userId)
     assert.equal(runtime.conversation_id, conversationId)
     assert.equal(runtime.hippocampus.snapshot_version, 1)

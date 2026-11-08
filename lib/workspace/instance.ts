@@ -66,6 +66,7 @@ const DOCUMENT_MIME_EXTENSIONS = new Map<string, string>([
   [GLB_MIME_TYPE, 'glb'],
   [PLY_MIME_TYPE, 'ply'],
   [SPZ_MIME_TYPE, 'spz'],
+  ['application/zip', 'zip'],
 ])
 const DOCUMENT_EXTENSIONS = new Set(DOCUMENT_MIME_EXTENSIONS.values())
 
@@ -137,6 +138,8 @@ export function inspectWorkspaceDocument(input: WorkspaceDocumentWrite): {
     if (!/^ply\r?\nformat\s+(ascii|binary_little_endian|binary_big_endian)\s+1\.0\r?\n/.test(header)) {
       throw new Error('3D model bytes do not start with a valid PLY 1.0 header')
     }
+  } else if (mimeType === 'application/zip') {
+    if (input.buffer.length < 4 || input.buffer.readUInt32LE(0) !== 0x04034b50) throw new Error('Project bytes do not start with the ZIP file header')
   } else if (input.buffer.length < 2 || input.buffer[0] !== 0x1f || input.buffer[1] !== 0x8b) {
     throw new Error('3D splat bytes do not start with the SPZ gzip header')
   }

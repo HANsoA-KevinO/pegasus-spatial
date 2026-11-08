@@ -1006,7 +1006,11 @@ export async function updateRunLive(
   leaseOwnerId?: string,
 ): Promise<boolean> {
   await connectDB()
-  const filter = {
+  const filter: {
+    run_id: string
+    'lease.owner_id'?: string
+    status?: AgentRunStatus
+  } = {
     run_id: runIdValue,
     ...(leaseOwnerId ? { 'lease.owner_id': leaseOwnerId, status: 'running' } : {}),
   }

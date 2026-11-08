@@ -7,11 +7,12 @@ import type {
 
 export const IMAGE_GENERATION_SUBMISSION_LEASE_MS = 6 * 60_000
 export const IMAGE_GENERATION_RESERVATION_RECOVERY_MS = 60_000
+export const MAX_IMAGE_GENERATION_SOURCE_BYTES = 20 * 1024 * 1024
 
 /**
- * The NewAPI chat-image transport receives aspect ratio as a composition
- * instruction, not a finite size enum. Accept any positive numeric
- * `width:height` pair instead of maintaining a product-level whitelist.
+ * Aspect ratios remain a numeric `width:height` contract instead of a finite
+ * product-level whitelist. The provider maps them to its closest valid pixel
+ * dimensions and rejects only ratios outside the upstream model's hard range.
  */
 export type ImageAspectRatio = string
 
@@ -47,6 +48,7 @@ export interface ImageGenerationOutput {
   mimeType: string
   revisedPrompt?: string
   providerRequestId?: string
+  providerModel?: string
 }
 
 /**
@@ -68,7 +70,7 @@ export interface ImageGenerationProvider {
 /**
  * Secret-free provider identity frozen before a paid submission. `provider`
  * is a versioned transport-contract id (for example
- * `newapi-chat-image-v1`), so the snapshot does not need to retain a gateway
+ * `newapi-images-v2`), so the snapshot does not need to retain a gateway
  * URL or any credential material.
  */
 export interface ImageGenerationProviderSnapshot {
@@ -152,6 +154,7 @@ export interface ImageGenerationReceiptStore {
     assetSha256: string,
     providerRequestId: string | undefined,
     now: Date,
+    actualModel?: string,
   ): Promise<ImageGenerationReceipt>
   adoptClaimedAsset(
     receipt: ImageGenerationReceipt,

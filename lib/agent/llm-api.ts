@@ -34,6 +34,37 @@ export class LLMAPIError extends Error {
   }
 }
 
+/** A failed/incomplete SSE message must never become executable tool calls. */
+export interface LLMStreamDiagnostics {
+  code: 'incomplete_message' | 'read_error' | 'protocol_error'
+  request_id: string | null
+  elapsed_ms: number
+  bytes_received: number
+  event_counts: Record<string, number>
+  last_event: string | null
+  last_delta: string | null
+  last_event_age_ms: number | null
+  message_started: boolean
+  message_stopped: boolean
+  done_marker: boolean
+  transport_eof: boolean
+  stop_reason: string | null
+  open_blocks: Array<{ index: number; type: string; tool?: string; input_json_chars: number }>
+  thinking_chars: number
+  text_chars: number
+  reported_output_tokens: number | null
+  usage_complete: boolean
+}
+export class LLMStreamError extends Error {
+  constructor(message: string, readonly diagnostics?: LLMStreamDiagnostics, readonly usage?: TokenUsage, options?: ErrorOptions) {
+    super(message, options); this.name = 'LLMStreamError'
+  }
+}
+
+export function isRecoverableLLMStreamError(error: unknown): error is LLMStreamError {
+  return error instanceof LLMStreamError && ['incomplete_message', 'read_error'].includes(error.diagnostics?.code ?? '')
+}
+
 export function isPromptTooLongLLMError(error: unknown): boolean {
   if (error instanceof LLMAPIError) {
     if (error.status === 413) return true
@@ -70,6 +101,7 @@ export async function callAnthropicAPIStream(
   onRedactedThinking?: () => void,
   abortSignal?: AbortSignal,
 ): Promise<StreamResult> {
+  const startedAt = Date.now()
   const endpoint = (baseUrl || LLM_BASE_URL).trim().replace(/\/+$/, '')
   const key = apiKey || LLM_API_KEY_ORCHESTRATOR
   if (!endpoint) throw new Error('LLM_BASE_URL is not configured')
@@ -136,7 +168,8 @@ export async function callAnthropicAPIStream(
   }
 
   // Parse SSE stream
-  const reader = res.body!.getReader()
+  if (!res.body) throw new LLMStreamError('LLM stream has no response body')
+  const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
 
@@ -144,132 +177,206 @@ export async function callAnthropicAPIStream(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const blocks = new Map<number, any>()
   const toolInputs = new Map<number, string>()
-  let stopReason = 'end_turn'
+  const openBlocks = new Set<number>()
+  let stopReason = ''
+  let messageStarted = false
+  let messageStopped = false
+  let aborted = false
+  let eventLines: string[] = []
+  let bytesReceived = 0, transportEof = false, doneMarker = false
+  let lastEvent: string | null = null, lastDelta: string | null = null, lastEventAt: number | null = null
+  let thinkingChars = 0, textChars = 0
+  const eventCounts: Record<string, number> = Object.create(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let usage: any = {}
 
-  while (true) {
-    // Check abort before each read — return partial results instead of throwing
-    if (abortSignal?.aborted) {
-      console.log('[llm-api] Aborted during streaming, returning partial results')
-      try { reader.cancel() } catch { /* ignore */ }
-      break
+  const observedUsage = (): TokenUsage => ({
+    input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0,
+    cache_creation_input_tokens: usage.cache_creation_input_tokens || 0,
+    cache_read_input_tokens: usage.cache_read_input_tokens || 0,
+  })
+  const streamFailure = (message: string, code: LLMStreamDiagnostics['code'], cause?: unknown) => {
+    const rawId = res.headers.get('x-request-id') || res.headers.get('request-id') || res.headers.get('x-oneapi-request-id')
+    const diagnostics: LLMStreamDiagnostics = {
+      code, request_id: rawId && /^[\w.:-]{1,200}$/.test(rawId) ? rawId : null,
+      elapsed_ms: Date.now() - startedAt, bytes_received: bytesReceived, event_counts: { ...eventCounts },
+      last_event: lastEvent, last_delta: lastDelta, last_event_age_ms: lastEventAt === null ? null : Date.now() - lastEventAt,
+      message_started: messageStarted, message_stopped: messageStopped, done_marker: doneMarker, transport_eof: transportEof,
+      stop_reason: stopReason || null,
+      open_blocks: [...openBlocks].map(index => ({ index, type: blocks.get(index)?.type ?? 'unknown', ...(blocks.get(index)?.name ? { tool: String(blocks.get(index).name).slice(0, 100) } : {}), input_json_chars: toolInputs.get(index)?.length ?? 0 })),
+      thinking_chars: thinkingChars, text_chars: textChars,
+      reported_output_tokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : null,
+      usage_complete: messageStopped && !!stopReason && openBlocks.size === 0,
     }
+    // Metadata only: never log streamed reasoning, source code, tool inputs or credentials.
+    console.warn('[llm-api] Stream interrupted:', JSON.stringify(diagnostics))
+    return new LLMStreamError(message, diagnostics, observedUsage(), cause === undefined ? undefined : { cause })
+  }
 
-    const { done, value } = await reader.read()
-    if (done) break
-
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
-      const data = line.slice(6).trim()
-      if (data === '[DONE]') continue
-
-      let event
-      try {
-        event = JSON.parse(data)
-      } catch {
-        continue
+  try {
+    while (true) {
+      // Partial streamed text may have been displayed, but no partial tool call
+      // can cross the transport boundary on cancellation.
+      if (abortSignal?.aborted) {
+        aborted = true
+        break
       }
 
-      const idx: number = event.index ?? -1
+      const { done, value } = await reader.read()
+      transportEof = done
+      bytesReceived += value?.byteLength ?? 0
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      if (done) { lines.push(buffer, ''); buffer = '' }
 
-      switch (event.type) {
-        case 'message_start':
-          if (event.message?.usage) {
-            usage = { ...usage, ...event.message.usage }
-            console.log(`[llm-api] usage@message_start: input=${usage.input_tokens} cache_read=${usage.cache_read_input_tokens} cache_create=${usage.cache_creation_input_tokens}`)
-          }
-          break
+      for (const rawLine of lines) {
+        const line = rawLine.replace(/\r$/, '')
+        if (line.startsWith('data:')) { eventLines.push(line.slice(5).replace(/^ /, '')); continue }
+        if (line !== '' || !eventLines.length) continue
+        const data = eventLines.join('\n').trim()
+        eventLines = []
+        if (data === '[DONE]') { doneMarker = true; messageStopped = true; continue }
 
-        case 'content_block_start':
-          if (event.content_block?.type === 'text') {
-            blocks.set(idx, { type: 'text', text: '' })
-          } else if (event.content_block?.type === 'tool_use') {
-            blocks.set(idx, {
-              type: 'tool_use',
-              id: event.content_block.id,
-              name: event.content_block.name,
-              input: {},
-            })
-            toolInputs.set(idx, '')
-            onToolUseStart?.(event.content_block.name)
-          } else if (event.content_block?.type === 'thinking') {
-            blocks.set(idx, { type: 'thinking', thinking: '', signature: '' })
-          } else if (event.content_block?.type === 'redacted_thinking') {
-            const blockData = event.content_block.data || ''
-            // Skip OpenRouter-injected redacted_thinking (non-Anthropic native)
-            if (typeof blockData === 'string' && blockData.startsWith('openrouter.reasoning:')) {
-              blocks.set(idx, { type: 'redacted_thinking', data: blockData, _skip: true })
-            } else {
-              blocks.set(idx, { type: 'redacted_thinking', data: blockData })
-              onRedactedThinking?.()
-            }
-          }
-          break
-
-        case 'content_block_delta': {
-          const block = blocks.get(idx)
-          if (!block) break
-
-          if (event.delta?.type === 'text_delta' && block.type === 'text') {
-            block.text += event.delta.text
-            onTextDelta?.(event.delta.text)
-          } else if (event.delta?.type === 'input_json_delta' && block.type === 'tool_use') {
-            toolInputs.set(idx, (toolInputs.get(idx) || '') + event.delta.partial_json)
-          } else if (event.delta?.type === 'thinking_delta' && block.type === 'thinking') {
-            block.thinking += event.delta.thinking
-            onThinkingDelta?.(event.delta.thinking)
-          } else if (event.delta?.type === 'signature_delta') {
-            if (block.type === 'thinking') {
-              block.signature = (block.signature || '') + event.delta.signature
-            } else if (block.type === 'redacted_thinking') {
-              block.data = (block.data || '') + event.delta.signature
-            }
-          }
-          break
+        let event
+        try {
+          event = JSON.parse(data)
+        } catch {
+          throw new LLMStreamError('LLM stream contains invalid event JSON')
         }
+        if (!event || typeof event !== 'object') throw new LLMStreamError('LLM stream contains an invalid event')
+        lastEvent = String(event.type ?? 'unknown').slice(0, 80)
+        lastDelta = event.delta?.type ? String(event.delta.type).slice(0, 80) : lastDelta
+        lastEventAt = Date.now()
+        if (Object.keys(eventCounts).length < 32 || Object.hasOwn(eventCounts, lastEvent)) eventCounts[lastEvent] = (eventCounts[lastEvent] || 0) + 1
+        if (event.type === 'error') throw new LLMStreamError(`LLM stream failed: ${String(event.error?.type ?? 'provider_error')}`)
+        if (messageStopped && event.type !== 'ping') throw new LLMStreamError('LLM stream continued after message_stop')
 
-        case 'content_block_stop': {
-          const block = blocks.get(idx)
-          if (block?.type === 'tool_use') {
-            const jsonStr = toolInputs.get(idx) || ''
-            if (jsonStr) {
-              try {
-                block.input = JSON.parse(jsonStr)
-              } catch {
-                // Preserve parse failure as a runtime-invalid value. The Agent
-                // Loop's tool-input boundary will replace it with a durable,
-                // JSON-safe rejection block and emit an error tool_result.
-                // Converting malformed JSON to {} here would silently execute
-                // a different call than the model produced.
-                block.input = undefined
+        const idx: number = event.index ?? -1
+
+        switch (event.type) {
+          case 'message_start':
+            if (messageStarted) throw new LLMStreamError('LLM stream contains multiple messages')
+            messageStarted = true
+            if (event.message?.usage) {
+              usage = { ...usage, ...event.message.usage }
+              console.log(`[llm-api] usage@message_start: input=${usage.input_tokens} cache_read=${usage.cache_read_input_tokens} cache_create=${usage.cache_creation_input_tokens}`)
+            }
+            break
+
+          case 'content_block_start':
+            if (!Number.isInteger(idx) || idx < 0 || blocks.has(idx) || !messageStarted) throw new LLMStreamError('LLM stream contains an invalid block start')
+            openBlocks.add(idx)
+            if (event.content_block?.type === 'text') {
+              const text = typeof event.content_block.text === 'string' ? event.content_block.text : ''
+              blocks.set(idx, { type: 'text', text }); textChars += text.length
+              if (text) onTextDelta?.(text)
+            } else if (event.content_block?.type === 'tool_use') {
+              blocks.set(idx, {
+                type: 'tool_use',
+                id: event.content_block.id,
+                name: event.content_block.name,
+                input: event.content_block.input ?? {},
+              })
+              toolInputs.set(idx, '')
+              onToolUseStart?.(event.content_block.name)
+            } else if (event.content_block?.type === 'thinking') {
+              const thinking = typeof event.content_block.thinking === 'string' ? event.content_block.thinking : ''
+              blocks.set(idx, { type: 'thinking', thinking, signature: event.content_block.signature || '' }); thinkingChars += thinking.length
+              if (thinking) onThinkingDelta?.(thinking)
+            } else if (event.content_block?.type === 'redacted_thinking') {
+              const blockData = event.content_block.data || ''
+              // Skip OpenRouter-injected redacted_thinking (non-Anthropic native)
+              if (typeof blockData === 'string' && blockData.startsWith('openrouter.reasoning:')) {
+                blocks.set(idx, { type: 'redacted_thinking', data: blockData, _skip: true })
+              } else {
+                blocks.set(idx, { type: 'redacted_thinking', data: blockData })
+                onRedactedThinking?.()
               }
             }
-          }
-          break
-        }
+            break
 
-        case 'message_delta':
-          if (event.delta?.stop_reason) {
-            stopReason = event.delta.stop_reason
+          case 'content_block_delta': {
+            const block = blocks.get(idx)
+            if (!block || !openBlocks.has(idx)) throw new LLMStreamError('LLM stream delta has no open block')
+
+            if (event.delta?.type === 'text_delta' && block.type === 'text') {
+              block.text += event.delta.text
+              textChars += event.delta.text.length
+              onTextDelta?.(event.delta.text)
+            } else if (event.delta?.type === 'input_json_delta' && block.type === 'tool_use') {
+              toolInputs.set(idx, (toolInputs.get(idx) || '') + event.delta.partial_json)
+            } else if (event.delta?.type === 'thinking_delta' && block.type === 'thinking') {
+              block.thinking += event.delta.thinking
+              thinkingChars += event.delta.thinking.length
+              onThinkingDelta?.(event.delta.thinking)
+            } else if (event.delta?.type === 'signature_delta') {
+              if (block.type === 'thinking') {
+                block.signature = (block.signature || '') + event.delta.signature
+              } else if (block.type === 'redacted_thinking') {
+                block.data = (block.data || '') + event.delta.signature
+              }
+            }
+            break
           }
-          if (event.usage) {
-            // Per Anthropic Messages API spec, `message_delta.usage` should only
-            // update output/cache counters — `input_tokens` is finalized in
-            // `message_start.usage` and must NOT be overwritten here. Some upstream
-            // gateways (observed: NewAPI) incorrectly send an inflated / doubled
-            // value in message_delta's input_tokens, which would mislead our
-            // auto-compact trigger. We preserve message_start's input_tokens.
-            const preservedInput = usage.input_tokens
-            usage = { ...usage, ...event.usage, input_tokens: preservedInput }
+
+          case 'content_block_stop': {
+            if (!openBlocks.delete(idx)) throw new LLMStreamError('LLM stream stopped an unopened block')
+            const block = blocks.get(idx)
+            if (block?.type === 'tool_use') {
+              const jsonStr = toolInputs.get(idx) || ''
+              if (jsonStr) {
+                try {
+                  block.input = JSON.parse(jsonStr)
+                } catch {
+                  // Preserve parse failure as a runtime-invalid value. The Agent
+                  // Loop's tool-input boundary will replace it with a durable,
+                  // JSON-safe rejection block and emit an error tool_result.
+                  // Converting malformed JSON to {} here would silently execute
+                  // a different call than the model produced.
+                  block.input = undefined
+                }
+              }
+            }
+            break
           }
-          break
+
+          case 'message_delta':
+            if (event.delta?.stop_reason) {
+              stopReason = event.delta.stop_reason
+            }
+            if (event.usage) {
+              // Per Anthropic Messages API spec, `message_delta.usage` should only
+              // update output/cache counters — `input_tokens` is finalized in
+              // `message_start.usage` and must NOT be overwritten here. Some upstream
+              // gateways (observed: NewAPI) incorrectly send an inflated / doubled
+              // value in message_delta's input_tokens, which would mislead our
+              // auto-compact trigger. We preserve message_start's input_tokens.
+              const preservedInput = usage.input_tokens
+              usage = { ...usage, ...event.usage, input_tokens: preservedInput }
+            }
+            break
+
+          case 'message_stop':
+            messageStopped = true
+            break
+        }
       }
+      if (done || messageStopped) break
     }
+  } catch (cause) {
+    if (abortSignal?.aborted) aborted = true
+    else {
+      const truncatedEvent = transportEof && cause instanceof LLMStreamError && cause.message === 'LLM stream contains invalid event JSON'
+      throw streamFailure(cause instanceof LLMStreamError ? cause.message : 'LLM stream connection failed before completion; partial tool calls were discarded', truncatedEvent ? 'incomplete_message' : cause instanceof LLMStreamError ? 'protocol_error' : 'read_error', cause)
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+  if (aborted) return { content: [], stop_reason: 'aborted', usage: { input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0 } }
+  if (!messageStarted || !messageStopped || !stopReason || openBlocks.size > 0) {
+    throw streamFailure('LLM stream ended before a complete message; partial tool calls were discarded', 'incomplete_message')
   }
 
   // Assemble final content blocks sorted by index, filter OpenRouter-injected redacted_thinking

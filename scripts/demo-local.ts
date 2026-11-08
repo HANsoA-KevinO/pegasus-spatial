@@ -16,8 +16,12 @@ import { loadProjectEnv } from './load-project-env'
 const PROJECT_ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const APP_PORT = 3200
 const APP_URL = `http://127.0.0.1:${APP_PORT}`
-const PID_FILE = join(tmpdir(), 'pegasus-spatial-demo.pid')
-const LOG_FILE = join(tmpdir(), 'pegasus-spatial-demo.log')
+const RENDERER_URL = 'http://127.0.0.1:3201'
+const PID_FILE = join(tmpdir(), 'pegasus-spatial-local.pid')
+const LOG_FILE = join(tmpdir(), 'pegasus-spatial-local.log')
+const RENDERER_PID_FILE = join(tmpdir(), 'pegasus-spatial-renderer.pid')
+const RENDERER_LOG_FILE = join(tmpdir(), 'pegasus-spatial-renderer.log')
+const RENDERER_SCRIPT = join(PROJECT_ROOT, 'scripts', 'scene-code-renderer.mjs')
 const NEXT_BIN = join(PROJECT_ROOT, 'node_modules', 'next', 'dist', 'bin', 'next')
 const JITI_BIN = join(PROJECT_ROOT, 'node_modules', 'jiti', 'lib', 'jiti-cli.mjs')
 const EXPECTED_MONGO_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
@@ -78,11 +82,11 @@ function mongoDatabaseName(uri: string): string {
 }
 
 /**
- * Local demo safety boundary. It deliberately refuses remote Mongo before
+ * Local deployment safety boundary. It deliberately refuses remote Mongo before
  * Docker or Next.js is started. Provider submission is controlled by the
  * configured credentials and durable task contracts, not a global flag.
  */
-export function assertSafeDemoEnvironment(options: { allowE2eDatabase?: boolean } = {}): void {
+export function assertSafeLocalEnvironment(options: { allowE2eDatabase?: boolean } = {}): void {
   loadProjectEnv()
   const mongoUri = process.env.MONGODB_URI?.trim()
   if (!mongoUri) throw new Error('缺少 MONGODB_URI；请先完成 .env.local。')
@@ -102,7 +106,7 @@ export function assertSafeDemoEnvironment(options: { allowE2eDatabase?: boolean 
     || !validDatabase
   ) {
     throw new Error(
-      '本地演示只允许 127.0.0.1:27019 上的 pegasus_spatial 隔离数据库；拒绝连接远程或其他数据库。',
+      '本地部署只允许 127.0.0.1:27019 上的 pegasus_spatial 数据库；拒绝连接远程或其他数据库。',
     )
   }
 
@@ -111,7 +115,7 @@ export function assertSafeDemoEnvironment(options: { allowE2eDatabase?: boolean 
   runStartupChecks()
 }
 
-export async function ensureDemoMongo(): Promise<void> {
+export async function ensureLocalMongo(): Promise<void> {
   assertDockerAvailable()
   docker(['compose', 'up', '-d', 'mongo'])
   const deadline = Date.now() + 70_000
@@ -130,6 +134,52 @@ export async function ensureDemoMongo(): Promise<void> {
     await sleep(1_000)
   }
   throw new Error('等待本地 Mongo 健康检查超时。')
+}
+
+export async function ensureLocalRenderer(): Promise<void> {
+  if (process.env.SCENE_CODE_WORKER_ENABLED === '0') return
+  if ((process.env.SCENE_CODE_RENDERER_TOKEN?.length ?? 0) < 24) throw new Error('代码建模需要 SCENE_CODE_RENDERER_TOKEN（至少 24 字符的独立随机密钥）。')
+  const configured = process.env.SCENE_CODE_RENDERER_URL || RENDERER_URL
+  if (![RENDERER_URL, 'http://localhost:3201'].includes(configured)) throw new Error('local:up 的受管渲染服务使用 127.0.0.1:3201；自定义服务请分步启动。')
+  const ready = async () => {
+    try {
+      const response = await fetch(RENDERER_URL + '/health', { headers: { authorization: `Bearer ${process.env.SCENE_CODE_RENDERER_TOKEN}` }, signal: AbortSignal.timeout(3000) })
+      if (response.status === 401) throw new Error('渲染服务密钥与 .env.local 不一致；请先停止旧渲染服务。')
+      return response.ok && (await response.json()).chromium === 'ready'
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('密钥')) throw error
+      return false
+    }
+  }
+  if (await ready()) return
+  if (process.env.SCENE_CODE_CHROMIUM_EXECUTABLE_PATH) {
+    if (!existsSync(process.env.SCENE_CODE_CHROMIUM_EXECUTABLE_PATH)) throw new Error('SCENE_CODE_CHROMIUM_EXECUTABLE_PATH 指向的 Chromium 不存在。')
+    const logFd = openSync(RENDERER_LOG_FILE, 'a', 0o600)
+    const child = spawn(process.execPath, [RENDERER_SCRIPT], { cwd: PROJECT_ROOT, env: { ...process.env, SCENE_CODE_RENDERER_HOST: '127.0.0.1', SCENE_CODE_RENDERER_PORT: '3201' }, detached: true, stdio: ['ignore', logFd, logFd] })
+    closeSync(logFd); child.unref()
+    if (!child.pid) throw new Error('无法启动本地 Chromium 渲染服务。')
+    writeFileSync(RENDERER_PID_FILE, JSON.stringify({ pid: child.pid, projectRoot: PROJECT_ROOT, port: 3201, startedAt: new Date().toISOString() }), { mode: 0o600 })
+  } else {
+    docker(['compose', '--env-file', '.env.local', '-f', 'docker-compose.yml', '-f', 'docker-compose.local.yml', 'up', '--build', '-d', 'scene-renderer'])
+  }
+  const deadline = Date.now() + 70_000
+  while (Date.now() < deadline) {
+    if (await ready()) return
+    await sleep(1000)
+  }
+  throw new Error(`等待本地 Chromium 渲染服务超时；本机服务日志：${RENDERER_LOG_FILE}，容器服务：docker compose logs scene-renderer。`)
+}
+
+function stopLocalNativeRenderer(): void {
+  if (!existsSync(RENDERER_PID_FILE)) return
+  const managed = JSON.parse(readFileSync(RENDERER_PID_FILE, 'utf8')) as ManagedPid
+  if (managed.projectRoot !== PROJECT_ROOT || managed.port !== 3201 || !Number.isSafeInteger(managed.pid) || managed.pid <= 1) throw new Error('渲染服务 PID 记录无效，未停止未知进程。')
+  if (isProcessAlive(managed.pid)) {
+    const command = spawnSync('ps', ['-p', String(managed.pid), '-o', 'command='], { encoding: 'utf8' }).stdout || ''
+    if (!command.includes(RENDERER_SCRIPT)) throw new Error('渲染服务 PID 已被其他进程复用，未停止未知进程。')
+    process.kill(managed.pid, 'SIGTERM')
+  }
+  unlinkSync(RENDERER_PID_FILE)
 }
 
 async function probeApp(): Promise<AppProbe> {
@@ -194,13 +244,13 @@ function logTail(maxLines = 24): string {
   return readFileSync(LOG_FILE, 'utf8').split('\n').slice(-maxLines).join('\n').trim()
 }
 
-export async function startManagedDemoApp(
+export async function startManagedLocalApp(
   childEnvironment: NodeJS.ProcessEnv = process.env,
 ): Promise<{ started: boolean }> {
   const current = await probeApp()
   if (current === 'pegasus-spatial') {
     throw new Error(
-      `端口 ${APP_PORT} 已有 Pegasus Spatial。为避免复用错误数据库或残留 E2E 进程，拒绝接管；请先运行 npm run demo:down。`,
+      `端口 ${APP_PORT} 已有 Pegasus Spatial。为避免复用错误数据库或残留 E2E 进程，拒绝接管；请先运行 npm run local:down。`,
     )
   }
   if (current === 'occupied') {
@@ -212,7 +262,7 @@ export async function startManagedDemoApp(
 
   const stale = readManagedPid()
   if (stale && isOwnedNextProcess(stale.pid)) {
-    throw new Error('检测到受管 Next 进程仍在运行，但页面未就绪；请先运行 npm run demo:down。')
+    throw new Error('检测到受管 Next 进程仍在运行，但页面未就绪；请先运行 npm run local:down。')
   }
   removePidFile()
 
@@ -230,7 +280,7 @@ export async function startManagedDemoApp(
   })
   closeSync(logFd)
   child.unref()
-  if (!child.pid) throw new Error('无法取得 Next.js 演示进程 PID。')
+  if (!child.pid) throw new Error('无法取得 Next.js 本地进程 PID。')
   writeFileSync(PID_FILE, JSON.stringify({
     pid: child.pid,
     projectRoot: PROJECT_ROOT,
@@ -242,21 +292,21 @@ export async function startManagedDemoApp(
   while (Date.now() < deadline) {
     if (!isProcessAlive(child.pid)) {
       removePidFile()
-      throw new Error(`Next.js 演示服务提前退出。\n${logTail()}`.trim())
+      throw new Error(`Next.js 本地服务提前退出。\n${logTail()}`.trim())
     }
     const probe = await probeApp()
     if (probe === 'pegasus-spatial') return { started: true }
     if (probe === 'occupied') {
-      await stopManagedDemoApp()
+      await stopManagedLocalApp()
       throw new Error(`端口 ${APP_PORT} 返回了非 Pegasus Spatial 页面。`)
     }
     await sleep(500)
   }
-  await stopManagedDemoApp()
+  await stopManagedLocalApp()
   throw new Error(`等待 Pegasus Spatial 页面就绪超时。\n${logTail()}`.trim())
 }
 
-export async function stopManagedDemoApp(): Promise<boolean> {
+export async function stopManagedLocalApp(): Promise<boolean> {
   const managed = readManagedPid()
   if (!managed) {
     removePidFile()
@@ -275,13 +325,13 @@ export async function stopManagedDemoApp(): Promise<boolean> {
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline && isProcessAlive(managed.pid)) await sleep(250)
   if (isProcessAlive(managed.pid)) {
-    throw new Error('Next.js 演示进程未在 15 秒内退出；未强制终止。')
+    throw new Error('Next.js 本地进程未在 15 秒内退出；未强制终止。')
   }
   removePidFile()
   return true
 }
 
-async function demoStatus(): Promise<number> {
+async function localStatus(): Promise<number> {
   loadProjectEnv()
   const configurationCheck = spawnSync(
     process.execPath,
@@ -294,8 +344,8 @@ async function demoStatus(): Promise<number> {
     },
   )
   const configuration = configurationCheck.status === 0
-    ? 'ready · new paid spatial submissions disabled'
-    : 'blocked · 运行 npm run demo:up 查看缺失或无效配置'
+    ? 'ready · local configuration valid'
+    : 'blocked · 运行 npm run local:up 查看缺失或无效配置'
 
   let mongo = 'unavailable'
   try {
@@ -311,14 +361,20 @@ async function demoStatus(): Promise<number> {
     mongo = 'docker unavailable'
   }
   const app = await probeApp()
+  let renderer = process.env.SCENE_CODE_WORKER_ENABLED === '0' ? 'disabled' : 'offline'
+  if (renderer !== 'disabled') {
+    try { const response = await fetch(RENDERER_URL + '/health', { signal: AbortSignal.timeout(1500) }); if (response.ok) renderer = 'ready' } catch { /* status only */ }
+  }
   console.log(`configuration: ${configuration}`)
   console.log(`mongo: ${mongo}`)
-  console.log('access: direct · fixed local Demo identity · loopback only')
+  console.log(`scene renderer: ${renderer}`)
+  console.log('access: direct · fixed local identity · loopback only')
   console.log(`web: ${app === 'pegasus-spatial' ? `ready · ${APP_URL}` : app}`)
   console.log('data: local Docker volume preserved')
   return configuration.startsWith('ready')
     && mongo === 'healthy'
     && app === 'pegasus-spatial'
+    && ['ready', 'disabled'].includes(renderer)
     ? 0
     : 1
 }
@@ -326,22 +382,23 @@ async function demoStatus(): Promise<number> {
 async function main(): Promise<void> {
   const action = process.argv[2]
   if (!['up', 'status', 'down'].includes(action ?? '')) {
-    throw new Error('Usage: npm run demo:up | npm run demo:status | npm run demo:down')
+    throw new Error('Usage: npm run local:up | npm run local:status | npm run local:down')
   }
 
   if (action === 'up') {
-    assertSafeDemoEnvironment()
-    await ensureDemoMongo()
-    await startManagedDemoApp()
-    console.log(`Pegasus Spatial 评委安全审阅模式已启动：http://localhost:${APP_PORT}`)
-    console.log(`状态检查：npm run demo:status`)
-    console.log(`安全停止：npm run demo:down（不会删除 Mongo volume）`)
+    assertSafeLocalEnvironment()
+    await ensureLocalMongo()
+    await ensureLocalRenderer()
+    await startManagedLocalApp()
+    console.log(`Pegasus Spatial 本地环境已启动：http://localhost:${APP_PORT}`)
+    console.log(`状态检查：npm run local:status`)
+    console.log(`安全停止：npm run local:down（不会删除 Mongo volume）`)
     console.log(`服务日志：${LOG_FILE}`)
     return
   }
 
   if (action === 'status') {
-    process.exitCode = await demoStatus()
+    process.exitCode = await localStatus()
     return
   }
 
@@ -350,15 +407,16 @@ async function main(): Promise<void> {
   if (app === 'pegasus-spatial' && (!managed || !isOwnedNextProcess(managed.pid))) {
     throw new Error('检测到非本脚本管理的 Pegasus Spatial 进程；请先手动停止它，Mongo 保持运行。')
   }
-  const stopped = await stopManagedDemoApp()
-  docker(['compose', 'stop', 'mongo'])
+  const stopped = await stopManagedLocalApp()
+  stopLocalNativeRenderer()
+  docker(['compose', 'stop', 'scene-renderer', 'mongo'])
   console.log(`Web：${stopped ? '已停止' : '未运行'}`)
   console.log('Mongo：已停止；容器与 pegasus-spatial 数据卷完整保留。')
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   main().catch(error => {
-    console.error(`[demo] ${(error as Error).message}`)
+    console.error(`[local] ${(error as Error).message}`)
     process.exitCode = 1
   })
 }

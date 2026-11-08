@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { resolveLocalOwner } from '@/lib/local-owner'
 import { getConversation } from '@/lib/db/repository'
 import { buildMediaPublicUrl } from '@/lib/media/public-url'
+import { getMediaStorageDriver } from '@/lib/media/config'
 import { toRasterAssetRef } from '@/lib/media/reference'
 import { writeImageAsset } from '@/lib/media/storage'
 
@@ -12,16 +13,15 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024
 
 /**
  * Accept one binary browser upload and return an opaque asset reference.
- * Base64 exists only transiently inside the image processor; it is never sent
- * in chat JSON, written to Conversation.messages, or forwarded to the gateway.
+ * The upload and chat history carry an asset reference. The model transport
+ * can read the stored bytes later for a single provider request.
  */
 export async function POST(req: NextRequest) {
   const userId = await resolveLocalOwner()
   if (userId instanceof Response) return userId
 
   try {
-    // Fail before writing an orphan if the provider-facing origin is not ready.
-    buildMediaPublicUrl('A'.repeat(43))
+    if (getMediaStorageDriver() === 'oss') buildMediaPublicUrl('A'.repeat(43))
 
     const form = await req.formData()
     const file = form.get('file')

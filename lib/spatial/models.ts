@@ -266,6 +266,7 @@ export const SpatialOperatorProviderSubmissionGuardModel =
   )
 
 const SpatialSceneSchema = new Schema<SpatialSceneRecord>({
+  acceptance_contract: { type: Schema.Types.Mixed, default: null },
   scene_id: { type: String, required: true, unique: true, index: true },
   project_id: { type: String, required: true, index: true },
   user_id: { type: String, required: true, index: true },
@@ -281,6 +282,7 @@ const SpatialSceneSchema = new Schema<SpatialSceneRecord>({
 SpatialSceneSchema.index({ project_id: 1, updated_at: -1 })
 
 const SpatialSceneRevisionSchema = new Schema<SpatialSceneRevisionRecord>({
+  program: { type: Schema.Types.Mixed, default: null },
   revision_id: { type: String, required: true, unique: true, index: true },
   scene_id: { type: String, required: true, index: true },
   project_id: { type: String, required: true, index: true },
@@ -304,6 +306,8 @@ SpatialSceneRevisionSchema.index({ project_id: 1, mutation_key: 1 }, { unique: t
 SpatialSceneRevisionSchema.index({ scene_id: 1, version: -1, committed: 1 })
 
 const SpatialObservationSchema = new Schema<SpatialObservationRecord>({
+  build_id: { type: String, default: null },
+  time_s: { type: Number, default: 0 },
   observation_id: { type: String, required: true, unique: true, index: true },
   scene_id: { type: String, required: true, index: true },
   project_id: { type: String, required: true, index: true },

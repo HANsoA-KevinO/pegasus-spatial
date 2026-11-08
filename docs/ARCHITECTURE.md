@@ -1,103 +1,120 @@
-# 架构
+# 系统架构
 
-Sci-Pegasus 当前是一个单体 Next.js 应用，但核心执行状态已从浏览器请求生命周期中解耦。
-
-```text
-Browser / API
-    │
-    ├── Conversation + Workspace APIs
-    │       ├── MongoDB conversation index
-    │       ├── GridFS text + immutable PDF documents
-    │       └── isolated raster asset storage
-    │
-    └── Project AgentTeam (1 Root + durable peers)
-            ├── Agent identity + Grant + independent SessionRuntime
-            ├── Task / Mailbox / Result / Proposal / append-only TeamEvent
-            ├── bounded worker pool + lease fence + recovery
-            ├── shared main LLM loop + per-Agent history/compaction/Hippocampus
-            ├── generic tools (Read/Write/Edit/Glob/Grep/WebSearch/Skill/...)
-            ├── research method layer
-            │       ├── review_update / adjacent_tension / hybrid routing
-            │       ├── six on-demand Skills + bounded references
-            │       └── Workspace C/E/G/H research state
-            ├── literature tools
-            │       ├── LiteratureService → arXiv / Sciverse providers
-            │       ├── document workspace → source artifact / normalized full text
-            │       └── internal PdfParserPort → local pdf-parse/PDF.js
-            ├── path-level Workspace CAS + private ACL + publication review
-            ├── Agent mailbox + Root observer copy + Team SSE replay
-            └── Memory v2 extraction and recall
-```
-
-## 保留的关键底座
-
-- `lib/agent-runtime/`：Run 状态机、租约、后台 runner、崩溃恢复。
-- `lib/agent-team/`：项目级 Team、Agent/Grant/Session/Task/Mailbox/Result/Proposal/Wait/Event 控制面、权限状态机、监督，以及面向模型的对话式协作工具。
-- `lib/agent/`：主循环、异步压缩、队列、流式广播、工具结果准入与审计。
-- `lib/memory-v2/`：长期历史、偏好候选、检索与整合。
-- `lib/workspace/`：持久化虚拟文件系统、按路径 revision CAS、Agent 私有 ACL、发布审批、整组容量预留和用户可见/内部命名空间分离。
-- `lib/literature/`：纯 I/O Provider 与标准化文献类型；其上层 `LiteratureService` 负责 schema v2 操作审计、确定性论文目录和全文物化。
-- `lib/document-parsers/`：Agent 不可见的 `PdfParserPort` 与有界本地 `pdf-parse/PDF.js` 实现；不定义独立 Agent 工具。
-- `lib/media/`：通用栅格证据资产；不含生图和 Canvas 派生逻辑。
-- `lib/llm-registry.ts`：主模型、检索模型和记忆模型的运行时别名层。
-
-## 当前工具边界
-
-通用公开工具包括 Read、Write、Edit、Glob、Grep、Skill、WebSearch、AskUserQuestion，以及按配置启用的 RecallHistory。文献层另外提供七个意图工具，其中六个远程工具来源绑定：
-
-- `SciverseSearchPapers`：按关键词或结构化条件发现论文元数据。
-- `SciverseSearchEvidence`：对 Sciverse 全文 chunk 做自然语言证据召回，可用 `filters.doc_id` 硬限定候选论文集。
-- `SciverseFetchPaper`：使用 `doc_id` 取得 provider full text，落盘并返回有界正文。
-- `SciverseListRelations`：使用 `unique_id` 分页列出 CITATIONS、REFERENCES 或 RELATED_WORKS。
-- `ArxivSearchPapers`：按关键词、作者、分类、日期和排序发现 arXiv 论文。
-- `ArxivFetchPaper`：使用 `arxiv_id` 保存原始 PDF，在同次调用中本地解析并返回有界正文。
-- `SearchDocument`：对已经落盘的全文做有界字面检索，返回可用时的页码、章节、bbox、行号和摘录。
-
-远程工具的来源由名称和 schema 固定，Agent 输入中没有 `source`。`unique_id` 是 Sciverse 元数据/关系图身份，`doc_id` 是可访问全文身份；两者不可互换。这些工具不拥有研究策略，也不向 Agent 暴露底层 transport 或解析器生命周期。路线选择、综述更新、相邻文献张力、证据综合、Gap/Hypothesis 与停止判断由 Project Guide 和六个按需 Skill 负责，完整方法见 [通用科研发现策略 V1](RESEARCH_STRATEGY.md)。`references/searches/*.json` 是 schema v2 不可变 I/O 审计；`operation` 为 `search_papers`、`search_evidence` 或 `list_relations`，`source` 记录实际 provider。它不是长期 `SearchSession` 或搜索 frontier；可恢复研究状态写入 Workspace Markdown。
-
-Canvas、生图、图形检查和 XML 装配不再存在兼容执行路径。
-
-## 文献数据流
+Pegasus Spatial 是一个单体 Next.js 应用。对话、Agent 执行、空间任务、Workspace、Scene Revision 与媒体索引统一持久化到 MongoDB；耗时的供应商任务由独立后台 worker 接管，不依赖某个浏览器请求一直保持连接。
 
 ```text
-SciverseSearchPapers(...) / SciverseSearchEvidence(...)
-SciverseListRelations(unique_id, relation, ...)
-ArxivSearchPapers(query, ...)
-    └── references/searches/search-<id>.json       # schema v2 immutable audit
-
-SciverseFetchPaper(doc_id, search_record_path?)
-ArxivFetchPaper(arxiv_id, version?, search_record_path?)
-    └── references/papers/<deterministic-paper-dir>/
-            ├── metadata.json
-            ├── provenance.json
-            ├── source-fulltext.md                  # Sciverse：直接可搜索
-            ├── original.pdf                       # arXiv
-            └── parsed/                            # arXiv：内部本地解析
-                    ├── fulltext.md
-                    ├── blocks.jsonl
-                    └── parser-provenance.json
-    └── 同次返回所有路径 + 有界正文
-
-SearchDocument(query, document_paths?)
-    └── bounded location/excerpt results
+Browser
+  ├── Chat Workspace
+  ├── File / Image / GLB preview
+  └── Spatial Stage
+          │
+Next.js APIs
+  ├── Conversation + Agent Loop
+  ├── Workspace + Media
+  ├── Spatial Scene + Observation
+  └── Render command bridge
+          │
+MongoDB
+  ├── conversations / Agent runtime
+  ├── workspace revisions
+  ├── spatial jobs / receipts
+  ├── scenes / scene revisions
+  └── media metadata / GridFS
+          │
+Spatial Worker
+  ├── NewAPI image generation
+  ├── Lux3D object generation
+  ├── Aholo World generation
+  └── artifact validation + publication
 ```
 
-上图的来源载荷按来源二选一：Sciverse 使用 `source-fulltext.md`；arXiv 使用 `original.pdf` 加 `parsed/`。PDF entry 包含 MIME、字节数、SHA-256、来源和 retrieval provenance。原始 PDF 路径不可静默覆写：相同路径与 hash 是幂等重放，不同 hash 会报冲突。浏览器通过带 SHA-256 版本参数的同源接口预览或下载 PDF；模型的 `Read` 只获得 PDF metadata，不会把二进制放入上下文。两个论文获取工具成功后，全文已经完整落为文本，Agent 可直接读取或检索；解析器能力边界不代表 PDF 中所有视觉内容都能被还原。
+## Agent 执行层
 
-当前 arXiv PDF 在 `ArxivFetchPaper` 内由进程内 `pdf-parse/PDF.js` 同步解析，无外部解析 API 或凭据。Parser 通过内部 `PdfParserPort` 隔离；如果未来引入 Docling、MinerU 或模型解析，只替换内部 adapter，不新增 Agent 的提交、状态查询或后端选择工具。
+- `lib/agent/`：Root Agent 主循环、模型调用、工具结果准入、消息队列和上下文管理。
+- `lib/agent-runtime/`：持久 Run、lease、崩溃恢复、后台执行和失败隔离。
+- `lib/agent-team/`：Agent 身份、显式工具授权、成员协作、任务与消息投递。
+- `lib/skills/`：按需加载的空间创作和图像生成方法说明。
 
-## 多 Agent 执行面
+Root 默认拥有完整空间能力。成员 Agent 只有在 `allowed_tools` 中被明确授权后才能调用生成或 Scene 修改工具；wildcard 不会隐式获得昂贵能力。
 
-每个 Conversation 懒创建一个持久化 `AgentTeam` 和固定 Root。团队最多保留 32 个 Agent 身份；Runner 同时最多租用 8 个 Team 执行槽。Root 与成员运行相同的 Agent Loop，差异只来自 coordinator grant、工具 allowlist、Workspace ACL 和预算。Agent 自然结束后回到 `idle`；`close` 才进入 `completed`，`reopen` 保留历史并增加 generation。
+## 空间任务层
 
-模型使用 `Agent` 创建持久成员，使用 `SendMessage` 完成普通分派、追问、纠偏和 P2P 合作。`TaskCreate`、`TaskUpdate`、`TaskList` 和 `TaskGet` 只是需要验收条件、依赖、所有者或独立预算时使用的可选共享账本。`ReviewWorkspaceChanges` 只审批成员私有文件的公共发布，`ManageAgent` 负责 interrupt/close/reopen。这些工具按权限和当前状态动态暴露；控制命令使用 `(run_id, tool_use_id)` 幂等，所有后台写入同时验证 AgentRun、Session 与 Team slot fence。
+`SpatialBuildJob` 统一承载图像、物体与 World 任务：
 
-成员每轮最终回复都由运行时自动保存为不可变结果并投递，本轮私有文件变更自动形成发布提案。每轮结束后 Agent 进入 idle；直接消息会唤醒它并在原历史上下文中继续。结果、阻塞和失败通知自动投递，模型不 polling 或显式等待。成员过程不写入公开 Conversation；P2P 消息持久化并抄送 Root，紧急事件立即唤醒，普通进度按监督窗口合并。
+```text
+prepared → submitting → submitted → running → materializing → published
+                         ├→ failed
+                         ├→ unknown
+                         └→ cancelled
+```
 
-普通成员只写 `.sci-pegasus/agents/{agent_id}/...`。公共文件必须通过 Result/Proposal 由 Root 逐项批准；`references/` 是受信任文献工具的例外，并通过完整文件集合预留保证 500 文件边界前不会先联网后半落盘。同一论文的跨进程并发 Fetch 共享确定性预留，解析失败可保留 canonical PDF 后仅重试本地解析。完整契约见 [多 Agent 团队底座 V1](AGENT_TEAM_V1.md)。
+主要设计：
 
-## 后续扩展原则
+- 幂等键为 `project_id + run_id + tool_use_id`。
+- 外部任务 ID 一旦获得，必须先持久化再返回。
+- 已知外部任务可在重启后继续轮询、下载和发布。
+- 供应商是否已接受无法确认时进入 `unknown`，系统不会自动再次提交。
+- 供应商短期地址会立即镜像到本方媒体存储，并验证 MIME、文件 magic、大小和 SHA-256。
+- `published` 任务可以重建相同 ToolResult，不重复调用供应商。
 
-新增文献来源通过 Provider 接入，但 Agent 公开契约继续使用来源绑定、按任务意图命名的工具；解析器只作为论文获取能力背后的内部 adapter。只有独立的材料数据库、科学计算或验证能力才按 Agent 的任务意图评估是否需要新工具。所有实现都应把查询、版本、参数、原始位置和结果哈希写入工作区证据。Provider 必须保持纯远端 I/O 与标准化，不在 adapter 内生成 follow-up query 或做科学判断。
+## Scene、源码与 Revision
 
-V1 已把多 Agent 调度建立在 durable Run、路径级 Workspace CAS 和持久 TeamEvent 之上，并以通用研究 Skill 提供不绑定具体材料体系的方法层。下一阶段的自动 prompt 变异、评价淘汰与拓扑进化必须复用现有权限、预算、审计和发布边界，不能绕开 grant 或让成员直接修改公共产物。
+代码场景以多文件 Three.js 源码为真值；源码、授权资产字节、依赖、种子和检查被编译冻结为不可变 SceneCodeBuild。Revision 引用 build，不引用可变源码路径。构建队列与付费生成任务独立，具备幂等、租约、取消、120 秒总时限及持久终态通知。
+
+SpatialScene 保存当前 revision 指针和保留的验收契约。发布校验完整 required 条件、验收版本及基础 Scene 版本，原子 CAS 创建新 revision；删检查或放宽容差不能绕过要求。新用户明确改变目标时才允许替换条件。恢复历史产生新 revision，不覆盖旧记录。新建 Scene 直接准备源码工程，不自动转换旧声明式场景。旧编辑工具退役，历史数据保留；恢复仅支持已发布代码构建。
+
+## 执行、观察与用户舞台
+
+浏览器使用隔离 iframe 中的 Worker + OffscreenCanvas；独立 Chromium 服务使用相同冻结 bundle 执行 Agent 的建模、工程视图、几何查询与导出，用户舞台关闭仍可工作。只允许固定依赖与授权资产；执行代码不获取应用 Cookie、数据库、供应商密钥或任意网络。部署服务为非 root Chromium sandbox，并使用内部网络和资源限制。
+
+源码支持任意 Three.js 几何、CSG、程序纹理、Shader、动画、GLB 与 Spark PLY/SPZ。Z-up、相对单位，动画固定 1/30 秒，颜色管线 ACES/sRGB。GLB 处理坐标基、底部中心与实例复用；资产读取和实际加入场景分别报告。
+
+Agent 通过四视图、轴向、比例、对象编号和稳定 key 定位对象，再查询实际网格距离、射线、截面、支撑采样、相交与指定区域净空。语义登记不是空间证明；包围盒重叠不是实体穿插；采样不是物理稳定性；缺少 GPU 查询几何时返回 unknown。观察绑定 build/revision/time，不把后续变化用于旧请求。详见 [Scene 系统](SCENE_SYSTEM.md)。
+
+用户只浏览、聚焦、选中、查看历史和截图反馈，全部修改由 Agent 写回源码。用户相机独立，反馈携带实际相机、对象 key、revision、build 和时间。新程序初始化成功才替换旧程序，失败保留旧版本并显示实际 revision。旧数据的只读显示代码暂存，不作为新系统的兼容保证或验收要求。
+
+## Workspace 与媒体
+
+用户可见产物使用稳定逻辑路径：
+
+```text
+output/spatial/images/
+output/spatial/objects/<build-id>/
+output/spatial/worlds/<build-id>/
+output/spatial/scenes/<scene-id>/
+output/spatial/builds/<build-id>/
+output/spatial/reviews/<observation-id>/
+```
+
+Workspace 以路径级 head 和不可变 revision 作为权威，写入通过 CAS 避免静默覆盖。媒体默认存储在 GridFS，也可以配置 OSS/CDN；浏览器只接收受控的公开 URL。
+
+## 恢复边界
+
+系统允许恢复：
+
+- 已持久化 external ID 的供应商任务；
+- 已下载但尚未发布的临时资产；
+- 已发布但 ToolResult 尚未返回的任务；
+- 中断的 Agent Run 和后台成员任务；
+- Scene、Revision、Agent viewpoint 与 Observation。
+
+系统不会自动恢复为新的付费提交：
+
+- 无法证明供应商未接受的 `unknown` 任务；
+- 用户已经获得成功候选后的额外候选；
+- 输入、供应商或模型快照已经改变的任务。
+
+## 部署边界
+
+- Web 默认监听 `127.0.0.1:3200`。
+- Mongo 默认监听 `127.0.0.1:27019`，数据库名为 `pegasus_spatial`。
+- Docker 网络、volume、GridFS bucket 与 OSS prefix 都使用 `pegasus-spatial` 命名空间。
+- 公网部署必须由外部网关提供 HTTPS、身份认证和请求限制。
+
+## 当前非目标
+
+- CAD 精度与真实米制；
+- 碰撞、重力和物理仿真；
+- OpenUSD / RenderCloud Scene Compiler；
+- 对 Aholo 3DGS 世界进行局部语义编辑；
+- 服务端无头 3D Viewer。

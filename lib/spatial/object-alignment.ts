@@ -83,6 +83,7 @@ export function computeGlbObjectAlignment(normalization: SceneObjectNormalizatio
 export function computeLuxPlyAlignment(
   normalization: SceneObjectNormalization,
   plyBounds: ObjectBounds,
+  alignedGlbSize?: Vec3,
 ): ObjectLocalAlignment {
   const correction = normalization.ply_basis_correction ?? 'lux_ply_negative_y_up_to_scene_z_up'
   if (correction !== 'lux_ply_negative_y_up_to_scene_z_up') {
@@ -90,7 +91,7 @@ export function computeLuxPlyAlignment(
   }
   const rotatedBounds = rotateObjectBounds(plyBounds, LUX_PLY_NEGATIVE_Y_UP_TO_SCENE_Z_UP.matrix)
   const targetBounds = sceneAlignedGlbBounds(normalization)
-  const targetSize = targetBounds ? sizeOf(targetBounds) : null
+  const targetSize = alignedGlbSize ?? (targetBounds ? sizeOf(targetBounds) : null)
   const sourceSize = sizeOf(rotatedBounds)
   return {
     correction,

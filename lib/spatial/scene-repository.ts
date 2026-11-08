@@ -89,6 +89,12 @@ export async function getSpatialSceneRevision(
   }).lean<SpatialSceneRevisionRecord>()
 }
 
+/** Revisions are globally unique, but still resolve only within owner/project. */
+export async function findScopedSpatialSceneRevision(revisionId: string, scope: SceneCommandScope): Promise<SpatialSceneRevisionRecord | null> {
+  await connectDB()
+  return SpatialSceneRevisionModel.findOne({ revision_id: revisionId.trim(), project_id: scope.projectId.trim(), user_id: scope.userId.trim(), committed: true }).lean<SpatialSceneRevisionRecord>()
+}
+
 export async function getCurrentSpatialSceneRevision(
   scene: SpatialSceneRecord,
 ): Promise<SpatialSceneRevisionRecord> {
@@ -282,10 +288,11 @@ export async function mutateSpatialScene(input: {
   identity: SceneMutationIdentity
   sceneId: string
   expectedVersion?: number
+  expectedAcceptanceVersion?: number
   observationId?: string
   summary: string
   commandHash: string
-  mutate(snapshot: Pick<SpatialSceneRevisionRecord, 'environment' | 'world' | 'instances'>): Pick<SpatialSceneRevisionRecord, 'environment' | 'world' | 'instances'>
+  mutate(snapshot: Pick<SpatialSceneRevisionRecord, 'environment' | 'world' | 'instances' | 'program'>): Pick<SpatialSceneRevisionRecord, 'environment' | 'world' | 'instances' | 'program'>
 }): Promise<SceneMutationResult> {
   await connectDB()
   const key = mutationKey(input.identity)
@@ -314,6 +321,7 @@ export async function mutateSpatialScene(input: {
   if (input.expectedVersion !== undefined && parent.version !== input.expectedVersion) {
     return { status: 'scene_changed', scene, latestRevision: parent }
   }
+  if (input.expectedAcceptanceVersion !== undefined && scene.acceptance_contract?.version !== input.expectedAcceptanceVersion) return { status: 'scene_changed', scene, latestRevision: parent }
   if (input.observationId) {
     const observation = await SpatialObservationModel.findOne({
       observation_id: input.observationId,
@@ -325,7 +333,7 @@ export async function mutateSpatialScene(input: {
       throw new SpatialSceneCommandRejectedError('观察点来自旧 Scene revision；请重新观察后再修改。')
     }
   }
-  const next = input.mutate({ environment: clone(parent.environment ?? null), world: clone(parent.world), instances: clone(parent.instances) })
+  const next = input.mutate({ environment: clone(parent.environment ?? null), world: clone(parent.world), instances: clone(parent.instances), program: clone(parent.program ?? null) })
   const revisionId = hashId('scnrev', scene.scene_id, key)
   const candidate: Omit<SpatialSceneRevisionRecord, 'created_at' | 'updated_at'> = {
     revision_id: revisionId,
@@ -337,6 +345,7 @@ export async function mutateSpatialScene(input: {
     mutation_key: key,
     mutation_hash: input.commandHash,
     environment: clone(next.environment),
+    program: clone(next.program ?? null),
     world: clone(next.world),
     instances: clone(next.instances),
     change_summary: requireText('change_summary', input.summary, 1000),
@@ -349,6 +358,7 @@ export async function mutateSpatialScene(input: {
     ...scopedSceneFilter(scene.scene_id, input.identity),
     current_revision_id: parent.revision_id,
     current_version: parent.version,
+    ...(input.expectedAcceptanceVersion !== undefined ? { 'acceptance_contract.version': input.expectedAcceptanceVersion } : {}),
   }, {
     $set: { current_revision_id: revisionId, current_version: parent.version + 1 },
   }, { returnDocument: 'after' }).lean<SpatialSceneRecord>()
@@ -380,7 +390,7 @@ export async function restoreSpatialSceneRevision(input: {
     sceneId: scene.scene_id,
     commandHash: input.commandHash,
     summary: `从 Scene v${source.version} 恢复为一个新的 revision`,
-    mutate: () => ({ environment: clone(source.environment ?? null), world: clone(source.world), instances: clone(source.instances) }),
+    mutate: () => ({ environment: clone(source.environment ?? null), world: clone(source.world), instances: clone(source.instances), program: clone(source.program ?? null) }),
   })
 }
 
@@ -484,7 +494,7 @@ export async function enqueueSpatialSurfaceQueryCommand(input: {
   const revision = await getCurrentSpatialSceneRevision(scene)
   const terrain = revision.instances.find(candidate => candidate.instance_id === input.terrainInstanceId)
   if (!terrain || terrain.role !== 'terrain') {
-    throw new SpatialSceneCommandRejectedError('指定 instance 不是当前 Scene 的 Lux 地形。')
+    throw new SpatialSceneCommandRejectedError('指定 instance 不是当前 Scene 的地形网格。')
   }
   const active = await SpatialRenderSessionModel.exists({
     scene_id: scene.scene_id, project_id: scene.project_id, user_id: scene.user_id, expires_at: { $gt: new Date() },
@@ -512,7 +522,7 @@ export async function enqueueSpatialSurfaceQueryCommand(input: {
 }
 
 export async function claimSpatialRenderCommand(input: {
-  scope: SceneCommandScope; sceneId: string; sessionId: string; leaseToken: string; leaseMs?: number
+  scope: SceneCommandScope; sceneId: string; sessionId: string; leaseToken: string; leaseMs?: number; renderedRevisionId?: string
 }): Promise<SpatialRenderCommandRecord | null> {
   await connectDB()
   const session = await SpatialRenderSessionModel.findOne({
@@ -523,6 +533,7 @@ export async function claimSpatialRenderCommand(input: {
   const now = new Date(); const token = randomUUID()
   return SpatialRenderCommandModel.findOneAndUpdate({
     scene_id: input.sceneId, project_id: input.scope.projectId, user_id: input.scope.userId,
+    ...(input.renderedRevisionId ? { revision_id: input.renderedRevisionId } : {}),
     $or: [
       { status: 'queued' },
       { status: 'claimed', 'lease.expires_at': { $lte: now } },

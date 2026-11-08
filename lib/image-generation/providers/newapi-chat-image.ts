@@ -1,16 +1,18 @@
 import { createHash } from 'node:crypto'
+import sharp from 'sharp'
 import { LLM_API_KEY_TOOLS, LLM_BASE_URL } from '../../llm-config'
+import { inspectRasterContent } from '../../media/storage'
 import { boundedErrorMessage, ImageGenerationProviderError } from '../errors'
-import { fetchImageGenerationJSON } from '../transport'
+import { DEFAULT_IMAGE_GENERATION_TIMEOUT_MS, fetchImageGenerationJSON } from '../transport'
+import { MAX_IMAGE_GENERATION_SOURCE_BYTES } from '../types'
 import type {
   ImageGenerationOutput,
   ImageGenerationProvider,
   ImageGenerationRequest,
 } from '../types'
 
-const NEWAPI_CHAT_IMAGE_CONTRACT_VERSION = 'newapi-chat-image-v1'
-const DEFAULT_NEWAPI_IMAGE_MODEL = 'GPT-image-2'
-const DEFAULT_MAX_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024
+const NEWAPI_IMAGE_CONTRACT_VERSION = 'newapi-images-v2'
+export const DEFAULT_NEWAPI_IMAGE_MODEL = 'gpt-image-2'
 const DEFAULT_MAX_PROVIDER_IMAGE_BYTES = 50 * 1024 * 1024
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   'image/png',
@@ -19,9 +21,73 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   'image/gif',
 ])
 
-function promptWithAspectRatio(input: ImageGenerationRequest): string {
-  if (!input.aspectRatio) return input.prompt
-  return `${input.prompt}\n\nRender the image with a ${input.aspectRatio} aspect ratio.`
+interface RequestedImageSize {
+  width: number
+  height: number
+  value: string
+}
+
+function requestedImageSize(aspectRatio?: string): RequestedImageSize | null {
+  if (!aspectRatio) return null
+  const [rawWidth, rawHeight] = aspectRatio.split(':')
+  const targetRatio = Number(rawWidth) / Number(rawHeight)
+  if (!Number.isFinite(targetRatio) || targetRatio <= 0) {
+    throw new ImageGenerationProviderError('图片比例无效', {
+      code: 'invalid_aspect_ratio',
+      requestMayHaveBeenAccepted: false,
+    })
+  }
+  if (targetRatio > 3 || targetRatio < 1 / 3) {
+    throw new ImageGenerationProviderError(
+      `GPT-image-2 的长短边比例不能超过 3:1：${aspectRatio}`,
+      {
+        code: 'provider_aspect_ratio_out_of_range',
+        requestMayHaveBeenAccepted: false,
+      },
+    )
+  }
+
+  // GPT-image-2 requires 16px-aligned edges and at least 655,360 pixels.
+  // Search the normal-resolution grid for the closest aspect, preferring
+  // roughly one megapixel when multiple dimensions represent it exactly.
+  const targetPixels = 1024 * 1024
+  let best: (RequestedImageSize & { aspectError: number; areaError: number }) | null = null
+  for (let width = 512; width <= 1536; width += 16) {
+    for (let height = 512; height <= 1536; height += 16) {
+      const pixels = width * height
+      if (pixels < 655_360) continue
+      const aspectError = Math.abs(Math.log((width / height) / targetRatio))
+      const areaError = Math.abs(Math.log(pixels / targetPixels))
+      if (
+        !best
+        || aspectError < best.aspectError - Number.EPSILON
+        || (Math.abs(aspectError - best.aspectError) <= Number.EPSILON && areaError < best.areaError)
+      ) {
+        best = {
+          width,
+          height,
+          value: `${width}x${height}`,
+          aspectError,
+          areaError,
+        }
+      }
+    }
+  }
+  if (!best) {
+    throw new ImageGenerationProviderError(`无法为图片比例 ${aspectRatio} 选择有效尺寸`, {
+      code: 'provider_aspect_ratio_unsupported',
+      requestMayHaveBeenAccepted: false,
+    })
+  }
+  return { width: best.width, height: best.height, value: best.value }
+}
+
+function promptWithAspectRatio(
+  input: ImageGenerationRequest,
+  requestedSize: RequestedImageSize | null,
+): string {
+  if (!input.aspectRatio || !requestedSize) return input.prompt
+  return `${input.prompt}\n\nRender the image with a ${input.aspectRatio} aspect ratio at ${requestedSize.value}. Preserve the requested composition across the full canvas.`
 }
 
 function normalizeApiBase(value: string): string {
@@ -51,16 +117,35 @@ function normalizeApiBase(value: string): string {
   return `${parsed.protocol}//${parsed.host}${pathname}`
 }
 
-function configurationFingerprint(apiBase: string, model: string): string {
+function configurationFingerprint(apiBase: string, model: string, editModel?: string, fallbackModel?: string): string {
   return createHash('sha256').update(JSON.stringify({
-    contractVersion: NEWAPI_CHAT_IMAGE_CONTRACT_VERSION,
+    contractVersion: NEWAPI_IMAGE_CONTRACT_VERSION,
+    referenceVariant: 'original-if-bounded',
     apiBase,
     model,
+    ...(editModel ? { editModel } : {}),
+    ...(fallbackModel ? { fallback: { model: fallbackModel, protocol: 'chat_completions' } } : {}),
   })).digest('hex')
 }
 
 function httpResultMayHaveBeenAccepted(status: number): boolean {
   return status >= 500 || status === 408 || status === 409 || status === 425 || status === 499
+}
+
+// Only New API's explicit pre-dispatch rejections allow a second paid route.
+// An upstream 403 can instead be a content-policy decision.
+function gatewayRejectedBeforeDispatch(data: unknown): boolean {
+  if (!data || typeof data !== 'object' || !('error' in data)) return false
+  const error = data.error
+  if (!error || typeof error !== 'object' || !('type' in error) || error.type !== 'new_api_error') return false
+  const message = 'message' in error && typeof error.message === 'string' ? error.message : ''
+  const code = 'code' in error ? error.code : undefined
+  return code === 'model_not_found' || code === 'no_available_channel'
+    || /^(?:This token has no access to model\b|No available channel for model\b)/i.test(message)
+}
+
+function parseErrorBody(text?: string): unknown {
+  try { return text ? JSON.parse(text) : undefined } catch { return undefined }
 }
 
 export function transportErrorMayHaveBeenAccepted(error: unknown): boolean {
@@ -84,7 +169,7 @@ export function transportErrorMayHaveBeenAccepted(error: unknown): boolean {
   ]).has(code)
 }
 
-function sourceAsDataUrl(
+function validateSourceImage(
   input: NonNullable<ImageGenerationRequest['source']>,
   maxBytes: number,
 ): string {
@@ -113,19 +198,15 @@ function sourceAsDataUrl(
       },
     )
   }
-  return `data:${mimeType};base64,${input.buffer.toString('base64')}`
+  return mimeType
 }
 
-function decodeImageDataUrl(
+function decodeImageBase64(
   value: unknown,
   maxBytes: number,
-): { buffer: Buffer; mimeType: string } | null {
+): Buffer | null {
   if (typeof value !== 'string') return null
-  const match = value.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([^\s]+)$/i)
-  if (!match) return null
-
-  const mimeType = match[1].toLowerCase()
-  const encoded = match[2]
+  const encoded = value
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) || encoded.length % 4 === 1) {
     throw new ImageGenerationProviderError('NewAPI 返回了无效的图片 Base64', {
       code: 'invalid_provider_image',
@@ -151,22 +232,15 @@ function decodeImageDataUrl(
       requestMayHaveBeenAccepted: true,
     })
   }
-  return { buffer, mimeType }
+  return buffer
 }
 
-function imageUrlFromPart(part: unknown): unknown {
-  if (!part || typeof part !== 'object') return undefined
-  const imageUrl = (part as { image_url?: unknown }).image_url
-  if (typeof imageUrl === 'string') return imageUrl
-  if (!imageUrl || typeof imageUrl !== 'object') return undefined
-  return (imageUrl as { url?: unknown }).url
-}
-
-function parseOutput(
+async function parseOutput(
   data: unknown,
   maxBytes: number,
+  requestedSize: RequestedImageSize | null,
   headerRequestId?: string,
-): ImageGenerationOutput {
+): Promise<ImageGenerationOutput> {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
       code: 'invalid_provider_schema',
@@ -175,83 +249,115 @@ function parseOutput(
   }
   const payload = data as {
     id?: unknown
-    choices?: Array<{
-      message?: {
-        images?: unknown
-        content?: unknown
-      }
+    data?: Array<{
+      b64_json?: unknown
+      revised_prompt?: unknown
     }>
   }
-  if (payload.choices !== undefined && !Array.isArray(payload.choices)) {
+  if (payload.data !== undefined && !Array.isArray(payload.data)) {
     throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
       code: 'invalid_provider_schema',
       requestMayHaveBeenAccepted: true,
     })
   }
-  const firstChoice = payload.choices?.[0]
-  if (firstChoice !== undefined && (!firstChoice || typeof firstChoice !== 'object')) {
-    throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
-      code: 'invalid_provider_schema',
-      requestMayHaveBeenAccepted: true,
-    })
-  }
-  const message = firstChoice?.message
-  if (message !== undefined && (!message || typeof message !== 'object')) {
-    throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
-      code: 'invalid_provider_schema',
-      requestMayHaveBeenAccepted: true,
-    })
-  }
-  if (!message) {
-    throw new ImageGenerationProviderError('NewAPI 返回中没有模型消息', {
-      code: 'provider_returned_no_message',
-      requestMayHaveBeenAccepted: true,
-    })
-  }
-
-  if (
-    (message.images !== undefined && !Array.isArray(message.images))
-    || (
-      message.content !== undefined
-      && message.content !== null
-      && typeof message.content !== 'string'
-      && !Array.isArray(message.content)
-    )
-  ) {
+  const firstImage = payload.data?.[0]
+  if (firstImage !== undefined && (!firstImage || typeof firstImage !== 'object')) {
     throw new ImageGenerationProviderError('NewAPI 返回结构无效', {
       code: 'invalid_provider_schema',
       requestMayHaveBeenAccepted: true,
     })
   }
 
-  const candidates: unknown[] = []
-  if (Array.isArray(message.images)) {
-    for (const image of message.images) candidates.push(imageUrlFromPart(image))
-  }
-  if (Array.isArray(message.content)) {
-    for (const part of message.content) candidates.push(imageUrlFromPart(part))
+  const buffer = decodeImageBase64(firstImage?.b64_json, maxBytes)
+  if (!buffer) {
+    throw new ImageGenerationProviderError('NewAPI 返回中没有可用的 Base64 图片', {
+      code: 'provider_returned_no_image',
+      requestMayHaveBeenAccepted: true,
+    })
   }
 
-  for (const candidate of candidates) {
-    const decoded = decodeImageDataUrl(candidate, maxBytes)
-    if (!decoded) continue
-    return {
-      ...decoded,
-      providerRequestId: headerRequestId
-        || (typeof payload.id === 'string' ? payload.id : undefined),
+  if (requestedSize) {
+    let metadata: { width?: number; height?: number }
+    try {
+      metadata = await sharp(buffer, { failOn: 'error' }).metadata()
+    } catch (error) {
+      throw new ImageGenerationProviderError('NewAPI 返回的图片无法读取尺寸', {
+        code: 'invalid_provider_image',
+        requestMayHaveBeenAccepted: true,
+        cause: error,
+      })
+    }
+    if (metadata.width !== requestedSize.width || metadata.height !== requestedSize.height) {
+      throw new ImageGenerationProviderError(
+        `NewAPI 未遵守请求尺寸：请求 ${requestedSize.value}，实际 ${metadata.width || '?'}x${metadata.height || '?'}`,
+        {
+          code: 'provider_aspect_ratio_mismatch',
+          requestMayHaveBeenAccepted: true,
+        },
+      )
     }
   }
 
-  throw new ImageGenerationProviderError('NewAPI 返回中没有可用的 Data URL 图片', {
-    code: 'provider_returned_no_image',
-    requestMayHaveBeenAccepted: true,
+  return {
+    buffer,
+    mimeType: 'image/png',
+    revisedPrompt: typeof firstImage?.revised_prompt === 'string'
+      ? firstImage.revised_prompt
+      : undefined,
+    providerRequestId: headerRequestId
+      || (typeof payload.id === 'string' ? payload.id : undefined),
+  }
+}
+
+async function parseChatOutput(
+  data: unknown,
+  maxBytes: number,
+  requestedSize: RequestedImageSize | null,
+  requestId?: string,
+): Promise<ImageGenerationOutput> {
+  const payload = data as {
+    id?: string
+    choices?: Array<{ message?: {
+      images?: Array<{ image_url?: { url?: string } }>
+      content?: Array<{ image_url?: { url?: string } }> | string
+    } }>
+  } | null
+  const message = payload?.choices?.[0]?.message
+  const parts = [
+    ...(Array.isArray(message?.images) ? message.images : []),
+    ...(Array.isArray(message?.content) ? message.content : []),
+  ]
+  const inline = parts.map(part => part?.image_url?.url).find(url =>
+    typeof url === 'string' && url.startsWith('data:image/'))
+  const encoded = inline?.match(/^data:image\/[a-z0-9.+-]+;base64,([\s\S]+)$/i)?.[1]
+  const buffer = decodeImageBase64(encoded, maxBytes)
+  if (!buffer) throw new ImageGenerationProviderError('备用生图渠道没有返回可用的内联图片', {
+    code: 'provider_returned_no_image', requestMayHaveBeenAccepted: true,
   })
+  try {
+    const raster = await inspectRasterContent(buffer)
+    await sharp(buffer, { pages: 1, failOn: 'warning' }).resize(1, 1).raw().toBuffer()
+    if (requestedSize && Math.abs((raster.width / raster.height) / (requestedSize.width / requestedSize.height) - 1) > 0.02) {
+      throw new ImageGenerationProviderError(
+        `备用渠道未遵守请求画幅：实际 ${raster.width}x${raster.height}`,
+        { code: 'provider_aspect_ratio_mismatch', requestMayHaveBeenAccepted: true },
+      )
+    }
+    return { buffer, mimeType: raster.mimeType, providerRequestId: requestId || payload?.id }
+  } catch (error) {
+    if (error instanceof ImageGenerationProviderError) throw error
+    throw new ImageGenerationProviderError('备用生图渠道返回的图片无法解码', {
+      code: 'invalid_provider_image', requestMayHaveBeenAccepted: true, cause: error,
+    })
+  }
 }
 
 export interface NewApiChatImageAdapterOptions {
   apiKey?: string
   apiBase?: string
   model?: string
+  editModel?: string
+  fallbackModel?: string
   fetchImpl?: typeof fetch
   timeoutMs?: number
   /** Tests only; production defaults are fixed in this adapter. */
@@ -261,19 +367,19 @@ export interface NewApiChatImageAdapterOptions {
 }
 
 /**
- * The competition build has one image transport: the proven NewAPI Chat
- * Completions contract used by the original Pegasus. There is deliberately no
- * official Images API fallback, because switching transports after an
- * ambiguous failure could submit the same paid generation twice.
+ * Freeze the routing choices in the receipt fingerprint. One backup attempt
+ * is available only when the first route definitively rejected submission.
  */
 export class NewApiChatImageAdapter implements ImageGenerationProvider {
-  readonly provider = NEWAPI_CHAT_IMAGE_CONTRACT_VERSION
+  readonly provider = NEWAPI_IMAGE_CONTRACT_VERSION
   readonly model: string
   readonly configurationFingerprint: string
   private readonly apiKey: string
   private readonly apiBase: string
   private readonly fetchImpl?: typeof fetch
-  private readonly timeoutMs?: number
+  private readonly timeoutMs: number
+  private readonly editModel?: string
+  private readonly fallbackModel?: string
   private readonly maxSourceImageBytes: number
   private readonly maxProviderImageBytes: number
   private readonly configurationError?: string
@@ -292,10 +398,12 @@ export class NewApiChatImageAdapter implements ImageGenerationProvider {
     this.model = options.model?.trim()
       || process.env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim()
       || DEFAULT_NEWAPI_IMAGE_MODEL
-    this.configurationFingerprint = configurationFingerprint(this.apiBase, this.model)
+    this.editModel = options.editModel?.trim() || undefined
+    this.fallbackModel = options.fallbackModel?.trim() || undefined
+    this.configurationFingerprint = configurationFingerprint(this.apiBase, this.model, this.editModel, this.fallbackModel)
     this.fetchImpl = options.fetchImpl
-    this.timeoutMs = options.timeoutMs
-    this.maxSourceImageBytes = options.maxSourceImageBytes ?? DEFAULT_MAX_SOURCE_IMAGE_BYTES
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_IMAGE_GENERATION_TIMEOUT_MS
+    this.maxSourceImageBytes = options.maxSourceImageBytes ?? MAX_IMAGE_GENERATION_SOURCE_BYTES
     this.maxProviderImageBytes = options.maxProviderImageBytes ?? DEFAULT_MAX_PROVIDER_IMAGE_BYTES
   }
 
@@ -316,69 +424,120 @@ export class NewApiChatImageAdapter implements ImageGenerationProvider {
       )
     }
 
-    const prompt = promptWithAspectRatio(input)
-    const content = input.source
-      ? [
-          {
-            type: 'image_url',
-            image_url: { url: sourceAsDataUrl(input.source, this.maxSourceImageBytes) },
-          },
-          { type: 'text', text: prompt },
-        ]
-      : prompt
-    const requestBody = {
-      model: this.model,
-      messages: [{ role: 'user', content }],
-      modalities: ['text', 'image'],
+    const size = requestedImageSize(input.aspectRatio)
+    const primary = input.source ? this.editModel ?? this.model : this.model
+    const deadline = Date.now() + this.timeoutMs
+    try {
+      return await this.generateAttempt(input, size, primary, false, this.timeoutMs)
+    } catch (error) {
+      const remainingMs = deadline - Date.now()
+      if (!this.fallbackModel || this.fallbackModel === primary || input.signal?.aborted || remainingMs <= 0
+        || !(error instanceof ImageGenerationProviderError) || !error.canUseBackup) throw error
+      return this.generateAttempt(input, size, this.fallbackModel, true, remainingMs)
+    }
+  }
+
+  private async generateAttempt(
+    input: ImageGenerationRequest,
+    size: RequestedImageSize | null,
+    model: string,
+    chat: boolean,
+    timeoutMs: number,
+  ): Promise<ImageGenerationOutput> {
+    const prompt = promptWithAspectRatio(input, size)
+    let url = `${this.apiBase}/images/generations`
+    let body: BodyInit
+    let contentType: string | undefined = 'application/json'
+    if (chat) {
+      const source = input.source
+      const content = source ? [
+        { type: 'image_url', image_url: { url: `data:${validateSourceImage(source, this.maxSourceImageBytes)};base64,${source.buffer.toString('base64')}` } },
+        { type: 'text', text: prompt },
+      ] : prompt
+      url = `${this.apiBase}/chat/completions`
+      body = JSON.stringify({ model, messages: [{ role: 'user', content }], modalities: ['text', 'image'] })
+    } else if (input.source) {
+      // Validate before constructing the multipart body or entering provider I/O.
+      const sourceMimeType = validateSourceImage(input.source, this.maxSourceImageBytes)
+      const form = new FormData()
+      form.set('model', model)
+      form.set('prompt', prompt)
+      form.set('size', size?.value || 'auto')
+      const extension = sourceMimeType === 'image/jpeg' ? 'jpg' : sourceMimeType.split('/')[1]
+      form.set(
+        'image',
+        new Blob([new Uint8Array(input.source.buffer)], { type: sourceMimeType }),
+        `source.${extension}`,
+      )
+      url = `${this.apiBase}/images/edits`
+      body = form
+      contentType = undefined
+    } else {
+      body = JSON.stringify({
+        model,
+        prompt,
+        n: 1,
+        size: size?.value || 'auto',
+      })
     }
 
     let response
     try {
       response = await fetchImageGenerationJSON({
-        url: `${this.apiBase}/chat/completions`,
+        url,
         init: {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
+            ...(contentType ? { 'Content-Type': contentType } : {}),
             'HTTP-Referer': 'https://pegasus.local',
             'X-Title': 'Pegasus Spatial',
           },
-          body: JSON.stringify(requestBody),
+          body,
           redirect: 'error',
         },
         signal: input.signal,
-        timeoutMs: this.timeoutMs,
+        timeoutMs,
         fetchImpl: this.fetchImpl,
       })
     } catch (error) {
       if (error instanceof ImageGenerationProviderError) throw error
+      const mayHaveBeenAccepted = transportErrorMayHaveBeenAccepted(error)
       throw new ImageGenerationProviderError(boundedErrorMessage(error), {
         code: error instanceof Error && error.name === 'TimeoutError'
           ? 'provider_timeout'
           : error instanceof Error && error.name === 'AbortError'
             ? 'provider_cancelled'
             : 'provider_transport_error',
-        requestMayHaveBeenAccepted: transportErrorMayHaveBeenAccepted(error),
+        requestMayHaveBeenAccepted: mayHaveBeenAccepted,
+        canUseBackup: !mayHaveBeenAccepted && !input.signal?.aborted,
         cause: error,
       })
     }
 
-    if (!response.ok) {
+    const gatewayRejection = gatewayRejectedBeforeDispatch(response.ok ? response.data : parseErrorBody(response.errorText))
+    if (!response.ok || gatewayRejection) {
       const message = boundedErrorMessage(response.errorText || `HTTP ${response.status}`)
       throw new ImageGenerationProviderError(
-        `NewAPI Chat API ${response.status}: ${message}`,
+        `NewAPI ${chat ? 'Chat Completions' : 'Images API'} ${response.status} (${model}): ${message}`,
         {
-          code: `provider_http_${response.status}`,
-          requestMayHaveBeenAccepted: httpResultMayHaveBeenAccepted(response.status),
+          code: response.ok ? 'provider_gateway_rejected' : `provider_http_${response.status}`,
+          requestMayHaveBeenAccepted: !gatewayRejection && httpResultMayHaveBeenAccepted(response.status),
+          canUseBackup: gatewayRejection,
         },
       )
     }
 
-    return parseOutput(response.data, this.maxProviderImageBytes, response.requestId)
+    const output = chat
+      ? await parseChatOutput(response.data, this.maxProviderImageBytes, size, response.requestId)
+      : await parseOutput(response.data, this.maxProviderImageBytes, size, response.requestId)
+    return { ...output, providerModel: model }
   }
 }
 
 export function createDefaultImageGenerationProvider(): ImageGenerationProvider {
-  return new NewApiChatImageAdapter()
+  return new NewApiChatImageAdapter({
+    editModel: process.env.PEGASUS_SPATIAL_IMAGE_EDIT_MODEL,
+    fallbackModel: process.env.PEGASUS_SPATIAL_IMAGE_FALLBACK_MODEL,
+  })
 }

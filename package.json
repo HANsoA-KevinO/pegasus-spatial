@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "postinstall": "node scripts/patch-aholo-viewer-workers.mjs",
     "dev": "next dev -H 127.0.0.1 -p 3200",
-    "demo:up": "jiti scripts/demo-local.ts up",
-    "demo:status": "jiti scripts/demo-local.ts status",
-    "demo:down": "jiti scripts/demo-local.ts down",
+    "predev": "jiti scripts/dev-services.ts",
+    "local:up": "jiti scripts/demo-local.ts up",
+    "local:status": "jiti scripts/demo-local.ts status",
+    "local:down": "jiti scripts/demo-local.ts down",
+    "deploy:prepare": "jiti scripts/deploy.ts prepare",
+    "deploy:up": "jiti scripts/deploy.ts up",
+    "deploy:status": "jiti scripts/deploy.ts status",
+    "deploy:down": "jiti scripts/deploy.ts down",
+    "deploy:logs": "jiti scripts/deploy.ts logs",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3200",
     "lint": "eslint",
@@ -17,7 +22,7 @@
     "memory-v2:migrate": "jiti scripts/migrate-memory-v2.ts",
     "memory-v2:migrate:apply": "jiti scripts/migrate-memory-v2.ts --apply",
     "memory-v2:verify": "jiti lib/memory-v2/__tests__/verify-memory-v2.ts",
-    "agent-runtime:verify": "jiti lib/agent-runtime/__tests__/verify-agent-runtime.ts && jiti lib/agent-runtime/__tests__/verify-member-dispatch-boundary.ts && jiti lib/agent-runtime/__tests__/verify-root-failure-policy.ts",
+    "agent-runtime:verify": "jiti lib/agent-runtime/__tests__/verify-agent-runtime.ts && jiti lib/agent-runtime/__tests__/verify-member-dispatch-boundary.ts && jiti lib/agent-runtime/__tests__/verify-root-failure-policy.ts && jiti lib/agent/__tests__/verify-stream-integrity.ts && jiti lib/agent/__tests__/verify-thinking-history.ts && jiti lib/agent-runtime/__tests__/verify-turn-limits.ts",
     "agent-runtime:verify:mongo": "jiti lib/agent-runtime/__tests__/verify-agent-runtime-mongo.ts && jiti lib/agent-runtime/__tests__/verify-member-recovery-mongo.ts && jiti lib/agent-runtime/__tests__/verify-root-failure-containment-mongo.ts && jiti lib/agent-runtime/__tests__/verify-compaction-barrier-mongo.ts",
     "agent-team:verify": "jiti lib/agent-team/__tests__/verify-agent-team.ts && jiti lib/agent-team/__tests__/verify-agent-team-runtime-contracts.ts && jiti lib/agent-team/__tests__/verify-execution-budget.ts && jiti lib/agent-team/__tests__/verify-public-contract.ts",
     "agent-team:verify:mongo": "jiti lib/agent-team/__tests__/verify-agent-team-mongo.ts && jiti lib/agent-team/__tests__/verify-approved-publication-recovery-mongo.ts && jiti lib/agent-team/__tests__/verify-execution-budget-mongo.ts",
@@ -69,19 +74,31 @@
     "spatial:verify": "jiti lib/spatial/__tests__/verify-spatial-core.ts && jiti lib/spatial/__tests__/verify-spatial-scene-spec.ts && jiti lib/spatial/__tests__/verify-spatial-scene.ts && jiti lib/spatial/__tests__/verify-spatial-runtime.ts && jiti lib/spatial/__tests__/verify-spatial-worker.ts && jiti lib/spatial/__tests__/verify-spatial-notifications.ts && jiti lib/spatial/__tests__/verify-spatial-operator-smoke.ts && jiti lib/tools/__tests__/verify-spatial-tool-adapter.ts && npm run media-prefix:verify && jiti lib/image-generation/__tests__/verify-generate-image-transport.ts && jiti lib/image-generation/__tests__/verify-generate-image-durability.ts && jiti scripts/__tests__/verify-spatial-readiness-security.ts && jiti components/workspace/__tests__/verify-spatial-product-ui.ts && jiti components/spatial-stage/__tests__/verify-spatial-stage.ts && npm run spatial:behavior-contracts",
     "spatial:verify:mongo": "jiti lib/spatial/__tests__/verify-spatial-recovery-mongo.ts && jiti lib/spatial/__tests__/verify-spatial-operator-smoke-mongo.ts && jiti lib/spatial/__tests__/verify-spatial-scene-mongo.ts",
     "spatial:verify:ui": "python3 scripts/verify-spatial-ui-smoke.py --base-url http://localhost:3200",
-    "spatial:verify:demo-e2e": "jiti scripts/verify-spatial-demo-e2e.ts",
-    "spatial:verify:stage-ui": "python3 scripts/verify-spatial-stage-ui.py"
+    "spatial:verify:local-e2e": "jiti scripts/verify-spatial-demo-e2e.ts",
+    "spatial:verify:stage-ui": "python3 scripts/verify-spatial-stage-ui.py",
+    "spatial:verify:three-browser": "python3 scripts/verify-three-renderer.py",
+    "scene-code:renderer": "node scripts/scene-code-renderer.mjs",
+    "scene-code:verify": "jiti scripts/verify-scene-code.ts",
+    "scene-code:verify:feedback": "jiti lib/scene-code/__tests__/verify-space-feedback.ts && jiti lib/agent/__tests__/verify-scene-code-receipt.ts",
+    "scene-code:verify:advanced": "jiti scripts/verify-scene-code-advanced.ts",
+    "scene-code:verify:mongo": "jiti scripts/verify-scene-code-mongo.ts",
+    "scene-code:verify:local": "node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/verify-scene-code-local.ts",
+    "scene-code:verify:flash": "MONGODB_URI=mongodb://127.0.0.1:27021/pegasus_flash_runtime_test node --env-file=.env.local node_modules/jiti/lib/jiti-cli.mjs scripts/verify-flash-runtime.ts"
   },
   "dependencies": {
     "@google/model-viewer": "^4.3.1",
-    "@manycore/aholo-viewer": "1.8.1",
+    "@jridgewell/trace-mapping": "0.3.31",
+    "@sparkjsdev/spark": "2.4.0",
     "@tailwindcss/typography": "^0.5.19",
     "ali-oss": "^6.23.0",
+    "esbuild": "0.28.0",
+    "fflate": "0.8.2",
     "katex": "^0.18.3",
-    "mongoose": "^9.3.0",
-    "next": "^16.2.4",
+    "mongoose": "^9.9.4",
+    "next": "^16.3.3",
     "next-themes": "^0.4.6",
     "pdf-parse": "^2.4.5",
+    "playwright-core": "1.64.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
@@ -90,7 +107,10 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "sharp": "^0.34.5"
+    "sharp": "^0.35.4",
+    "three": "0.183.2",
+    "three-bvh-csg": "0.0.18",
+    "three-mesh-bvh": "0.9.18"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -99,6 +119,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/sharp": "^0.31.1",
+    "@types/three": "0.183.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "jiti": "^2.6.1",
@@ -106,6 +127,6 @@
     "typescript": "^5"
   },
   "overrides": {
-    "postcss": "^8.5.10"
+    "postcss": "^8.5.26"
   }
 }

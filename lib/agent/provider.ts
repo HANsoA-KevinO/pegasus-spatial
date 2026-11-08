@@ -1,6 +1,8 @@
 // Workspace Provider — bridges Agent Loop with LLM API + Workspace Instance
 
 import type { AgentProvider } from './loop'
+import { materializeProviderImages } from './provider-image-transport'
+import { executeSceneCodeTool } from '../tools/scene-code'
 import type { ConversationMessage, ContentBlock, ToolResult, ToolCallSummary, LLMResponse, SkillDefinition, ImageSource } from '../types'
 import { WorkspaceInstance } from '../workspace/types'
 import { getToolSchemasForCapabilities } from '../tools/schemas'
@@ -19,6 +21,7 @@ import type { MemoryRuntimeContext } from '../memory-v2/types'
 import { memoryV2Flags } from '../memory-v2/flags'
 import { callAnthropicAPIStream, StreamResult } from './llm-api'
 import { buildMediaPublicUrl } from '../media/public-url'
+import { getMediaStorageDriver } from '../media/config'
 import type { AgentExecutionContext, ToolExecutionInvocation } from './execution-context'
 import { canExecuteTool } from './execution-context'
 import { canAgentWriteWorkspacePath } from '../workspace/agent-scope'
@@ -29,6 +32,10 @@ import {
 
 function toProviderImageSource(source: ImageSource) {
   if (source.type === 'asset') {
+    const transport = process.env.LLM_IMAGE_TRANSPORT
+    if (transport === 'inline' || (transport !== 'url' && getMediaStorageDriver() === 'gridfs')) {
+      return { type: 'url' as const, url: `pegasus-asset:${source.asset_id}` }
+    }
     return {
       type: 'url' as const,
       url: buildMediaPublicUrl(source.asset_id, source.storage_driver),
@@ -188,24 +195,24 @@ export function createAgentProvider(
             return { type: 'text', text: block.text }
           }
           if (block.type === 'image') {
-            // Text-only models can't read images. Replace with a Chinese
-            // system-reminder explaining the limitation so the model can
-            // still respond based on surrounding text.
-            if (config.supportsVision === false) {
-              return {
-                type: 'text',
-                text: '<system-reminder>用户上传了一张图片，但你不是多模态模型，无法直接理解图片信息。不要直接去read，使用相应的工具继续做。</system-reminder>',
-              }
+            const image = config.supportsVision === false
+              ? { type: 'text', text: '<system-reminder>用户上传了一张图片，当前模型无法直接查看。</system-reminder>' }
+              : { type: 'image', source: toProviderImageSource(block.source) }
+            if (msg.role === 'user' && block.source.type === 'asset' && block.workspace_path
+              && /^references\/uploads\/[a-f0-9]{64}\.(png|jpg|webp|gif)$/.test(block.workspace_path)) {
+              return [image, { type: 'text', text: `<system-reminder>上一张用户附件的 Workspace 路径为 ${block.workspace_path}，可用于 GenerateImage 的 input_image_path。</system-reminder>` }]
             }
-            return { type: 'image', source: toProviderImageSource(block.source) }
+            return image
           }
           if (block.type === 'tool_use') {
             return { type: 'tool_use', id: block.id, name: block.name, input: block.input }
           }
           if (block.type === 'thinking') {
-            // Skip empty signature (OpenRouter may not forward signature_delta)
-            if (!block.signature) return null
-            return { type: 'thinking', thinking: block.thinking, signature: block.signature }
+            // DeepSeek's Anthropic endpoint requires completed reasoning to
+            // round-trip during tool use, and does not use Claude signatures.
+            // Native Claude history still requires its original signature.
+            if (!block.signature && !/(?:^|\/)deepseek(?:-|$)/i.test(config.model)) return null
+            return { type: 'thinking', thinking: block.thinking, ...(block.signature ? { signature: block.signature } : {}) }
           }
           if (block.type === 'redacted_thinking') {
             // Skip empty data and OpenRouter-injected redacted_thinking
@@ -248,7 +255,7 @@ export function createAgentProvider(
           const tr: any = { type: 'tool_result', tool_use_id: block.tool_use_id, content: trContent }
           if (block.is_error) tr.is_error = true
           return tr
-        }).filter(Boolean),
+        }).flat().filter(Boolean),
       }))
 
       // Merge consecutive same-role messages (safety net for Anthropic API's alternating role rule).
@@ -262,6 +269,16 @@ export function createAgentProvider(
           prev.content.push(...msg.content)
         } else {
           apiMessages.push(msg)
+        }
+      }
+      if (/(?:^|\/)deepseek(?:-|$)/i.test(config.model)) {
+        for (const msg of apiMessages) {
+          // Some gateway channels return a tool-only assistant turn. DeepSeek
+          // still requires the thinking field on replay. An empty block records
+          // the absence of received reasoning; do not invent text/signatures.
+          if (msg.role === 'assistant' && msg.content.some(block => block.type === 'tool_use') && !msg.content.some(block => block.type === 'thinking')) {
+            msg.content.unshift({ type: 'thinking', thinking: '' })
+          }
         }
       }
 
@@ -387,7 +404,7 @@ export function createAgentProvider(
 
     async callLLM(request): Promise<LLMResponse> {
       const response = await callAnthropicAPIStream(
-        request,
+        await materializeProviderImages(request, config.executionContext),
         config.baseUrl,
         config.apiKey,
         callbacks?.onTextChunk,
@@ -402,7 +419,7 @@ export function createAgentProvider(
     async callLLMSilent(request, abortSignal): Promise<LLMResponse> {
       // Silent mode — no callbacks, no SSE events to frontend
       const response = await callAnthropicAPIStream(
-        request,
+        await materializeProviderImages(request, config.executionContext),
         config.baseUrl,
         config.apiKey,
         undefined, // onTextDelta
@@ -547,6 +564,15 @@ export function createAgentProvider(
             invocation,
             signal: config.abortSignal,
           })
+        case 'PrepareSceneCode':
+        case 'RunSceneCode':
+        case 'InspectSceneBuild':
+        case 'RenderSceneViews':
+        case 'QuerySceneGeometry':
+        case 'CheckSceneConstraints':
+        case 'PublishSceneBuild':
+        case 'ExportSceneBuild':
+          return executeSceneCodeTool(name, input, { executionContext: config.executionContext, invocation, signal: config.abortSignal, workspace })
         case 'CreateSpatialScene':
         case 'SetSceneEnvironment':
         case 'SetSceneWorld':

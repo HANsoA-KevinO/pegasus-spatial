@@ -104,11 +104,11 @@ export function runStartupChecks(): void {
     )
     if (reason) failures.push({ variable: 'LLM_BASE_URL', reason })
   }
-  const imageModel = process.env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim() || 'GPT-image-2'
-  if (imageModel !== 'GPT-image-2') {
+  const imageModel = process.env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim() || 'gpt-image-2'
+  if (!/^gpt-image-2$/i.test(imageModel)) {
     failures.push({
       variable: 'PEGASUS_SPATIAL_IMAGE_MODEL',
-      reason: 'must be the exact case-sensitive NewAPI alias GPT-image-2',
+      reason: 'must be the configured case-sensitive GPT Image 2 alias on New API',
     })
   }
 
@@ -116,6 +116,19 @@ export function runStartupChecks(): void {
   // surfaces the misconfiguration earlier in the boot sequence.
   if (!process.env.MONGODB_URI) {
     failures.push({ variable: 'MONGODB_URI', reason: 'not set (required)' })
+  }
+
+  if (process.env.SCENE_CODE_WORKER_ENABLED !== '0') {
+    const token = process.env.SCENE_CODE_RENDERER_TOKEN?.trim()
+    if (!token || token.length < 24 || SECRET_PLACEHOLDER_VALUES.has(token)) {
+      failures.push({ variable: 'SCENE_CODE_RENDERER_TOKEN', reason: 'must contain at least 24 characters and must not be a placeholder' })
+    }
+    try {
+      const renderer = new URL(process.env.SCENE_CODE_RENDERER_URL || 'http://127.0.0.1:3201')
+      if (!['http:', 'https:'].includes(renderer.protocol) || renderer.username || renderer.password || renderer.search || renderer.hash) throw new Error('invalid URL')
+    } catch {
+      failures.push({ variable: 'SCENE_CODE_RENDERER_URL', reason: 'must be a complete credential-free HTTP(S) URL without query or fragment' })
+    }
   }
 
   if (process.env.AGENT_RUNTIME_BACKGROUND_RUNNER === '1') {
@@ -152,15 +165,11 @@ export function runStartupChecks(): void {
         reason: 'must not be 0 when a spatial provider is configured',
       })
     }
-    const providerMediaVariable = mediaDriver === 'oss'
-      ? 'NEXT_PUBLIC_MEDIA_CDN_BASE_URL'
-      : 'MEDIA_PUBLIC_BASE_URL'
-    const providerMediaValue = mediaDriver === 'oss'
-      ? process.env.NEXT_PUBLIC_MEDIA_CDN_BASE_URL || process.env.OSS_CDN_BASE_URL
-      : process.env.MEDIA_PUBLIC_BASE_URL
-    if (!isProviderReachableHttpsOrigin(providerMediaValue)) {
+    if (mediaDriver === 'oss' && !isProviderReachableHttpsOrigin(
+      process.env.NEXT_PUBLIC_MEDIA_CDN_BASE_URL || process.env.OSS_CDN_BASE_URL,
+    )) {
       failures.push({
-        variable: providerMediaVariable,
+        variable: 'NEXT_PUBLIC_MEDIA_CDN_BASE_URL',
         reason: 'must be a credential-free public HTTPS origin reachable by Aholo/Lux3D',
       })
     }

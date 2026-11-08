@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useCallback, useRef, useState } from 'react'
 import { ModelPickerModal } from '@/components/chat/ModelPickerModal'
+import { FlowingLightFrame } from '@/components/effects/FlowingLightFrame'
 import { ProgressiveImage } from '@/components/media/ProgressiveImage'
 import { useChatContext } from '@/contexts/ChatContext'
 import { useConversations } from '@/hooks/useConversation'
@@ -98,13 +99,14 @@ export function TaskWorkbench({ onSubmit }: {
       <section className="pmo-spatial-launcher" aria-labelledby="spatial-home-title">
         <div className="pmo-spatial-launcher-kicker">
           <span>01</span>
-          <p>从一句话开始，Agent 会自己选择图像、Lux 造物、World 与场景编辑工具</p>
+          <p>从照片与记忆开始，Agent 绘制概念图、生成单件 3D 资产，再组装成可探索的场景</p>
         </div>
         <h1 id="spatial-home-title">把脑海里的空间，<br />搭成可以进入的世界。</h1>
         <p className="pmo-spatial-launcher-copy">描述体验、氛围和必须保留的约束。你不需要先选择工作方式，也不需要等待每个 3D 任务结束。</p>
 
-        <div
+        <FlowingLightFrame
           className="pmo-spatial-composer"
+          data-fluid-interaction="ignore"
           onDrop={event => { event.preventDefault(); processFiles(event.dataTransfer.files) }}
           onDragOver={event => event.preventDefault()}
         >
@@ -126,7 +128,7 @@ export function TaskWorkbench({ onSubmit }: {
             }}
             rows={4}
             aria-label="描述想创造的空间"
-            placeholder="例如：搭建一座雨夜中的未来植物研究站。中央是干净的开放工作区，周围有发光植物舱、机械臂和可进入的玻璃温室……"
+            placeholder="例如：还原小时候住过的院子。入口朝南，北边是两间瓦房，西墙下有一条长凳。照片里看不清的部分可以先问我……"
           />
 
           {pendingImages.length > 0 && (
@@ -196,7 +198,7 @@ export function TaskWorkbench({ onSubmit }: {
             </div>
             <button type="button" className="pmo-spatial-start" disabled={!question.trim() || uploadingImages > 0} onClick={submit}>开始创作 <span aria-hidden="true">↗</span></button>
           </div>
-        </div>
+        </FlowingLightFrame>
 
         <ModelPickerModal
           open={modelOpen}

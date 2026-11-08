@@ -93,7 +93,7 @@ async function main(): Promise<void> {
       command_hash: 'command-hash',
       input_hash: 'input-hash',
       status: 'submitting',
-      provider: 'newapi-chat-image-v1',
+      provider: 'newapi-images-v2',
       model: 'GPT-image-2',
       output_path: 'output/spatial/images/slotless-recovery.png',
       submission_owner: 'crashed-owner',

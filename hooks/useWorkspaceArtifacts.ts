@@ -22,6 +22,9 @@ export interface WorkspaceArtifact {
   assetId?: string
   width?: number
   height?: number
+  revision?: number
+  createdAt?: string
+  updatedAt?: string
   source?: WorkspaceDocumentSource
   provenance?: WorkspaceDocumentProvenance
 }
@@ -156,6 +159,9 @@ export function buildArtifactsFromDB(doc: ConversationArtifactFields): Workspace
           assetId: entry.asset_id,
           width: entry.width,
           height: entry.height,
+          revision: entry.version,
+          createdAt: entry.created_at,
+          updatedAt: entry.updated_at,
         }]
       }
       if (entry.kind === 'document') {
@@ -170,6 +176,9 @@ export function buildArtifactsFromDB(doc: ConversationArtifactFields): Workspace
           filename: entry.filename,
           sizeBytes: entry.size_bytes,
           sha256: entry.sha256,
+          revision: entry.version,
+          createdAt: entry.created_at,
+          updatedAt: entry.updated_at,
           source: entry.source,
           provenance: entry.provenance,
         }]
@@ -181,6 +190,9 @@ export function buildArtifactsFromDB(doc: ConversationArtifactFields): Workspace
         content: '',
         mimeType: entry.mime_type,
         gridfsPending: true,
+        revision: entry.version,
+        createdAt: entry.created_at,
+        updatedAt: entry.updated_at,
       }]
     })
     .sort((a, b) => artifactRank(a.type) - artifactRank(b.type))

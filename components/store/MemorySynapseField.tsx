@@ -76,11 +76,11 @@ export function MemorySynapseField({ className = '' }: { className?: string }) {
     }
     const fams: [number, number, number][] = [
       hexToRgb(read('--mem-fam-a', '#74806a')),
-      hexToRgb(read('--mem-fam-b', read('--brand-primary', '#d75a3b'))),
+      hexToRgb(read('--mem-fam-b', read('--brand-primary', '#5d77ad'))),
       hexToRgb(read('--mem-fam-c', '#b58a57')),
     ]
     const linkRgb = hexToRgb(read('--mem-link', '#a66c58'))
-    const bgRgb = hexToRgb(read('--paper', '#fcfbf7'))
+    const bgRgb = hexToRgb(read('--paper', '#ffffff'))
     const fieldBlend: GlobalCompositeOperation = 'multiply'
     const boost = 1
     const boostFill = 1

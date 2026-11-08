@@ -4,11 +4,11 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ============================================================
-   Design System: "Pegasus Spatial · Architectural Atelier"
+   Design System: "Pegasus Spatial · Spatial Blueprint"
    ============================================================
    Philosophy:
-     - Warm paper and ivory surfaces recall an architectural studio.
-     - Graphite ink carries structure; terracotta marks active creation.
+     - Cool paper-white surfaces keep dense spatial work calm and legible.
+     - Graphite ink carries structure; blueprint blue marks active creation.
      - Boundaries rely on restrained tonal shifts and hairlines.
      - The 3D world remains the visual subject; interface chrome recedes.
    ============================================================ */
@@ -21,37 +21,37 @@
 
   /* --- Surface Hierarchy (soft neutral, almost-white) ---
      Three-tier design language:
-       Base    = body / shell / all pages         → --surface          (#fdfdfd)
+       Base    = body / shell / all pages         → --surface          (#f8f9fb)
        Elevated = cards / popovers / input shell → --surface-container-lowest (#ffffff)
-       Chrome  = sidebars / chat container       → --surface-container-low / --surface-sidebar (#f7f7f8)
+       Chrome  = sidebars / chat container       → --surface-container-low / --surface-sidebar (#f1f3f7)
      Original prototype-C palette restored. Elevated white pops off Base via
      var(--hairline) real border + shadow (not by deepening Base, which
      produces lavender wash). Chrome (sidebar/chat) keeps its original warm
      gray so existing pages match the user's earlier design memory. */
-  --surface:                 #f4f1ea;
-  --surface-container-low:   #ece8df;
-  --surface-container:       #e5e0d6;
-  --surface-container-high:  #ddd7cc;
-  --surface-container-highest: #d2cbc0;
-  --surface-container-lowest: #fcfbf7;
-  --surface-bright:          #fffefa;
+  --surface:                 #f8f9fb;
+  --surface-container-low:   #f1f3f7;
+  --surface-container:       #eceff4;
+  --surface-container-high:  #e3e7ed;
+  --surface-container-highest: #d8dde6;
+  --surface-container-lowest: #ffffff;
+  --surface-bright:          #ffffff;
   /* Semantic alias — both AppSidebar (Tailwind `bg-surface-sidebar`) and the
    * ChatContainer / right-side panel reach for this name. Keep it as a single
    * alias so the two surfaces stay in lockstep. */
   --surface-sidebar:         var(--surface-container-low);
 
   /* 工作区文档面「纸」(类别 9)—— 干净近白纸底 + 柔投影,作为浮在活背景上的内容画布。 */
-  --paper:                   #fcfbf7;
-  --paper-edge:              rgba(32, 37, 34, 0.08);
+  --paper:                   #ffffff;
+  --paper-edge:              rgba(20, 26, 38, 0.06);
   --shadow-paper:            0 1px 2px rgba(16,18,24,0.05), 0 22px 50px -26px rgba(16,20,32,0.28), inset 0 1px 0 rgba(255,255,255,0.7);
 
   /* --- Text Hierarchy (neutral charcoal, never pure black) --- */
   /* 墨色层级 · 冷中性重标定(W1 面已转冷灰,墨色随之从暖中性灰改冷蓝 charcoal +
      拉高 muted 对比:旧 #86868b 在 #f8f9fb 上仅 ~3.5:1、色温偏暖不搭)。 */
-  --on-surface:              #202522;
-  --on-surface-variant:      #4e544f;
-  --secondary-text:          #70756f;
-  --outline-variant:         #c7c2b8;
+  --on-surface:              #191c23;
+  --on-surface-variant:      #3a404c;
+  --secondary-text:          #646b7a;
+  --outline-variant:         #cbd0d9;
 
   /* --- Token aliases used pervasively across .pmo-* classes.
    * Previously these were referenced in CSS as `var(--ink-secondary)` etc.
@@ -61,24 +61,30 @@
    * without rewriting every call site. */
   --ink-secondary:           var(--on-surface-variant);
   --ink-muted:               var(--secondary-text);
-  --ink-faint:               #949991;
-  --hairline:                #d4cfc5;
-  --surface-sink:            #e4dfd6;
+  --ink-faint:               #949ba9;
+  --hairline:                #d2d6dd;
+  --surface-sink:            #e4e7ec;
+
+  /* Memory graph families: sage, blueprint, ochre, and a cool link hue. */
+  --mem-fam-a:               #74806a;
+  --mem-fam-b:               #5d77ad;
+  --mem-fam-c:               #b58a57;
+  --mem-link:                #7e8faa;
 
   /* --- 品牌主色单一源头（设计系统先行 · 全站唯一来源） --- */
-  --brand-primary:           #d75a3b;
-  --brand-primary-deep:      #b7442b;
+  --brand-primary:           #536c9f;
+  --brand-primary-deep:      #3f568a;
 
-  /* --- Primary (terracotta signal on warm paper) --- */
+  /* --- Primary (blueprint signal on cool paper) --- */
   --primary:                 var(--brand-primary);
-  --primary-container:       #f3d9d0;
+  --primary-container:       #dbe5fb;
   --primary-deep:            var(--brand-primary-deep);   /* Hover / active darker primary */
   --on-primary:              #ffffff;   /* White on terracotta */
-  --on-primary-container:    #6a281c;
+  --on-primary-container:    #1a2744;
 
   /* --- Secondary --- */
-  --secondary-container:     #e4dfd5;
-  --on-secondary-container:  #555b56;
+  --secondary-container:     #dfe6f2;
+  --on-secondary-container:  #57657a;
 
   /* --- Semantic --- */
   --error:                   #ba1a1a;
@@ -89,7 +95,7 @@
   --warning-container:       #ffe0b2;
 
   /* --- Tint & Glass --- */
-  --surface-tint:            #d75a3b;
+  --surface-tint:            #536c9f;
   --scrim:                   rgba(31, 31, 35, 0.5);
 
   /* --- Ambient Shadows (neutral basis to match soft white) --- */
@@ -115,13 +121,13 @@
    * 07/10/12/18 numeric aliases match the opacity percentages used at call
    * sites; weak/mid/strong are the semantic names. Both forms point to the
    * same values so existing CSS that uses either compiles correctly. */
-  --primary-tint-weak:       rgba(215, 90, 59, 0.07);
-  --primary-tint-mid:        rgba(215, 90, 59, 0.12);
-  --primary-tint-strong:     rgba(215, 90, 59, 0.22);
-  --primary-tint-07:         rgba(215, 90, 59, 0.07);
-  --primary-tint-10:         rgba(215, 90, 59, 0.10);
-  --primary-tint-12:         rgba(215, 90, 59, 0.12);
-  --primary-tint-18:         rgba(215, 90, 59, 0.18);
+  --primary-tint-weak:       rgba(83, 108, 159, 0.07);
+  --primary-tint-mid:        rgba(83, 108, 159, 0.12);
+  --primary-tint-strong:     rgba(83, 108, 159, 0.22);
+  --primary-tint-07:         rgba(83, 108, 159, 0.07);
+  --primary-tint-10:         rgba(83, 108, 159, 0.10);
+  --primary-tint-12:         rgba(83, 108, 159, 0.12);
+  --primary-tint-18:         rgba(83, 108, 159, 0.18);
 
   /* --- 圆角刻度（四档收敛）---
    * 主题无关，明暗共用。Tailwind 工具类经 @theme inline 生成
@@ -136,7 +142,7 @@
   --foreground: var(--on-surface);
 
   /* 全站根静态网点（body 最低背景层）。 */
-  --backdrop-dot: rgba(18, 20, 26, 0.15);
+  --backdrop-dot: rgba(22, 30, 48, 0.12);
 }
 
 /* The competition build deliberately ships one visual identity. Even if a
@@ -240,6 +246,169 @@ body {
 @keyframes statusSlideIn {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Remote UI adaptation: the atmosphere keeps the branch's slow "breathing"
+ * composition, but uses composited CSS gradients instead of a second WebGL
+ * canvas. This avoids blocking screenshots and scene-canvas readback. */
+.pmo-app-atmosphere {
+  --pmo-atmosphere-opacity: .48;
+  background: #f8f9fb;
+  transition: opacity 700ms ease;
+}
+.pmo-app-atmosphere[data-state='landing'] { --pmo-atmosphere-opacity: .66; }
+.pmo-app-atmosphere[data-state='running'] { --pmo-atmosphere-opacity: .82; }
+.pmo-app-atmosphere__mass {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  opacity: var(--pmo-atmosphere-opacity);
+  transform: translate3d(0, 0, 0) scale(1);
+  transform-origin: center;
+  will-change: transform;
+}
+.pmo-app-atmosphere__mass--clay {
+  left: -18vw;
+  top: -34vh;
+  width: 76vw;
+  height: 92vh;
+  background: radial-gradient(ellipse at center, rgba(93, 119, 173, .27), rgba(132, 158, 211, .10) 42%, transparent 70%);
+  animation: pmo-atmosphere-clay 27s ease-in-out infinite alternate;
+}
+.pmo-app-atmosphere__mass--sage {
+  bottom: -39vh;
+  right: -20vw;
+  width: 80vw;
+  height: 95vh;
+  background: radial-gradient(ellipse at center, rgba(116, 128, 106, .20), rgba(166, 184, 153, .09) 44%, transparent 72%);
+  animation: pmo-atmosphere-sage 33s ease-in-out infinite alternate;
+}
+.pmo-app-atmosphere__mass--paper {
+  left: 36vw;
+  top: 18vh;
+  width: 48vw;
+  height: 58vh;
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, .82), rgba(218, 227, 247, .10) 56%, transparent 76%);
+  animation: pmo-atmosphere-paper 22s ease-in-out infinite alternate;
+}
+.pmo-app-atmosphere__grid {
+  position: absolute;
+  inset: 0;
+  opacity: .11;
+  background-image: linear-gradient(rgba(45, 52, 47, .18) 1px, transparent 1px), linear-gradient(90deg, rgba(45, 52, 47, .18) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: linear-gradient(to bottom, black, transparent 92%);
+}
+.pmo-app-atmosphere__veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, rgba(255, 254, 250, .15), transparent 42%, rgba(255, 254, 250, .18));
+}
+@keyframes pmo-atmosphere-clay {
+  to { transform: translate3d(10vw, 8vh, 0) scale(1.13) rotate(5deg); }
+}
+@keyframes pmo-atmosphere-sage {
+  to { transform: translate3d(-12vw, -7vh, 0) scale(1.1) rotate(-4deg); }
+}
+@keyframes pmo-atmosphere-paper {
+  to { transform: translate3d(-8vw, 9vh, 0) scale(1.18); }
+}
+
+/* Resize-aware composer ribbon, adapted from the integration branch. */
+.pmo-flowing-light {
+  position: relative;
+  isolation: isolate;
+}
+.pmo-flowing-light__path {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.pmo-flowing-light__segment {
+  fill: none;
+  stroke: color-mix(in srgb, var(--primary) 70%, #fff);
+  stroke-linecap: round;
+  stroke-width: var(--pmo-flow-width);
+  stroke-dasharray: var(--pmo-flow-dash) var(--pmo-flow-gap);
+  stroke-dashoffset: var(--pmo-flow-offset);
+  opacity: calc(var(--pmo-flow-opacity) * .55);
+  animation: pmo-flowing-light-travel var(--pmo-flow-duration, 12s) linear infinite;
+  transition: opacity 220ms ease;
+}
+.pmo-flowing-light:focus-within .pmo-flowing-light__segment,
+.pmo-flowing-light:hover .pmo-flowing-light__segment {
+  opacity: var(--pmo-flow-opacity);
+}
+@keyframes pmo-flowing-light-travel {
+  to { stroke-dashoffset: var(--pmo-flow-end); }
+}
+
+/* Immersive workspace media: the breadcrumb already carries metadata, so the
+ * image/model itself gets the available stage instead of another card header. */
+.pmo-progressive-image--unframed,
+.pmo-progressive-image--unframed .pmo-progressive-image-loader {
+  background: transparent;
+}
+.pmo-viewer-tool {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: var(--r-ctrl);
+  color: #fff;
+  background: rgba(21, 24, 22, .66);
+  box-shadow: 0 8px 24px rgba(21, 24, 22, .16);
+  backdrop-filter: blur(14px);
+  transition: background 160ms ease, transform 160ms ease;
+}
+.pmo-viewer-tool:hover { background: rgba(21, 24, 22, .86); transform: translateY(-1px); }
+.pmo-viewer-tool:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.pmo-viewer-tool svg { width: 17px; height: 17px; }
+.pmo-viewer-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(8, 10, 9, .94);
+  backdrop-filter: blur(12px);
+  animation: fade-in 160ms ease-out;
+}
+.pmo-viewer-close {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  z-index: 2;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 50%;
+  color: #fff;
+  font-size: 25px;
+  font-weight: 300;
+  line-height: 1;
+  background: rgba(0,0,0,.46);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+.pmo-viewer-close:hover { background: rgba(255,255,255,.14); }
+.pmo-viewer-close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pmo-app-atmosphere__mass,
+  .pmo-flowing-light__segment {
+    animation: none !important;
+  }
 }
 
 /* ============================================================
@@ -1102,8 +1271,8 @@ button.pmo-memory-node:hover {
 .pmo-btn-primary:hover:not(:disabled) {
   background: var(--primary-deep);
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(183, 68, 43, 0.28),
-              0 0 0 6px rgba(215, 90, 59, 0.10);
+  box-shadow: 0 6px 20px rgba(63, 86, 138, 0.24),
+              0 0 0 6px rgba(93, 119, 173, 0.10);
 }
 
 .pmo-btn-primary:active:not(:disabled) {
@@ -3045,10 +3214,10 @@ button.pmo-memory-node:hover {
 
 /* Pegasus Spatial landing — a compact creative console, not an onboarding form. */
 .pmo-spatial-home {
-  --home-ink: #202522;
-  --home-muted: #70756f;
-  --home-line: rgba(32, 37, 34, .13);
-  --home-mint: #d75a3b;
+  --home-ink: #191c23;
+  --home-muted: #646b7a;
+  --home-line: rgba(25, 28, 35, .12);
+  --home-mint: #536c9f;
   position: relative;
   display: grid;
   min-height: 100%;
@@ -3057,16 +3226,16 @@ button.pmo-memory-node:hover {
   overflow: auto;
   color: var(--home-ink);
   background:
-    radial-gradient(circle at 82% 18%, rgba(226, 137, 104, .19), transparent 32%),
-    radial-gradient(circle at 12% 84%, rgba(164, 190, 165, .20), transparent 28%),
-    #f4f1ea;
+    radial-gradient(circle at 82% 18%, rgba(132, 158, 211, .20), transparent 32%),
+    radial-gradient(circle at 12% 84%, rgba(166, 184, 153, .16), transparent 28%),
+    #f8f9fb;
   isolation: isolate;
 }
 .pmo-spatial-home::before {
   position: absolute;
   inset: 0;
   z-index: -2;
-  background-image: linear-gradient(rgba(45, 52, 47, .045) 1px, transparent 1px), linear-gradient(90deg, rgba(45, 52, 47, .045) 1px, transparent 1px);
+  background-image: linear-gradient(rgba(42, 51, 70, .045) 1px, transparent 1px), linear-gradient(90deg, rgba(42, 51, 70, .045) 1px, transparent 1px);
   background-size: 52px 52px;
   content: "";
   mask-image: linear-gradient(to bottom, black, transparent 88%);
@@ -3078,38 +3247,38 @@ button.pmo-memory-node:hover {
   z-index: -1;
   width: 70vw;
   height: 80vh;
-  background: radial-gradient(ellipse, rgba(215, 90, 59, .14), transparent 68%);
+  background: radial-gradient(ellipse, rgba(93, 119, 173, .16), transparent 68%);
   pointer-events: none;
 }
 .pmo-spatial-home-footer > div > span,
 .pmo-spatial-recents > span { color: var(--home-muted); font-family: var(--font-geist-mono), monospace; font-size: 9px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
 .pmo-spatial-launcher { width: min(900px, calc(100% - 48px)); margin: auto; padding: 5vh 0 7vh; }
 .pmo-spatial-launcher-kicker { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-.pmo-spatial-launcher-kicker span { display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid rgba(215, 90, 59, .32); border-radius: 50%; color: var(--home-mint); font-family: var(--font-geist-mono), monospace; font-size: 9px; background: rgba(255,254,250,.76); }
+.pmo-spatial-launcher-kicker span { display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid rgba(93, 119, 173, .32); border-radius: 50%; color: var(--home-mint); font-family: var(--font-geist-mono), monospace; font-size: 9px; background: rgba(255,255,255,.78); }
 .pmo-spatial-launcher-kicker p { margin: 0; color: var(--home-muted); font-size: 11px; }
 .pmo-spatial-launcher h1 { max-width: 780px; margin: 0; font-family: "Iowan Old Style", "Songti SC", Georgia, serif; font-size: clamp(43px, 6.4vw, 82px); font-weight: 500; line-height: .99; letter-spacing: -.055em; }
 .pmo-spatial-launcher-copy { max-width: 650px; margin: 24px 0 32px; color: var(--home-muted); font-size: 13px; line-height: 1.8; }
-.pmo-spatial-composer { overflow: hidden; border: 1px solid rgba(32, 37, 34, .13); border-radius: 16px; background: rgba(255, 254, 250, .9); box-shadow: 0 26px 80px rgba(59, 47, 40, .13), inset 0 1px rgba(255,255,255,.82); backdrop-filter: blur(24px); }
+.pmo-spatial-composer { overflow: hidden; border: 1px solid rgba(25, 28, 35, .12); border-radius: 16px; background: rgba(255, 255, 255, .91); box-shadow: 0 26px 80px rgba(38, 49, 72, .13), inset 0 1px rgba(255,255,255,.88); backdrop-filter: blur(24px); }
 .pmo-spatial-composer > textarea { display: block; width: 100%; min-height: 150px; resize: vertical; border: 0; padding: 24px 26px 14px; color: var(--home-ink); font-family: inherit; font-size: 17px; line-height: 1.65; background: transparent; outline: none; }
-.pmo-spatial-composer > textarea::placeholder { color: #9a9f97; }
-.pmo-spatial-composer:focus-within { border-color: rgba(215, 90, 59, .42); box-shadow: 0 28px 84px rgba(59, 47, 40, .15), 0 0 0 4px rgba(215, 90, 59, .07); }
+.pmo-spatial-composer > textarea::placeholder { color: #949ba9; }
+.pmo-spatial-composer:focus-within { border-color: rgba(93, 119, 173, .46); box-shadow: 0 28px 84px rgba(38, 49, 72, .16), 0 0 0 4px rgba(93, 119, 173, .08); }
 .pmo-spatial-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--home-line); padding: 11px; }
 .pmo-spatial-composer-tools { display: flex; min-width: 0; align-items: center; gap: 4px; }
-.pmo-spatial-composer .pmo-tool-btn { min-height: 36px; padding: 7px 10px; color: #676e67; font-size: 11px; }
-.pmo-spatial-composer .pmo-tool-btn:hover:not(:disabled) { color: var(--home-ink); background: rgba(215, 90, 59, .07); }
+.pmo-spatial-composer .pmo-tool-btn { min-height: 36px; padding: 7px 10px; color: #646b7a; font-size: 11px; }
+.pmo-spatial-composer .pmo-tool-btn:hover:not(:disabled) { color: var(--home-ink); background: rgba(93, 119, 173, .08); }
 .pmo-spatial-composer .pmo-tool-btn:disabled { cursor: not-allowed; opacity: .42; }
 .pmo-spatial-composer .pmo-tool-btn.model { max-width: 230px; border-color: rgba(32, 37, 34, .09); background: rgba(255, 255, 255, .58); }
 .pmo-spatial-model-name { overflow: hidden; max-width: 170px; text-overflow: ellipsis; white-space: nowrap; }
 .pmo-spatial-composer-previews { display: flex; gap: 9px; overflow-x: auto; border-top: 1px solid rgba(32, 37, 34, .07); padding: 12px 20px; }
-.pmo-spatial-composer-preview { position: relative; width: 68px; height: 68px; flex: 0 0 auto; overflow: hidden; border: 1px solid rgba(32, 37, 34, .12); border-radius: 10px; background: #eeeae1; }
+.pmo-spatial-composer-preview { position: relative; width: 68px; height: 68px; flex: 0 0 auto; overflow: hidden; border: 1px solid rgba(25, 28, 35, .12); border-radius: 10px; background: #edf0f5; }
 .pmo-spatial-composer-preview > button { position: absolute; top: 4px; right: 4px; display: grid; width: 20px; height: 20px; place-items: center; border: 0; border-radius: 50%; color: #fff; font-size: 14px; line-height: 1; background: rgba(32, 37, 34, .72); cursor: pointer; backdrop-filter: blur(8px); }
-.pmo-spatial-composer-context { border-top: 1px solid rgba(32, 37, 34, .08); padding: 14px 20px 16px; background: rgba(244, 241, 234, .5); }
+.pmo-spatial-composer-context { border-top: 1px solid rgba(25, 28, 35, .08); padding: 14px 20px 16px; background: rgba(241, 243, 247, .58); }
 .pmo-spatial-composer-context label { display: block; margin-bottom: 8px; color: var(--home-mint); font-family: var(--font-geist-mono), monospace; font-size: 9px; font-weight: 700; letter-spacing: .14em; }
-.pmo-spatial-composer-context textarea { display: block; width: 100%; resize: vertical; border: 1px solid rgba(32, 37, 34, .12); border-radius: 9px; padding: 11px 12px; color: var(--home-ink); font: inherit; font-size: 12px; line-height: 1.6; background: rgba(255, 254, 250, .78); outline: none; }
-.pmo-spatial-composer-context textarea:focus { border-color: rgba(215, 90, 59, .38); box-shadow: 0 0 0 3px rgba(215, 90, 59, .07); }
+.pmo-spatial-composer-context textarea { display: block; width: 100%; resize: vertical; border: 1px solid rgba(25, 28, 35, .12); border-radius: 9px; padding: 11px 12px; color: var(--home-ink); font: inherit; font-size: 12px; line-height: 1.6; background: rgba(255, 255, 255, .82); outline: none; }
+.pmo-spatial-composer-context textarea:focus { border-color: rgba(93, 119, 173, .42); box-shadow: 0 0 0 3px rgba(93, 119, 173, .08); }
 .pmo-spatial-composer-status { padding: 0 20px 10px; color: var(--home-muted); font-size: 10px; }
 .pmo-spatial-composer-status.error { color: var(--danger); }
-.pmo-spatial-start { display: flex; flex: none; align-items: center; gap: 18px; border: 1px solid #d75a3b; border-radius: 9px; padding: 12px 15px; color: #fff; font-size: 12px; font-weight: 750; background: linear-gradient(135deg, #df6b4d, #c94d30); box-shadow: 0 8px 20px rgba(170, 65, 42, .22); cursor: pointer; }
+.pmo-spatial-start { display: flex; flex: none; align-items: center; gap: 18px; border: 1px solid #536c9f; border-radius: 9px; padding: 12px 15px; color: #fff; font-size: 12px; font-weight: 750; background: linear-gradient(135deg, #536c9f, #3f568a); box-shadow: 0 8px 20px rgba(63, 86, 138, .24); cursor: pointer; }
 .pmo-spatial-start:disabled { cursor: not-allowed; filter: grayscale(.4); opacity: .35; }
 .pmo-spatial-home-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; border-top: 1px solid var(--home-line); padding: 18px clamp(24px, 5vw, 72px) 24px; }
 .pmo-spatial-home-footer p { margin: 6px 0 0; color: var(--home-muted); font-size: 10px; }

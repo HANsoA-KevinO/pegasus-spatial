@@ -212,7 +212,7 @@ async function main(): Promise<void> {
       source: 'agent-loop',
       model: 'legacy-model',
     })
-    assert.equal(historical.validateSync(), undefined)
+    await historical.validate()
     assert.equal(historical.team_id, undefined)
     assert.equal(historical.agent_id, undefined)
     assert.equal(historical.task_id, undefined)

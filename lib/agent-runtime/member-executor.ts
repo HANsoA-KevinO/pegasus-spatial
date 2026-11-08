@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { resolveAgentTurnLimit } from './turn-limits'
 import type {
   ContentBlock,
   ConversationDoc,
@@ -168,7 +169,6 @@ import {
 } from './compaction-barrier'
 
 const HEARTBEAT_MS = 10_000
-const MAX_MEMBER_TURNS = 50
 const TEAM_TOOL_NAMES = new Set<string>([
   ...ROOT_AGENT_TOOL_NAMES,
   ...LEGACY_AGENT_TEAM_TOOL_NAMES,
@@ -1309,7 +1309,7 @@ export async function executeMemberAgentRun(
       : undefined
     const result = await agentLoop(provider, allMessages, {
       runId: run.run_id,
-      maxTurns: MAX_MEMBER_TURNS,
+      maxTurns: resolveAgentTurnLimit('member'),
       model: resolved.model,
       modelAlias: alias,
       abortSignal: abortController.signal,

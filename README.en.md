@@ -1,126 +1,148 @@
 # Pegasus Spatial
 
-**Pegasus Spatial** is a natural-language spatial creation agent that can choose among image generation, 3D object creation, Aholo World generation, and reality reconstruction capabilities.
+> 🏆 **VentureD Hackathon 2026 · Deep Space Disrupt Award — Deep Space Track Champion**
+>
+> August 2026, Hangzhou · Deep Space track supported by Manycore Tech · Competition project name: Spatial Pegasus.
 
-The product has one conversational entry point and no object/world mode selector. Provider APIs remain independent tools; the Agent chooses the smallest useful combination, tracks durable external jobs, preserves asset lineage, and exposes inspectable outputs.
+**Pegasus Spatial** is a natural-language **AI World Compiler and spatial creation workspace**. A multimodal Agent interprets text, reference images, and spatial constraints to turn ideas into concept art, independent 3D assets, and editable scenes.
 
-The default Project Guide is `spatial-creation@1`, and its default Skill catalog contains only `spatial-creation`. The inherited `materials-discovery@1` guide and research Skills remain in the repository for explicit legacy use but are not part of a new spatial project's default surface.
+Three.js source and immutable builds preserve scene truth, provenance, and revision history. Users browse, select, and send screenshot feedback; the Agent edits source and checks engineering views and actual mesh measurements.
 
-## Judge demo
+The project is moving toward **memory-space reconstruction**: turning a few old photographs and spoken memories into spaces people can enter. Hybrid modelling and the Agent observation/edit loop are being developed; unseen geometry and uncertain recollections are distinguished from known facts.
 
-This is a **judge-safe review mode** for pre-generated, persisted results. The
-competition machine has these one-time prerequisites:
+Through one conversation, the Agent combines procedural geometry, generated Lux3D assets, panoramas, optional Aholo World backgrounds, scene editing, and rendered observations.
 
-- Docker Desktop or Docker Engine is installed, its daemon is running, and the
-  current user can access it.
-- Docker Compose v2 is installed, and the official `mongo:7` image is cached or
-  can be pulled.
-- `npm install` and `.env.local` provider/media setup are complete.
+## Highlights
 
-After those prerequisites, the demo starts with one command:
+- Generate concept art and asset references from text or Workspace images.
+- Author multi-file Three.js geometry, CSG, curves, instances, procedural textures, shaders, and animations alongside GLB assets.
+- Generate complex GLB assets with Lux3D, with independent selection and transforms.
+- Combine 2:1 panoramic environments with editable GLB assets; optionally explore Aholo World 3DGS backgrounds from fixed viewpoints.
+- Execute frozen builds in an isolated Worker and bundled Chromium service, including when the user stage is closed.
+- Inspect labelled engineering views, mesh distances, support samples, intersections, and reserved clearances.
+- Browse and select without direct editing; publish checked builds atomically against retained requirements and restore revision history.
+- Capture real rendered viewpoints and continue editing from visual feedback.
+- Query actual GLB mesh surfaces to guide object placement on terrain.
+- Run long 3D jobs asynchronously and resume the Agent when results arrive.
+- Prevent duplicate paid submissions with durable receipts and explicit `unknown` states.
 
-```bash
-npm run demo:up
-```
+## Quick local setup
 
-The command checks Docker/Compose and safe configuration; starts and waits for
-isolated local persistence; then launches the web app on loopback. Judges open
-`http://localhost:3200` directly. There is no login, registration, invite code,
-password, database client, or database credential to manage.
-
-```bash
-npm run demo:status   # configuration, persistence, and web health; no secrets
-npm run demo:down     # stops services without deleting the Mongo volume
-```
-
-Demo startup refuses missing configuration, remote Mongo targets, or any
-existing listener on port 3200. Normal Agent calls have no separate global
-paid-call switch: concrete provider credentials, exact artifact host
-allowlists, durable receipts, and unknown-state replay protection are the
-submission boundary. Do not send a generation prompt during a static review.
-
-`demo:up` does not claim that live natural-language generation is enabled. Live
-generation is a team-controlled startup after the H0 download-host allowlists,
-provider operator smoke tests, and budget authorization pass. It is not part of
-the judge-safe one-command review mode.
-
-## V1 tools
-
-- `GenerateImage`: text-to-image and single-image editing through the single
-  NewAPI Chat Completions route, using the exact model alias `GPT-image-2`.
-- `CreateObject3D`: text/image to a mirrored Lux3D GLB artifact.
-- `CreateWorld3D`: text/single image to an Aholo World job.
-- `GetSpatialJob` / `WaitSpatialJob`: observe a known durable external job without resubmitting it.
-- `InspectSpatialArtifact`: inspect published assets, manifests, and lineage.
-- Image viewing, GLB orbit preview, and Aholo World manifest/open affordances.
-
-Spatial generation tools are Root-owned by default and may be explicitly delegated through persisted `allowed_tools`; wildcard grants do not expose them. Valid provider configuration is sufficient for submission. External job idempotency is scoped by `project_id + run_id + tool_use_id`; ambiguous submissions enter `unknown` and are never automatically replayed.
-
-## Isolation
-
-- App/package/Compose namespace: `pegasus-spatial`
-- Web: `http://localhost:3200`
-- Mongo: `127.0.0.1:27019/pegasus_spatial`
-- GridFS bucket: `pegasus_spatial_media`
-- OSS prefix: `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=raster-assets/pegasus-spatial`
-- Browser access has no account/session cookie and uses one fixed local Demo owner.
-
-The internal virtual Workspace path remains `.sci-pegasus/` for compatibility with the tested CAS/version/ACL implementation. Database, media, cookies, networks, and volumes are isolated from Sci-Pegasus.
-
-## Start and verify
+Requirements: Node.js 20+, npm 10+, Docker, and Docker Compose v2.
 
 ```bash
-cp .env.example .env.local
-# Replace secrets and add provider credentials.
+git clone https://github.com/HANsoA-KevinO/pegasus-spatial.git
+cd pegasus-spatial
 npm install
-docker compose up -d mongo
+cp .env.example .env.local
+```
+
+Configure at least the model gateway and spatial providers in `.env.local`:
+
+```env
+LLM_BASE_URL=https://your-newapi.example.com/v1
+LLM_API_KEY_ORCHESTRATOR=...
+LLM_API_KEY_TOOLS=...
+SCENE_CODE_RENDERER_TOKEN=an-independent-random-secret-of-at-least-24-characters
+AGENT_RUNTIME_INTERNAL_SECRET=another-independent-random-secret-of-at-least-32-characters
+CRON_SECRET=a-third-independent-random-secret
+```
+
+Then start the local stack:
+
+```bash
+npm run local:up
+```
+
+Open `http://localhost:3200`.
+
+```bash
+npm run local:status   # configuration, Mongo, and Web health without secrets
+npm run local:down     # stop services while preserving the local data volume
+```
+
+For direct development logs:
+
+```bash
 npm run dev
 ```
 
-Open `http://localhost:3200`. Do not enable paid calls before completing live provider smoke tests.
+The predev hook starts MongoDB and the rendering service. Set
+`SCENE_CODE_CHROMIUM_EXECUTABLE_PATH` to use an installed native Chromium instead
+of the rendering container. Configure Aholo / Lux3D only when generating assets;
+source modelling and importing existing GLB assets do not require paid generation.
 
-`GenerateImage` reuses `LLM_BASE_URL` and `LLM_API_KEY_TOOLS`; it does not use
-`OPENAI_API_KEY` or a runtime provider selector. The NewAPI base URL must not
-contain embedded credentials, a query string, or a fragment. Paid/production
-configuration requires HTTPS. Plain HTTP is accepted by startup only for a
-non-production loopback URL and is never considered paid-ready by the readiness
-check.
+For a containerized deployment:
 
-The OSS object prefix is the non-sensitive, intentionally public
-`NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX`. Server writers, server URL builders,
-and browser CDN URLs all consume that one value. Leading/trailing slashes and
-path-traversal segments are rejected. The legacy private variable may coexist
-only when its value is exactly equal; a mismatch fails startup.
+```bash
+cp .env.example .env.production
+# Fill in production credentials and HTTPS endpoints.
+docker compose --env-file .env.production up --build -d
+```
 
-For a legacy public-HTTP NewAPI, local development may explicitly set
-`PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP=1`. This is an unsafe escape hatch,
-never passes paid readiness, and remains rejected in production.
+The application uses a local single-user mode and listens on loopback by default. Put an authenticated HTTPS gateway in front of it before exposing it to a LAN or the public Internet. See [Deployment](docs/DEPLOYMENT.md) for the complete configuration.
+
+## Main Agent tools
+
+- `GenerateImage`
+- `CreateObject3D`
+- `CreateWorld3D`
+- `GetSpatialJob` / `WaitSpatialJob`
+- `InspectSpatialArtifact`
+- `CreateSpatialScene` / `InspectSpatialScene`
+- `PrepareSceneCode` / `RunSceneCode` / `InspectSceneBuild`
+- `RenderSceneViews` / `QuerySceneGeometry` / `CheckSceneConstraints`
+- `PublishSceneBuild` / `ExportSceneBuild`
+- `RestoreSpatialScene`
+- `SetSceneViewpoint` / `FocusSceneObject` / `CaptureSceneView`
+- `QuerySceneSurface`
+
+The system uses Three.js source throughout. Creating a Scene prepares its code project. Declarative edit tools are retired; old scenes are not automatically migrated. Existing assets can be explicitly imported into a new project. See [Scene system](docs/SCENE_SYSTEM.md) for execution, observation, and verification boundaries.
+
+External 3D generation uses a durable queue. The tool queues the job locally and returns its ID and current status. A background worker submits it to the provider, persists the external task ID, polls, validates, mirrors, publishes, and reports the finished artifact. A `prepared` status means the job is queued; it does not yet establish provider acceptance.
+
+## Workspace outputs
+
+```text
+output/spatial/images/
+output/spatial/objects/<build-id>/
+output/spatial/worlds/<build-id>/
+output/spatial/scenes/<scene-id>/
+output/spatial/builds/<build-id>/
+output/spatial/reviews/<observation-id>/
+```
+
+Every successful scene mutation creates a new immutable revision. Concurrent updates use CAS, and restored history is written as a new revision rather than overwriting the past.
+
+## Verification
 
 ```bash
 npm run project-prompt:verify
 npm run spatial:verify
 npm run spatial:verify:mongo
-npm run spatial:verify:demo-e2e
+npm run spatial:verify:local-e2e
 npm run tool-contracts:verify
 npm run multi-agent:verify
 npx tsc --noEmit
 npm run lint
 npm run build
+npm audit --audit-level=high
 ```
 
-`spatial:verify:demo-e2e` uses a randomly named loopback-only temporary
-database and terminal fixtures. It verifies direct local access, internal owner
-isolation, Spatial Job UI/API, refresh, and web-process restart recovery
-without sending chat, model, Aholo, or Lux3D requests. Only that guarded test
-database is removed afterward.
+These checks do not submit paid provider jobs. Run live provider smoke tests separately after reviewing configuration and cost.
 
-The account-free build is for a single-machine competition Demo only. The app
-binds to `127.0.0.1`; exposing it to a LAN or the public Internet requires an
-authenticated access-control gateway.
+## Documentation
 
-The five spatial Agent behavior cases under `evals/spatial-creation/` are
-definition-only CI contracts. They deliberately allow different useful tool
-combinations and must be replayed with the frozen live model before the demo;
-their presence is not a claim that live provider behavior has passed.
+- [Architecture](docs/ARCHITECTURE.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Multi-Agent runtime contract](docs/AGENT_TEAM_V1.md)
+- [Spatial Scene system](docs/SCENE_SYSTEM.md)
+- [Upstream provenance](UPSTREAM.md)
 
-V1 does not claim OpenUSD scene compilation, object-level Aholo writeback, CAD precision, real scale, collision correctness, path planning, or physical simulation. See [UPSTREAM.md](UPSTREAM.md) before redistribution; no authoritative license file was inherited.
+## Scope
+
+The current release does not claim CAD precision, real-world metric scale, collision correctness, physics simulation, or OpenUSD scene compilation. Panoramas provide an infinitely distant visual environment. Aholo World is an optional experiment in volumetric backgrounds for fixed viewpoints, without guarantees of local semantic editing or freely navigable scene geometry. Editable structure consists of procedural meshes, independent GLB instances and Scene Revisions.
+
+## License
+
+No open-source license is currently declared for this repository. Redistribution under MIT, Apache-2.0, or another open-source license requires explicit permission from the project owner.

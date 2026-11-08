@@ -925,6 +925,9 @@ export function routineSupervisionEvents(
     if (
       event.type === 'message_sent'
       || event.type === 'supervision_due'
+      // Bootstrapping a project is bookkeeping. It does not authorize a
+      // model turn, including when a read-only Stage initializes the team.
+      || event.type === 'team_created'
       // Result delivery is an immediate, idempotent turn boundary. Replaying
       // its audit event in the later routine digest would inject the same
       // logical completion into Root twice.
@@ -939,7 +942,7 @@ export function routineSupervisionEvents(
     // transitions are effects of the Run, not new team state to supervise.
     // Member status changes remain visible because they can require action.
     if (
-      event.type === 'agent_status_changed'
+      (event.type === 'agent_status_changed' || event.type === 'agent_created')
       && event.subject_agent_id === rootAgentId
     ) return false
 

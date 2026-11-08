@@ -22,7 +22,7 @@
     },
     {
       "id": "direct-world-request",
-      "prompt": "请创建一间可以进入的深夜电台空间：狭长房间、钨丝灯、吸音木墙和环形控制台。",
+      "prompt": "请用 Aholo 做一个定点体积背景，表现深夜电台里的钨丝灯、吸音木墙和环形控制台。",
       "expected": {
         "must_call_one_of": ["CreateWorld3D"],
         "optional_before_target": ["GenerateImage"],
@@ -59,9 +59,10 @@
       "setup": "当前 observation 绑定 Scene v3，截图中左侧椅子遮挡入口，用户明确要求直接调整。",
       "prompt": "根据这个观察点，把左侧椅子移到右后方；调整后用 Agent 相机截图复核。",
       "expected": {
-        "must_call_one_of": ["TransformSceneObject"],
-        "must_eventually_call": ["CaptureSceneView"],
-        "must_use_observation_id": true,
+        "must_call_one_of": ["Edit", "Write"],
+        "must_eventually_call": ["RunSceneCode", "PublishSceneBuild", "CaptureSceneView"],
+        "must_use_observed_revision_and_key": true,
+        "must_not_call": ["GenerateImage", "CreateObject3D", "CreateWorld3D"],
         "cost_only_ask_forbidden": true,
         "final_language": "zh-CN"
       }
@@ -72,7 +73,7 @@
       "prompt": "对照两张真实渲染图判断问题属于 Scene 摆放还是资产坐标基，并说明下一步。",
       "expected": {
         "classification": "asset_basis_mismatch",
-        "must_not_call": ["TransformSceneObject"],
+        "must_not_call": ["Edit", "Write", "PublishSceneBuild"],
         "required_review_checks": [
           "gravity_direction",
           "support_points",
@@ -88,9 +89,9 @@
       "prompt": "请搭建一个可以继续编辑的未来主义滨水广场：先做完整地台、主道路和建筑外壳模块，再加入可单独移动的灯、树和长椅；远景只要氛围背景。",
       "expected": {
         "must_call_one_of": ["CreateObject3D"],
-        "must_eventually_call": ["CreateSpatialScene", "AddSceneObject"],
+        "must_eventually_call": ["CreateSpatialScene", "RunSceneCode", "PublishSceneBuild"],
         "world_role": "optional_ambient_background",
-        "editable_truth": "glb",
+        "editable_truth": "three_js_source",
         "must_not_require_fixed_order": true,
         "final_language": "zh-CN"
       }
@@ -109,6 +110,20 @@
           "CreateObject3D": ["prompt"]
         },
         "must_not_call": ["CreateWorld3D"],
+        "final_language": "zh-CN"
+      }
+    },
+    {
+      "id": "photo-memory-reconstruction",
+      "setup": "Workspace 有一张老院子照片，能看到院门、主屋和石桌。没有概念图或可复用的 GLB。",
+      "prompt": "帮我把照片里的老院子还原成能走进去的场景。我记得进门右边是石桌，主屋的门一直开着，小时候我们会从院里穿进屋。",
+      "expected": {
+        "must_call_in_order": ["GenerateImage", "CreateObject3D", "RunSceneCode", "PublishSceneBuild"],
+        "scene_concepts_before_asset_references": true,
+        "reference_images_show_one_asset_each": true,
+        "published_scene_uses_generated_glbs": true,
+        "preserve_photo_memory_inference_distinction": true,
+        "ask_user_before_first_target": false,
         "final_language": "zh-CN"
       }
     },
@@ -158,8 +173,8 @@
       "prompt": "把两个新资产放入 Scene 并从 Agent 视角复核。",
       "expected": {
         "single_scene_mutation_owner": true,
-        "must_call_sequence": ["InspectSpatialScene", "AddSceneObject", "InspectSpatialScene", "AddSceneObject"],
-        "expected_final_scene_version": 6,
+        "must_call_in_order": ["InspectSpatialScene", "RunSceneCode", "PublishSceneBuild"],
+        "published_scene_contains_both_assets": true,
         "scene_changed_unhandled": false,
         "must_eventually_call": ["CaptureSceneView"],
         "final_language": "zh-CN"

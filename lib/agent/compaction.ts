@@ -731,7 +731,9 @@ function stripAllMedia(messages: ConversationMessage[]): {
       // Strip standalone image blocks
       if (block.type === 'image') {
         removedMedia += 1
-        return { type: 'text', text: '[image removed to reduce context size]' }
+        return { type: 'text', text: block.workspace_path
+          ? `[用户附件保存在 Workspace：${block.workspace_path}]`
+          : '[image removed to reduce context size]' }
       }
       // Strip images from tool_result arrays
       if (block.type === 'tool_result' && Array.isArray(block.content)) {

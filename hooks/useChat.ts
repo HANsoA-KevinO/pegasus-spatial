@@ -17,6 +17,18 @@ import { attachPersistedToolResult } from '@/lib/chat/persisted-tool-results'
 
 const ACTIVE_CONVERSATION_KEY = 'sci_pegasus_active_conversation_id'
 
+function workspaceFileRevision(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
+  const entry = value as Record<string, unknown>
+  return [
+    entry.gridfs_id,
+    entry.asset_id,
+    entry.sha256,
+    entry.version,
+    entry.updated_at,
+  ].map(part => String(part ?? '')).join('\u0000')
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function summarizeToolAction(tool: string, input: any, displayPath: string): string {
   switch (tool) {
@@ -208,6 +220,37 @@ export function useChat(options: UseChatOptions) {
     }
   }
 
+  const refreshWorkspaceArtifacts = useCallback(async (conversationKey: string): Promise<void> => {
+    if (!conversationKey || conversationKey === '_new') return
+    try {
+      const response = await fetch(
+        `/api/conversations/${encodeURIComponent(conversationKey)}`,
+        { cache: 'no-store' },
+      )
+      if (!response.ok) return
+      const payload = await response.json() as ConversationArtifactFields
+      const cached = cacheRef.current.get(conversationKey)
+      if (!cached) return
+      const previousFiles = cached.dbArtifactFields?.output?.files ?? {}
+      const nextFiles = payload.output?.files ?? {}
+      for (const [path, nextEntry] of Object.entries(nextFiles)) {
+        if (workspaceFileRevision(previousFiles[path]) !== workspaceFileRevision(nextEntry)) {
+          invalidateGridFSCache(conversationKey, path)
+        }
+      }
+      const nextFields: ConversationArtifactFields = {
+        output: {
+          files: payload.output?.files,
+          manifest: payload.output?.manifest,
+        },
+      }
+      cached.dbArtifactFields = nextFields
+      if (activeKeyRef.current === conversationKey) setDbArtifactFields(nextFields)
+    } catch {
+      // The status card keeps polling durable state; a later refresh can recover.
+    }
+  }, [])
+
   /**
    * Apply one parsed SSE event to the cached conversation state.
    * Shared by the POST /api/chat streaming path (sendMessage) and the GET /api/chat/stream/:id
@@ -271,11 +314,11 @@ export function useChat(options: UseChatOptions) {
       if (cached) {
         const prevFields = cached.dbArtifactFields ?? {}
         const prevOutput = (prevFields.output ?? {}) as Record<string, unknown>
-        const prevFiles = (prevOutput.files ?? {}) as Record<string, { gridfs_id?: string }>
-        const newFiles = (data.files ?? {}) as Record<string, { gridfs_id?: string }>
+        const prevFiles = (prevOutput.files ?? {}) as Record<string, unknown>
+        const newFiles = (data.files ?? {}) as Record<string, unknown>
         for (const [path, newEntry] of Object.entries(newFiles)) {
           const prevEntry = prevFiles[path]
-          if (!prevEntry || prevEntry.gridfs_id !== newEntry?.gridfs_id) {
+          if (workspaceFileRevision(prevEntry) !== workspaceFileRevision(newEntry)) {
             invalidateGridFSCache(myKey, path)
           }
         }
@@ -296,17 +339,7 @@ export function useChat(options: UseChatOptions) {
     }
 
     if (evtType === 'workspace_refresh') {
-      void fetch(`/api/conversations/${encodeURIComponent(myKey)}`, { cache: 'no-store' })
-        .then(response => response.ok ? response.json() : null)
-        .then(data => {
-          if (!data) return
-          const cached = cacheRef.current.get(myKey)
-          if (!cached) return
-          const nextFields = data as ConversationArtifactFields
-          cached.dbArtifactFields = nextFields
-          if (activeKeyRef.current === myKey) setDbArtifactFields(nextFields)
-        })
-        .catch(() => undefined)
+      void refreshWorkspaceArtifacts(myKey)
       return
     }
 
@@ -837,14 +870,14 @@ export function useChat(options: UseChatOptions) {
             const res = await fetch(`/api/conversations/${myKey}`)
             if (res.ok) {
               const data = await res.json()
-              const newFiles = (data.output?.files ?? {}) as Record<string, { gridfs_id?: string }>
+              const newFiles = (data.output?.files ?? {}) as Record<string, unknown>
               const cached = cacheRef.current.get(myKey)
               const prevFields = cached?.dbArtifactFields ?? {}
               const prevOutput = (prevFields.output ?? {}) as Record<string, unknown>
-              const prevFiles = (prevOutput.files ?? {}) as Record<string, { gridfs_id?: string }>
+              const prevFiles = (prevOutput.files ?? {}) as Record<string, unknown>
               for (const [path, newEntry] of Object.entries(newFiles)) {
                 const prevEntry = prevFiles[path]
-                if (!prevEntry || prevEntry.gridfs_id !== newEntry?.gridfs_id) {
+                if (workspaceFileRevision(prevEntry) !== workspaceFileRevision(newEntry)) {
                   invalidateGridFSCache(myKey, path)
                 }
               }
@@ -1389,6 +1422,7 @@ export function useChat(options: UseChatOptions) {
     sendMessage,
     stopGeneration,
     loadConversation,
+    refreshWorkspaceArtifacts,
     answerQuestion,
     resetChat,
     updateCachedSettings,

@@ -104,7 +104,7 @@ export async function createConversation(
     conversation_id: randomUUID(),
     user_id: userId,
     settings: {
-      orchestrator_model: settings?.orchestrator_model ?? 'anthropic/claude-opus-4-6',
+      orchestrator_model: settings?.orchestrator_model ?? 'main_pro',
       research_domain: settings?.research_domain ?? '',
     },
     ...(projectGuide ? { project_guide: projectGuide } : {}),

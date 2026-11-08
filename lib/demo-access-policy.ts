@@ -1,6 +1,6 @@
 import type { UserPlan } from './llm-registry'
 
-/** Fixed capabilities for the account-free, single-machine competition Demo. */
+/** Fixed capabilities for the account-free, single-machine local deployment. */
 export async function getUserPlan(ownerId: string): Promise<UserPlan> {
   void ownerId
   return 'team'

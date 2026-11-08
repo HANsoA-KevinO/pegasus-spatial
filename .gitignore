@@ -1,11 +1,16 @@
 node_modules/
 .next/
+.next-flash-test/
 out/
 coverage/
+__pycache__/
+*.pyc
 *.tsbuildinfo
 *.log
 .DS_Store
 /exports/
+/output/
+/submission/
 
 .env
 .env.*

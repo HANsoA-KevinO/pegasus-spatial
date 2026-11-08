@@ -55,6 +55,14 @@ function stringArg(input: Record<string, unknown>, key: string): string | undefi
 
 function recoveryInstruction(toolName: string, input: Record<string, unknown>): string {
   switch (toolName) {
+    case 'RunSceneCode':
+      return '构建已执行。使用保留的 build_id 调用 InspectSceneBuild；必要时按 object_keys 缩小索引。不要为了找回构建 ID 而重新构建。'
+    case 'InspectSceneBuild':
+      return '沿用相同 build_id，指定 object_keys 或 limit/offset 获取较小分页。图片未注入时，用 Read 读取回执中的具体 preview_paths，无需 Glob 搜索。'
+    case 'RenderSceneViews':
+    case 'CheckSceneConstraints':
+    case 'QuerySceneGeometry':
+      return '沿用相同 build_id/revision_id，缩小视图或批量查询；构建没有改变。图片未注入时，Read 回执中的具体 preview_paths。没有收到图片不能声称已完成视觉判断。'
     case 'Read': {
       const path = stringArg(input, 'file_path') ?? '(unknown)'
       return `请用 Read(file_path=${path}, offset=起始行, limit=较小行数) 分段读取；先尝试 50～100 行。`
@@ -85,6 +93,32 @@ function recoveryInstruction(toolName: string, input: Record<string, unknown>): 
     default:
       return '请缩小单次工具结果，或先把结果写入 workspace 后再按需读取。'
   }
+}
+
+/** Executed mutations must retain their receipt even when the full geometry or
+ * image result cannot fit. Losing this ID previously sent the Agent searching
+ * old builds after a successful RunSceneCode. Never retain arbitrary payloads. */
+function sceneCodeReceipt(options: ToolResultAdmissionOptions): string | null {
+  if (!['PrepareSceneCode', 'RunSceneCode', 'InspectSceneBuild', 'RenderSceneViews', 'QuerySceneGeometry', 'CheckSceneConstraints', 'PublishSceneBuild', 'ExportSceneBuild'].includes(options.toolName)) return null
+  for (const part of textParts(options.result.content)) {
+    try {
+      const data = JSON.parse(part.text) as Record<string, unknown>
+      const receipt: Record<string, unknown> = {}
+      for (const key of ['status', 'build_id', 'scene_id', 'revision_id', 'base_revision_id', 'base_version', 'version', 'pending', 'entry_path', 'assets_path']) if (typeof data[key] === 'string' || typeof data[key] === 'number' || typeof data[key] === 'boolean') receipt[key] = data[key]
+      if (typeof data.error === 'string') receipt.error = data.error.slice(0, 1200)
+      const report = data.report as Record<string, unknown> | undefined
+      const montage = (data.montage ?? report?.montage) as { workspace_path?: unknown } | undefined
+      const views = (data.views ?? report?.views) as Array<{ workspace_path?: unknown }> | undefined
+      const paths = [montage?.workspace_path, ...(Array.isArray(views) ? views.map(view => view.workspace_path) : [])].filter((path): path is string => typeof path === 'string' && path.startsWith('output/') && path.length <= 512).slice(0, 8)
+      if (paths.length) { receipt.preview_paths = paths; receipt.visual_evidence_delivered = false }
+      if (Array.isArray(data.available_cameras)) receipt.available_cameras = data.available_cameras.filter(name => typeof name === 'string').slice(0, 20)
+      if (typeof data.acceptance_version === 'number') receipt.acceptance_version = data.acceptance_version
+      const checks = data.checks ?? data.constraints ?? report?.constraints
+      if (Array.isArray(checks)) { receipt.check_count = checks.length; receipt.checks = checks.filter(check => check && typeof check === 'object').slice(0, 30).map(check => ({ id: String(check.id).slice(0, 200), status: String(check.status).slice(0, 30), required: check.required === true })) }
+      if (Object.keys(receipt).length) return JSON.stringify(receipt)
+    } catch { /* Non-JSON tools use the generic admission response. */ }
+  }
+  return null
 }
 
 /**
@@ -123,13 +157,14 @@ export function admitToolResult(
   // inline raster bytes from the next request.
   if (Array.isArray(options.result.content)) {
     const text = textParts(options.result.content)
+    const receipt = sceneCodeReceipt(options)
     const withoutImages: ToolResultBlock = {
       ...options.result,
       content: [
         ...text,
         {
           type: 'text',
-          text: `[大型内联图像未注入：下一请求将超过模型窗口]\n${recoveryInstruction(options.toolName, options.toolInput)}`,
+          text: `[大型内联图像未注入：下一请求将超过模型窗口]\n${receipt ? `${receipt}\n` : ''}${recoveryInstruction(options.toolName, options.toolInput)}`,
         },
       ],
     }
@@ -145,6 +180,7 @@ export function admitToolResult(
     }
   }
 
+  const receipt = sceneCodeReceipt(options)
   const guarded: ToolResultBlock = {
     ...options.result,
     content: [
@@ -153,6 +189,7 @@ export function admitToolResult(
       `projected_input: ~${projected.toLocaleString()} tokens`,
       `window: ${options.contextWindow.toLocaleString()} tokens`,
       `admission_limit: ${admissionLimit.toLocaleString()} tokens`,
+      ...(receipt ? [`已执行操作的持久回执：${receipt}`] : []),
       recoveryInstruction(options.toolName, options.toolInput),
     ].join('\n'),
     // Retrieval did not deliver the requested material to the model; marking

@@ -1,5 +1,5 @@
 /**
- * Pegasus Spatial is a single-user, loopback-only competition demo.
+ * Pegasus Spatial uses a stable owner for its single-user local deployment.
  *
  * This identifier is not an account or credential. It is the stable internal
  * owner key used by Conversation, Workspace and durable Job CAS boundaries.

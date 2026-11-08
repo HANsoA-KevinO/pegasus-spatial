@@ -8,7 +8,9 @@ import {
   worldBuildLabel,
 } from '../world-stage-model'
 import { applyObjectLocalAlignment, computeGlbObjectAlignment, computeLuxPlyAlignment } from '../object-alignment'
-import { readRenderPixelsWithRetry } from '../render-readback'
+import * as THREE from 'three'
+import { createSpatialProxyObject, type SpatialStageInstance } from '../proxy-geometry'
+import { alignmentMatrix, applyInstanceTransform, applyViewpoint, instancesInFrustum, queryMeshSurface } from '../three-scene-geometry'
 
 const root = process.cwd()
 const source = (...segments: string[]) => readFileSync(join(root, ...segments), 'utf8')
@@ -80,76 +82,43 @@ const glbAlignment = computeGlbObjectAlignment({
 })
 assert.deepEqual(glbAlignment.rotationRadians, [Math.PI / 2, 0, 0])
 
-let asynchronousReads = 0
-let synchronousReads = 0
-const waitDurations: number[] = []
-await readRenderPixelsWithRetry({
-  render() {},
-  async waitForRenderOver(duration) { waitDurations.push(duration) },
-  async readRenderResultAsync() {
-    asynchronousReads += 1
-    throw new Error('GL client sync failed')
-  },
-  readRenderResult() { synchronousReads += 1 },
-}, new Uint8Array(4), { x: 0, y: 0, width: 1, height: 1 })
-assert.equal(asynchronousReads, 3)
-assert.equal(synchronousReads, 1)
-assert.deepEqual(waitDurations, [48, 80, 112, 96])
-
-const canvas = source('components', 'spatial-stage', 'AholoWorldCanvas.tsx')
-assert.match(canvas, /import\('@manycore\/aholo-viewer'\)/)
-assert.match(canvas, /sdk\.createViewer\(/)
-assert.match(canvas, /SplatLoader\.parseSplatData/)
-assert.match(canvas, /SplatUtils\.createSplat/)
-assert.match(canvas, /container\.addEventListener/)
-assert.match(canvas, /viewer\.destroy\(\)/)
-assert.match(canvas, /controller\.abort\(\)/)
-assert.match(canvas, /GLTFLoader\.loadGLTF/)
-assert.match(canvas, /readRenderPixelsWithRetry/)
-assert.match(canvas, /ensureMissingMeshNormals/)
-assert.match(canvas, /addOrSetAttribute\('normal'/)
-assert.match(canvas, /outputContext\.drawImage\(source/)
-assert.doesNotMatch(canvas, /runtime\.viewer\.resize\(\{ width, height \}\)/, 'capture must never resize the visible Stage framebuffer')
-assert.match(canvas, /isExtraCopyBeforeScreenEnabled\.set\(true\)/)
-assert.match(canvas, /空间舞台尚未产生有效截图帧/)
-assert.match(canvas, /createPicker\(\)/)
-assert.match(canvas, /EnvMapBackground/)
-assert.match(canvas, /downloadTexture\(environmentUrl/)
-assert.match(canvas, /querySurface/)
-assert.match(canvas, /picker\.raycaster\.set\(origin, down\)/)
-assert.match(canvas, /qualityMode/)
-assert.match(canvas, /qualityAssetKey/)
-assert.match(canvas, /QUALITY_ALIGNMENT_VERSION/)
-assert.match(canvas, /qualityCacheRef/)
-assert.match(canvas, /qualityCandidates/)
-assert.match(canvas, /setHighlightObjects/)
-assert.match(canvas, /agent-observer\.gltf/)
-assert.match(canvas, /status: 'loading'/)
-assert.match(canvas, /containsCaptureOrigin/)
-assert.match(canvas, /orbit\.target = axis === 'Z' \? \[0, -1, 0\] : \[0, 0, -1\]/)
-assert.match(canvas, /3DGS 解码超时/)
-assert.match(canvas, /Lux 可编辑物体仍可继续使用/)
-assert.match(canvas, /fitEditableObjects/)
-assert.doesNotMatch(canvas, /!container \|\| !assetUrl \|\| !format/)
-assert.match(canvas, /resetUserView/)
-assert.match(canvas, /WASD 水平移动/)
-assert.match(canvas, /movementKeys = new Set\(\['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE'\]\)/)
-assert.match(canvas, /requestAnimationFrame\(navigate\)/)
-assert.match(canvas, /pressedKeys\.has\('KeyE'\)/)
-assert.match(canvas, /pressedKeys\.has\('KeyQ'\)/)
-assert.match(canvas, /orbit\.mode = event\.shiftKey/)
-assert.match(canvas, /if \(orbit\.moved\)/)
-
-const readback = source('components', 'spatial-stage', 'render-readback.ts')
-assert.match(readback, /WebGL clientWaitSync/)
-assert.match(readback, /readRenderResultAsync/)
-assert.match(readback, /waitForRenderOver\(48 \+ attempt \* 32\)/)
-assert.match(readback, /viewer\.readRenderResult\(pixels, range\)/)
-
-const viewerPatch = source('scripts', 'patch-aholo-viewer-workers.mjs')
-assert.match(viewerPatch, /EXPECTED_DIRECT_WORKER_COUNT = 3/)
-assert.match(viewerPatch, /new Worker\(workerUrl, \{ type: "module" \}\)/)
-assert.match(viewerPatch, /Math\.max\(1, \(navigator\.hardwareConcurrency \|\| 2\) - 1\)/)
+// Exercise native geometry, transforms and raycasting rather than matching SDK strings.
+const instance = {
+  instance_id: 'floor', label: 'floor', role: 'terrain',
+  proxy: { kind: 'box', dimensions: [10, 8, 2], material: 'stone', color: '#778899', opacity: 1 },
+  transform: { position: [3, -2, 4], rotation_quaternion: [0, 0, 0, 1], scale: [2, 1, 1.5] },
+} as SpatialStageInstance
+const floor = createSpatialProxyObject(instance)!
+applyInstanceTransform(floor, instance.transform)
+assert.ok(queryMeshSurface(floor, [3, -2], 100, 'Z').every((value, axis) => Math.abs(value - [3, -2, 7][axis]) < 1e-9))
+assert.throws(() => queryMeshSurface(floor, [1000, 1000], 100, 'Z'), /未命中/)
+for (const primitive of ['box', 'cylinder', 'arch'] as const) {
+  const object = createSpatialProxyObject({ ...instance, proxy: { kind: primitive, dimensions: [4, 2, 6] } })!
+  const bounds = new THREE.Box3().setFromObject(object)
+  assert.ok(bounds.min.distanceTo(new THREE.Vector3(-2, -1, 0)) < 1e-6)
+  assert.ok(bounds.max.distanceTo(new THREE.Vector3(2, 1, 6)) < 1e-6)
+  if (primitive === 'arch') assert.throws(() => queryMeshSurface(object, [0, 0], 4, 'Z'), /未命中/, 'arch opening must not be a filled bounding box')
+}
+const point = new THREE.Vector3(-2, -3, -4).applyMatrix4(alignmentMatrix(plyAlignment)).toArray()
+const expected = applyObjectLocalAlignment([-2, -3, -4], plyAlignment)
+assert.ok(point.every((value, axis) => Math.abs(value - expected[axis]) < 1e-12), 'native alignment must retain nonuniform scaling')
+const camera = new THREE.PerspectiveCamera(56, 16 / 9, 0.01, 1000)
+applyViewpoint(camera, { position: [3, -15, 10], target: [3, -2, 5], up: [0, 0, 1], fov_deg: 56 })
+assert.deepEqual(instancesInFrustum([['floor', floor]], camera), ['floor'])
+applyViewpoint(camera, { position: [3, -15, 10], target: [3, -100, 10], up: [0, 0, 1], fov_deg: 56 })
+assert.deepEqual(instancesInFrustum([['floor', floor]], camera), [])
+const canvas = source('components', 'spatial-stage', 'ThreeWorldCanvas.tsx')
+const runtime = source('components', 'spatial-stage', 'three-scene-runtime.ts')
+assert.match(runtime, /new THREE.WebGLRenderer/)
+assert.match(runtime, /new GLTFLoader\(\)\.parseAsync/)
+assert.match(runtime, /covSplats: true/, 'Gaussian covariance transforms must preserve nonuniform Scene scale')
+assert.match(runtime, /entry\?\.key !== key/, 'polling must reconcile by asset identity')
+assert.match(runtime, /readRenderTargetPixelsAsync/)
+assert.match(runtime, /this\.epoch !== epoch/, 'capture must reject scene mutations while awaiting GPU readback')
+assert.match(runtime, /new OutputPass/, 'offscreen captures need the same tone and color conversion as the screen')
+assert.match(runtime, /expectedRevisionId/)
+assert.match(runtime, /dispose\(\)/)
+assert.doesNotMatch(canvas + runtime, /@manycore\/aholo-viewer/)
 
 const sceneRepository = source('lib', 'spatial', 'scene-repository.ts')
 assert.match(sceneRepository, /ply && job\.provider !== 'lux3d'/)
@@ -158,8 +127,8 @@ assert.match(sceneRepository, /glb_basis_correction: 'gltf_y_up_to_scene_z_up'/)
 assert.match(sceneRepository, /ply_basis_correction: 'lux_ply_negative_y_up_to_scene_z_up'/)
 
 const stage = source('components', 'spatial-stage', 'SpatialStage.tsx')
-assert.match(stage, /AholoWorldCanvas/)
-assert.match(stage, /AUTO REVISION/)
+assert.match(stage, /ThreeWorldCanvas/)
+assert.match(stage, /场景历史/)
 assert.match(stage, /从这里提出修改/)
 assert.match(stage, /不声称可以局部语义修改 3DGS/)
 assert.match(stage, /把你看到的问题交给 Agent/)
@@ -170,11 +139,11 @@ assert.match(stage, /高质量 PLY/)
 assert.match(stage, /GLB 实时模式/)
 assert.match(stage, /场景资产库/)
 assert.match(stage, /主 Agent 观察机位/)
-assert.match(stage, /贴合地形/)
-assert.match(stage, /ArrowLeft: \[0, -step\]/)
-assert.match(stage, /PageUp: \[2, step\]/)
-assert.match(stage, /rotation_deg/)
-assert.match(stage, /expected_version/)
+assert.doesNotMatch(stage, /贴合地形/)
+assert.doesNotMatch(stage, /ArrowLeft: \[0, -step\]/)
+assert.doesNotMatch(stage, /PageUp: \[2, step\]/)
+assert.doesNotMatch(stage, /editTransform|nudgeSelected|groundSelected/)
+assert.doesNotMatch(stage, /edit_id|expected_version/)
 assert.match(stage, /RENDER_COMMAND_IDLE_POLL_MS = 2_500/)
 assert.match(stage, /RENDER_COMMAND_ACTIVE_POLL_MS = 250/)
 assert.match(stage, /RENDER_SESSION_HEARTBEAT_MS = 15_000/)
@@ -184,19 +153,17 @@ assert.match(stage, /method: 'DELETE'/)
 assert.doesNotMatch(stage, /sessionStorage/, 'copied Stage tabs must not share one render lease identity')
 assert.match(stage, /const manifestPreviewPath = initialManifestPath \|\| null/)
 assert.match(stage, /sceneId\?: string \| null/)
-assert.match(stage, /全屏编辑/)
+assert.match(stage, /全屏查看/)
 assert.match(stage, /sceneId && list\.scenes\.some/)
 
 const sceneRoute = source('app', 'api', 'conversations', '[id]', 'spatial', 'scenes', '[sceneId]', 'route.ts')
 assert.match(sceneRoute, /export async function PATCH/)
-assert.match(sceneRoute, /mutateSpatialScene/)
-assert.match(sceneRoute, /用户调整“\$\{target\.label\}”的位置与姿态/)
-assert.match(sceneRoute, /expectedVersion: Number\(body\.expected_version\)/)
-assert.match(sceneRoute, /status: 409/)
+assert.doesNotMatch(sceneRoute, /mutateSpatialScene/)
+assert.match(sceneRoute, /status: 405/)
 assert.match(stage, /const effectiveLegacyPath = manifestPreviewPath \?\? legacyPath/)
 assert.match(stage, /isManifestPreview \? null : manifests\[0\] \?\? null/)
-assert.match(stage, /const displayedSceneData = isManifestPreview \? null : sceneData/)
-assert.match(stage, /if \(!selectedSceneId \|\| isManifestPreview\) return/)
+assert.match(stage, /const displayedSceneData = isManifestPreview \|\| sceneData\?\.scene\.scene_id !== selectedSceneId/)
+assert.match(stage, /if \(!selectedSceneId \|\| isManifestPreview \|\| previewVersion \|\| codeProgram\) return/)
 assert.match(stage, /World 预览仅供查看/)
 
 const renderCompletionRoute = source(

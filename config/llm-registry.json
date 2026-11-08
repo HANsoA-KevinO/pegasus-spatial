@@ -16,13 +16,13 @@
       "promptCacheTtl": "5m"
     },
     "main_pro": {
-      "realModel": "Claude-opus-4.6",
+      "realModel": "Claude-opus",
       "keyChannel": "orchestrator",
       "availableToPlans": ["pro", "team"],
-      "displayName": "Claude Opus 4.6",
+      "displayName": "Claude Opus",
       "displayDescription": "复杂任务深度推理",
       "supportsVision": true,
-      "contextWindow": 200000,
+      "contextWindow": 256000,
       "maxOutputTokens": 32768,
       "compactionMaxOutputTokens": 8000,
       "promptCacheTtl": "5m"
@@ -76,6 +76,6 @@
   "defaultMainAlias": {
     "free": "main_standard",
     "pro":  "main_standard",
-    "team": "main_standard"
+    "team": "main_pro"
   }
 }

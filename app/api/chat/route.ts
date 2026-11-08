@@ -8,6 +8,8 @@ import {
   estimateProjectContextOverheadTokens,
 } from '@/lib/agent/provider'
 import { agentLoop } from '@/lib/agent/loop'
+import { LLMStreamError } from '@/lib/agent/llm-api'
+import { resolveAgentTurnLimit } from '@/lib/agent-runtime/turn-limits'
 import {
   acknowledgeDequeuedMessages,
   dequeueMessages,
@@ -16,6 +18,7 @@ import {
   repairTerminalRootTeamQueueReceipts,
 } from '@/lib/agent/message-queue'
 import { createWorkspaceInstance } from '@/lib/workspace/instance'
+import { queuedImageBlock, uploadedImageBlock } from '@/lib/workspace/uploaded-image'
 import type { FileEntry } from '@/lib/workspace/types'
 import { spatialCreationWorkspace } from '@/lib/workspace/definitions/spatial-creation'
 import { loadSkills } from '@/lib/skills/loader'
@@ -122,7 +125,7 @@ import type {
   FrozenProjectContextSnapshot,
   FrozenWorkspaceProjection,
 } from '@/lib/agent-runtime/types'
-import { classifyAgentRunFailure } from '@/lib/agent-runtime/failure-policy'
+import { classifyAgentRunFailure, isRecoverableModelStreamFailure } from '@/lib/agent-runtime/failure-policy'
 import {
   compileProjectGuide,
   validateProjectGuideRef,
@@ -1319,7 +1322,7 @@ export async function POST(req: NextRequest) {
           if (!claimed) {
             throw new Error('图片资产不存在、已被占用或不属于当前用户，请重新上传')
           }
-          content.push(toImageBlock(claimed))
+          content.push(await uploadedImageBlock(workspace, claimed))
         }
         content.push({ type: 'text', text })
         return content
@@ -1442,22 +1445,11 @@ export async function POST(req: NextRequest) {
         recoveryMessages.push(orphanedToolRecovery)
         nextRunMessageSequence += 1
       }
-      const initialQueuedMessages: ConversationMessage[] = initialQueued.map(queuedMessage => {
+      const initialQueuedMessages: ConversationMessage[] = []
+      for (const queuedMessage of initialQueued) {
         const queuedContent: ContentBlock[] = []
         for (const image of queuedMessage.images ?? []) {
-          if ('assetId' in image) {
-            queuedContent.push({
-              type: 'image',
-              source: {
-                type: 'asset',
-                asset_id: image.assetId,
-                media_type: image.mimeType,
-                width: image.width,
-                height: image.height,
-                ...(image.storageDriver ? { storage_driver: image.storageDriver } : {}),
-              },
-            })
-          }
+          if ('assetId' in image) queuedContent.push(await queuedImageBlock(workspace, image, userId, convId))
         }
         queuedContent.push({
           type: 'text',
@@ -1468,7 +1460,7 @@ export async function POST(req: NextRequest) {
                 content: queuedMessage.content,
               }),
         })
-        return {
+        initialQueuedMessages.push({
           role: 'user',
           content: queuedContent,
           timestamp: new Date(),
@@ -1477,8 +1469,16 @@ export async function POST(req: NextRequest) {
           sequence: nextRunMessageSequence++,
           source_queue_id: queuedMessage.queueId,
           visibility: queuedMessage.visibility,
+        })
+      }
+      for (const historicalMessage of historyMessages) {
+        if (historicalMessage.role !== 'user') continue
+        for (const block of historicalMessage.content) {
+          if (block.type !== 'image' || block.workspace_path || block.source.type !== 'asset') continue
+          const asset = await claimImageAsset(block.source.asset_id, userId, convId).catch(() => null)
+          if (asset) block.workspace_path = (await uploadedImageBlock(workspace, asset)).workspace_path
         }
-      })
+      }
       const persistedMessageIds = new Set(
         persistedMessages
           .map(persistedMessage => persistedMessage.message_id)
@@ -1665,7 +1665,7 @@ export async function POST(req: NextRequest) {
         : undefined
       const result = await agentLoop(provider, allMessages, {
         runId: agentRunId,
-        maxTurns: 50,
+        maxTurns: resolveAgentTurnLimit('root'),
         model: modelProvider,
         modelAlias: alias,
         abortSignal: abortController.signal,
@@ -2306,6 +2306,11 @@ export async function POST(req: NextRequest) {
         !userCancelled
         && typeof error.message === 'string'
         && /abort|terminated|shutdown/i.test(error.message)
+      // The provider has not returned a complete assistant message yet, so
+      // none of this request's tools crossed the execution boundary. Resume
+      // the same Run from its last complete checkpoint, on explicit user input.
+      const streamInterrupted = isRecoverableModelStreamFailure(error, !!liveModelActionId, userCancelled)
+      const canResume = processInterrupted || streamInterrupted
       console.error(
         '[chat] ERROR:',
         error.stack ?? error.message,
@@ -2405,18 +2410,23 @@ export async function POST(req: NextRequest) {
           )
         }
       }
-      const failureTerminationReason = /model|provider|openrouter|anthropic/i.test(error.message)
+      const failureTerminationReason = error instanceof LLMStreamError || /model|provider|openrouter|anthropic/i.test(error.message)
         ? 'model_error' as const
         : 'runtime_error' as const
       const failureMetadata = classifyAgentRunFailure(error, failureTerminationReason)
       let runStatePersisted = !agentRunId
       if (agentRunId && !leaseLost) {
         try {
+          if (streamInterrupted && runLeaseValid) {
+            if (livePersistTimer) { clearTimeout(livePersistTimer); livePersistTimer = null }
+            await livePersistPromise
+            await clearRunLive(agentRunId, executionOwnerId)
+          }
           runStatePersisted = await setRunStatus(
             agentRunId,
             userCancelled
               ? 'cancelled'
-              : processInterrupted
+              : canResume
                 ? 'recoverable'
                 : 'failed',
             userCancelled
@@ -2427,7 +2437,7 @@ export async function POST(req: NextRequest) {
                     ? { leaseOwnerId: executionOwnerId }
                     : { onlyIfUnleased: true }),
                 }
-              : processInterrupted
+              : canResume
               ? {
                   error: error.message,
                   ...(runLeaseValid
@@ -2447,7 +2457,7 @@ export async function POST(req: NextRequest) {
           if (!runStatePersisted) {
             runLeaseValid = false
           }
-          if (userCancelled || !processInterrupted) {
+          if (userCancelled || !canResume) {
             await releaseQueuedMessagesForRun(agentRunId)
           }
         } catch (runError) {
@@ -2468,10 +2478,12 @@ export async function POST(req: NextRequest) {
               ...(agentRunId ? { run_id: agentRunId } : {}),
               ...(convId ? { conversation_id: convId } : {}),
             }
-          : processInterrupted
+          : canResume
             ? {
                 type: 'run_recoverable',
-                message: '执行已停在最近的完整检查点，可以安全恢复。',
+                message: streamInterrupted
+                  ? '上游响应连接中断，已保留完成的步骤。可以从上个完整检查点继续；中断的本轮需重新请求，半截工具调用不会执行。'
+                  : '执行已停在最近的完整检查点，可以安全恢复。',
                 ...(agentRunId ? { run_id: agentRunId } : {}),
                 ...(convId ? { conversation_id: convId } : {}),
               }

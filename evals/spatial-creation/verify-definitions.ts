@@ -35,6 +35,7 @@ const expectedIds = [
   'format-basis-orientation-review',
   'lux-modular-environment-assembly',
   'lux-important-module-multiview',
+  'photo-memory-reconstruction',
   'parallel-asset-fanout',
   'asset-maker-submit-and-continue',
   'async-spatial-published-notification',
@@ -54,11 +55,11 @@ assert.deepEqual(byId.get('direct-object-request')?.must_call_one_of, ['CreateOb
 assert.deepEqual(byId.get('direct-world-request')?.must_call_one_of, ['CreateWorld3D'])
 assert.deepEqual(byId.get('reference-image-edit')?.must_call_one_of, ['GenerateImage'])
 assert.deepEqual(byId.get('ambiguous-object-or-world')?.must_call_one_of, ['AskUserQuestion'])
-assert.deepEqual(byId.get('scene-observation-adjustment')?.must_call_one_of, ['TransformSceneObject'])
-assert.deepEqual(byId.get('scene-observation-adjustment')?.must_eventually_call, ['CaptureSceneView'])
+assert.deepEqual(byId.get('scene-observation-adjustment')?.must_call_one_of, ['Edit', 'Write'])
+assert.deepEqual(byId.get('scene-observation-adjustment')?.must_eventually_call, ['RunSceneCode', 'PublishSceneBuild', 'CaptureSceneView'])
 assert.equal(byId.get('scene-observation-adjustment')?.cost_only_ask_forbidden, true)
 assert.equal(byId.get('format-basis-orientation-review')?.classification, 'asset_basis_mismatch')
-assert.deepEqual(byId.get('format-basis-orientation-review')?.must_not_call, ['TransformSceneObject'])
+assert.deepEqual(byId.get('format-basis-orientation-review')?.must_not_call, ['Edit', 'Write', 'PublishSceneBuild'])
 assert.deepEqual(byId.get('format-basis-orientation-review')?.required_review_checks, [
   'gravity_direction',
   'support_points',
@@ -69,13 +70,20 @@ assert.equal(byId.get('format-basis-orientation-review')?.ambiguous_single_view_
 assert.deepEqual(byId.get('lux-modular-environment-assembly')?.must_call_one_of, ['CreateObject3D'])
 assert.deepEqual(byId.get('lux-modular-environment-assembly')?.must_eventually_call, [
   'CreateSpatialScene',
-  'AddSceneObject',
+  'RunSceneCode',
+  'PublishSceneBuild',
 ])
 assert.equal(byId.get('lux-modular-environment-assembly')?.world_role, 'optional_ambient_background')
-assert.equal(byId.get('lux-modular-environment-assembly')?.editable_truth, 'glb')
+assert.equal(byId.get('lux-modular-environment-assembly')?.editable_truth, 'three_js_source')
 assert.deepEqual(byId.get('lux-important-module-multiview')?.must_call_one_of, ['CreateObject3D'])
 assert.equal(byId.get('lux-important-module-multiview')?.reference_image_count, 2)
 assert.deepEqual(byId.get('lux-important-module-multiview')?.must_not_call, ['CreateWorld3D'])
+const reconstruction = byId.get('photo-memory-reconstruction')
+assert.deepEqual(reconstruction?.must_call_in_order, ['GenerateImage', 'CreateObject3D', 'RunSceneCode', 'PublishSceneBuild'])
+assert.equal(reconstruction?.scene_concepts_before_asset_references, true)
+assert.equal(reconstruction?.reference_images_show_one_asset_each, true)
+assert.equal(reconstruction?.published_scene_uses_generated_glbs, true)
+assert.equal(reconstruction?.preserve_photo_memory_inference_distinction, true)
 assert.equal(byId.get('parallel-asset-fanout')?.must_create_agents_min, 2)
 assert.equal(byId.get('parallel-asset-fanout')?.single_scene_mutation_owner, true)
 assert.equal(byId.get('parallel-asset-fanout')?.must_not_reject_due_to_project_slot_limit, true)
@@ -86,7 +94,7 @@ assert.equal(byId.get('async-spatial-published-notification')?.notification_kind
 assert.equal(byId.get('async-spatial-published-notification')?.same_tool_use_second_result_forbidden, true)
 assert.equal(byId.get('async-spatial-published-notification')?.duplicate_terminal_delivery_count, 1)
 assert.equal(byId.get('two-ready-assets-serialized-placement')?.single_scene_mutation_owner, true)
-assert.equal(byId.get('two-ready-assets-serialized-placement')?.expected_final_scene_version, 6)
+assert.equal(byId.get('two-ready-assets-serialized-placement')?.published_scene_contains_both_assets, true)
 assert.deepEqual(
   record(
     byId.get('lux-important-module-multiview')?.forbidden_tool_fields,

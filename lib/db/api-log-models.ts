@@ -1,4 +1,5 @@
 import mongoose, { Schema, type Model } from 'mongoose'
+import type { LLMStreamDiagnostics } from '../agent/llm-api'
 
 // ==================== API Call Log ====================
 
@@ -22,6 +23,7 @@ export interface APICallLogDoc {
   duration_ms: number
   status: 'success' | 'error' | 'aborted'
   error_message?: string
+  stream_diagnostics?: LLMStreamDiagnostics
   tool_calls: string[]
   turn_number: number
   request_body: unknown
@@ -52,6 +54,7 @@ const APICallLogSchema = new Schema<APICallLogDoc>(
     duration_ms: { type: Number, default: 0 },
     status: { type: String, enum: ['success', 'error', 'aborted'], default: 'success' },
     error_message: { type: String },
+    stream_diagnostics: { type: Schema.Types.Mixed },
     tool_calls: { type: [String], default: [] },
     turn_number: { type: Number, default: 0 },
     request_body: { type: Schema.Types.Mixed },
@@ -86,6 +89,7 @@ APICallLogSchema.index(
 function apiCallLogModel(): Model<APICallLogDoc> {
   const existing = mongoose.models.APICallLog as Model<APICallLogDoc> | undefined
   if (!existing) return mongoose.model<APICallLogDoc>('APICallLog', APICallLogSchema)
+  if (!existing.schema.path('stream_diagnostics')) existing.schema.add({ stream_diagnostics: { type: Schema.Types.Mixed } })
 
   // Next.js development keeps compiled models across module reloads. Patch
   // additive fields so strict mode does not silently discard V1 attribution

@@ -1,6 +1,6 @@
-import { assertSafeDemoEnvironment } from './demo-local'
+import { assertSafeLocalEnvironment } from './demo-local'
 
-// demo:status runs this validation in a child process because the shared
+// local:status runs this validation in a child process because the shared
 // startup checker deliberately terminates on invalid production-style config.
 // The parent reports only readiness, never captured environment values.
-assertSafeDemoEnvironment()
+assertSafeLocalEnvironment()

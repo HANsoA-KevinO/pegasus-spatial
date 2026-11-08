@@ -13,7 +13,7 @@ import {
   type SpatialCommandScope,
   type SpatialToolResultEnvelope,
 } from '../spatial'
-import { ensureProviderImageDeliveryUrl } from '../media/storage'
+import { resolveSpatialReferenceUrl } from '../media/storage'
 import type { RasterAssetRef, ToolResult } from '../types'
 import { normalizeWorkspacePath } from '../workspace/path-policy'
 import type { WorkspaceInstance } from '../workspace/types'
@@ -77,7 +77,7 @@ export interface SpatialToolDependencies {
     artifactId: string
     scope: SpatialCommandScope
   }): Promise<SpatialToolResultEnvelope>
-  resolveProviderRasterUrl(asset: RasterAssetRef): Promise<string>
+  resolveProviderRasterUrl(asset: RasterAssetRef): Promise<string | undefined>
   now(): Date
 }
 
@@ -95,7 +95,7 @@ const defaultDependencies: SpatialToolDependencies = {
   getSpatialJobResult,
   waitSpatialJobResult,
   inspectSpatialArtifactResult,
-  resolveProviderRasterUrl: asset => ensureProviderImageDeliveryUrl(asset.assetId),
+  resolveProviderRasterUrl: asset => resolveSpatialReferenceUrl(asset.assetId),
   now: () => new Date(),
 }
 
@@ -206,17 +206,15 @@ function scopeFor(context: AgentExecutionContext): SpatialCommandScope {
   }
 }
 
-function providerUrlFromAsset(asset: RasterAssetRef): string {
-  const raw = asset.urls.original || asset.urls.model
-  if (!raw) throw new Error(`图片资产 ${asset.assetId} 没有可供空间供应商读取的 URL。`)
+function providerUrlFromAsset(assetId: string, raw: string): string {
   let url: URL
   try {
     url = new URL(raw)
   } catch {
-    throw new Error(`图片资产 ${asset.assetId} 尚未映射到可访问的绝对 URL。`)
+    throw new Error(`图片资产 ${assetId} 尚未映射到可访问的绝对 URL。`)
   }
   if (url.protocol !== 'https:' || url.username || url.password) {
-    throw new Error(`图片资产 ${asset.assetId} 必须映射为无内嵌凭证的公网 HTTPS URL。`)
+    throw new Error(`图片资产 ${assetId} 必须映射为无内嵌凭证的公网 HTTPS URL。`)
   }
   return url.toString()
 }
@@ -225,7 +223,7 @@ async function resolveAuthorizedRaster(
   workspace: WorkspaceInstance,
   rawPath: string,
   dependencies: SpatialToolDependencies,
-): Promise<{ path: string; assetId: string; url: string }> {
+): Promise<{ path: string; assetId: string; url?: string }> {
   let path: string
   try {
     path = normalizeWorkspacePath(rawPath)
@@ -234,8 +232,8 @@ async function resolveAuthorizedRaster(
   }
   const first = await workspace.readRaster(path)
   if (!first) throw new Error(`Workspace 中不存在可用图片：${path}`)
-  const providerAsset = { ...first, urls: { ...first.urls, original: await dependencies.resolveProviderRasterUrl(first) } }
-  const url = providerUrlFromAsset(providerAsset)
+  const resolvedUrl = await dependencies.resolveProviderRasterUrl(first)
+  const url = resolvedUrl === undefined ? undefined : providerUrlFromAsset(first.assetId, resolvedUrl)
   // Guard against a path being revised while this invocation is resolving its
   // provider input. The frozen asset identity must match the frozen URL.
   const current = await workspace.readRaster(path)
@@ -335,8 +333,10 @@ export async function executeCreateObject3D(
           output_formats: ['glb', 'ply'],
           ...(references.length
             ? {
-                source_image_urls: references.map(reference => reference.url),
                 source_asset_ids: references.map(reference => reference.assetId),
+                ...(references.every(reference => reference.url)
+                  ? { source_image_urls: references.map(reference => reference.url) }
+                  : { source_image_transport: 'provider_asset' }),
               }
             : {}),
         },
@@ -384,7 +384,10 @@ export async function executeCreateWorld3D(
         ...(source ? { source_image_path: source.path } : {}),
         provider_options: {
           ...(source
-            ? { source_image_url: source.url, source_asset_id: source.assetId }
+            ? {
+                source_asset_id: source.assetId,
+                ...(source.url ? { source_image_url: source.url } : { source_image_transport: 'provider_asset' }),
+              }
             : {}),
         },
       },

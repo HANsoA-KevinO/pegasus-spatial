@@ -232,7 +232,7 @@ export async function inspectRasterContent(buffer: Buffer, claimedMimeType?: str
   width: number
   height: number
 }> {
-  let metadata: sharp.Metadata
+  let metadata: Awaited<ReturnType<ReturnType<typeof sharp>['metadata']>>
   try {
     metadata = await sharp(buffer, { animated: true }).metadata()
   } catch {
@@ -689,6 +689,12 @@ export async function ensureProviderImageDeliveryUrl(assetId: string): Promise<s
     }
   }
   return buildOSSObjectPublicUrl(aliasKey)
+}
+
+/** Local mode leaves reference bytes for the provider worker to upload on demand. */
+export async function resolveSpatialReferenceUrl(assetId: string): Promise<string | undefined> {
+  if (getMediaStorageDriver() === 'gridfs') return undefined
+  return ensureProviderImageDeliveryUrl(assetId)
 }
 
 export async function getOwnedImageAsset(

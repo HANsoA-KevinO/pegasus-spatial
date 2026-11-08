@@ -9,7 +9,7 @@ import { WorkspaceDefinition } from '../../types'
  */
 export const spatialCreationWorkspace: WorkspaceDefinition = {
   name: 'spatial-creation',
-  description: '图像、3D 物体、Aholo World、修订血缘与可观察评审工作区',
+  description: 'Three.js 源码场景、图像、3D 资产、构建版本与可观察评审工作区',
   policy: {
     allowedRoots: ['output', 'analysis', 'notes', 'references', '.sci-pegasus'],
     internalRoot: '.sci-pegasus',
@@ -40,9 +40,24 @@ export const spatialCreationWorkspace: WorkspaceDefinition = {
         resolver: { type: 'field', field: 'output.spatial.worlds' },
       },
       {
-        path: 'output/spatial/scenes/<scene-id>/scene.json',
-        description: '可由 Agent 使用 Write/Edit 维护并通过 ApplySceneSpec 原子应用的声明式 Scene 源文件',
+        path: 'output/spatial/scenes/<scene-id>/main.ts',
+        description: 'Three.js 场景入口；Write/Edit 多文件源码，RunSceneCode 执行候选，PublishSceneBuild 原子发布',
         resolver: { type: 'field', field: 'output.spatial.scenes' },
+      },
+      {
+        path: 'output/spatial/scenes/<scene-id>/assets.json',
+        description: '源码工程的授权 GLB、纹理、PLY/SPZ 与数据资产清单',
+        resolver: { type: 'field', field: 'output.spatial.scene_assets' },
+      },
+      {
+        path: 'output/spatial/scenes/<scene-id>/checks.json',
+        description: '用户明确的必需空间条件与可选诊断；几何检查不能代替视觉判断',
+        resolver: { type: 'field', field: 'output.spatial.scene_checks' },
+      },
+      {
+        path: 'output/spatial/builds/<build-id>/views/<view-id>.png',
+        description: '绑定不可变构建、相机与时间的工程视图和截图证据',
+        resolver: { type: 'field', field: 'output.spatial.build_views' },
       },
       {
         path: 'output/spatial/reviews/<artifact-id>.md',

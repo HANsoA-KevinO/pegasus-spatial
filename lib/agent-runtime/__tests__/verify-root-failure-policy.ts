@@ -2,10 +2,17 @@ import assert from 'node:assert/strict'
 import {
   agentRunFailureSignature,
   classifyAgentRunFailure,
+  isRecoverableModelStreamFailure,
 } from '../failure-policy'
+import { LLMStreamError, type LLMStreamDiagnostics } from '../../agent/llm-api'
 import { teamAgentStatusAfterRun } from '../runner'
 
 function main(): void {
+  const interrupted = new LLMStreamError('incomplete response', { code: 'incomplete_message' } as LLMStreamDiagnostics)
+  assert.equal(isRecoverableModelStreamFailure(interrupted, true, false), true)
+  assert.equal(isRecoverableModelStreamFailure(interrupted, true, true), false, 'explicit cancellation must win')
+  assert.equal(isRecoverableModelStreamFailure(interrupted, false, false), false, 'an uncertain tool execution must not be retried as a model request')
+  assert.equal(isRecoverableModelStreamFailure(new LLMStreamError('malformed response', { code: 'protocol_error' } as LLMStreamDiagnostics), true, false), false)
   assert.deepEqual(
     classifyAgentRunFailure(
       new TypeError("Cannot read properties of undefined (reading 'length')"),

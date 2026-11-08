@@ -3,7 +3,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ImageAttachment, ModelProvider } from '@/lib/types'
 import { useChat, type ChatMessage } from '@/hooks/useChat'
-import { buildArtifactsFromDB, useWorkspaceArtifacts, type WorkspaceArtifact } from '@/hooks/useWorkspaceArtifacts'
+import {
+  buildArtifactsFromDB,
+  useWorkspaceArtifacts,
+  type WorkspaceArtifact,
+} from '@/hooks/useWorkspaceArtifacts'
+import {
+  isSpatialPreviewArtifact,
+  latestSpatialPreview,
+  spatialPreviewRevision,
+} from '@/components/workspace/latest-spatial-preview'
 import {
   ROOT_AGENT_RUN_EVENT,
   type RootAgentRunEventDetail,
@@ -36,6 +45,7 @@ interface ChatContextValue {
   ) => void
   stopGeneration: () => void
   loadConversation: (id: string) => void
+  refreshWorkspaceArtifacts: (id: string) => Promise<void>
   answerQuestion: (answer: string) => void
   resetChat: () => void
   artifacts: WorkspaceArtifact[]
@@ -58,7 +68,7 @@ interface ChatContextValue {
 const ChatContext = createContext<ChatContextValue | null>(null)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const [model, setModel] = useState<ModelProvider>('main_standard')
+  const [model, setModel] = useState<ModelProvider>('main_pro')
   // Legacy metadata remains readable for existing projects, but new Spatial
   // conversations no longer invent a user-facing "creation context" choice.
   const [researchDomain, setResearchDomain] = useState('')
@@ -68,6 +78,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [activeArtifactPath, setActiveArtifactPathState] = useState<string | null>(null)
   const [activeSceneId, setActiveSceneIdState] = useState<string | null>(null)
   const previousConversationIdRef = useRef<string | null>(null)
+  const observedSpatialHeadsRef = useRef<{
+    conversationId: string | null
+    revisions: Map<string, string>
+  }>({ conversationId: null, revisions: new Map() })
   const handleConversationLoaded = useCallback((settings: {
     orchestrator_model?: string
     research_domain?: string
@@ -134,8 +148,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [chat.conversationId])
 
   // The active file belongs to a project, not to the global application. A
-  // project switch restores its last file without letting newly streamed files
-  // steal focus from whatever the user is currently reading.
+  // project switch restores its last file; a genuinely new spatial revision
+  // is handled separately below and becomes the live workspace preview once.
   useEffect(() => {
     const nextConversationId = chat.conversationId
     const changedProject = previousConversationIdRef.current !== nextConversationId
@@ -175,6 +189,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       let savedPath: string | null = null
       try { savedPath = localStorage.getItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${chat.conversationId}`) } catch { /* ignore */ }
       const preferred = artifacts.find(artifact => artifact.path === savedPath)
+        ?? latestSpatialPreview(artifacts)
         ?? artifacts.find(artifact => artifact.path === 'output/research-report.md')
         ?? artifacts.find(artifact => artifact.path === 'analysis/research-scope.md')
         ?? artifacts[0]
@@ -182,6 +197,37 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return preferred.path
     })
   }, [activeSceneId, artifacts, chat.conversationId])
+
+  // Auto-present only a newly published image/model/world revision. Repeated
+  // status polling produces the same revision fingerprint and therefore never
+  // keeps stealing focus after the user manually opens another file.
+  useEffect(() => {
+    const conversationId = chat.conversationId
+    const previews = artifacts.filter(isSpatialPreviewArtifact)
+    const nextRevisions = new Map(
+      previews.map(artifact => [artifact.path, spatialPreviewRevision(artifact)]),
+    )
+    const observed = observedSpatialHeadsRef.current
+    if (!conversationId || observed.conversationId !== conversationId) {
+      observedSpatialHeadsRef.current = { conversationId, revisions: nextRevisions }
+      return
+    }
+
+    const changed = previews.filter(artifact => (
+      observed.revisions.get(artifact.path) !== nextRevisions.get(artifact.path)
+    ))
+    observedSpatialHeadsRef.current = { conversationId, revisions: nextRevisions }
+    const latest = latestSpatialPreview(changed)
+    if (!latest) return
+
+    setActiveSceneIdState(null)
+    setActiveArtifactPathState(latest.path)
+    setSidebarView('files')
+    try {
+      localStorage.setItem(`${ACTIVE_ARTIFACT_KEY_PREFIX}${conversationId}`, latest.path)
+      localStorage.removeItem(`${ACTIVE_SCENE_KEY_PREFIX}${conversationId}`)
+    } catch { /* localStorage may be unavailable in privacy modes */ }
+  }, [artifacts, chat.conversationId])
   const showWorkspace = Boolean(activeSceneId) || artifacts.length > 0 || (chat.isLoading && chat.hasMutatorStarted)
   const inFlightPaths = useMemo(() => {
     const result = new Set<string>()
@@ -234,6 +280,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     sendMessage: chat.sendMessage,
     stopGeneration: chat.stopGeneration,
     loadConversation: chat.loadConversation,
+    refreshWorkspaceArtifacts: chat.refreshWorkspaceArtifacts,
     answerQuestion: chat.answerQuestion,
     resetChat: chat.resetChat,
     artifacts,
@@ -255,7 +302,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     model, researchDomain, chat.messages, chat.isLoading, chat.isLoadingConversation,
     chat.conversationId, chat.contextUsage, chat.runningConversationIds,
     chat.waitingForUserIds, chat.sendMessage, chat.stopGeneration,
-    chat.loadConversation, chat.answerQuestion, chat.resetChat,
+    chat.loadConversation, chat.refreshWorkspaceArtifacts, chat.answerQuestion, chat.resetChat,
     artifacts, showWorkspace, activeArtifactPath, setActiveArtifactPath,
     activeSceneId, setActiveSceneId,
     inFlightPaths, quotedSelection, sidebarCollapsed, sidebarView,

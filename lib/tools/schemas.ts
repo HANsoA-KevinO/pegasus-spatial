@@ -1,7 +1,10 @@
 import { ToolSchema } from '../types'
+import { sceneCodeToolSchemas } from '../scene-code/tool-schemas'
+import { SCENE_CODE_TOOL_NAMES, RETIRED_SCENE_EDIT_TOOLS } from '../scene-code/types'
 
 /** Wildcard delegation never expands to these capabilities. Root may grant them explicitly. */
 export const EXPLICIT_SPATIAL_DELEGATION_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ...SCENE_CODE_TOOL_NAMES,
   'GenerateImage',
   'CreateObject3D',
   'CreateWorld3D',
@@ -33,6 +36,7 @@ const MATERIAL_RESEARCH_TOOL_NAMES: ReadonlySet<string> = new Set([
 ])
 
 const allToolSchemas: ToolSchema[] = [
+  ...sceneCodeToolSchemas,
   {
     name: 'Read',
     description: `Read a text, raster, or document entry from the workspace, or a reference file exposed by a loaded Skill.
@@ -151,7 +155,7 @@ Use this when a requested spatial outcome benefits from a visual reference, or w
     name: 'CreateObject3D',
     description: `Queue one durable Lux3D object build and return immediately with its persistent Job identity.
 
-The normal path is one clean canonical reference image. At least one of prompt or reference_image_paths is required; both may be provided. Use 2–4 ordered references only as an explicit recovery path after a real single-view result exposes unacceptable hidden-side ambiguity, or when the user specifically requests multi-view reconstruction. The build publishes a standalone editable GLB, optional high-quality PLY and manifest. A prepared result means the local durable queue accepted the request, not that Lux3D has accepted it yet. Continue independent work; a terminal completion reminder is delivered automatically. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
+Provide a prompt, 1–4 authorized reference_image_paths, or both. For an image-conditioned build, use one clean canonical view of the target asset. Add consistent views of that same asset when other sides, openings, or support geometry matter. Order the main view first. Each image should show the isolated asset from one viewpoint. With multiple views, the provider receives the images without the prompt. The build publishes a standalone editable GLB, optional high-quality PLY and manifest. A prepared result means the local durable queue accepted the request, not that Lux3D has accepted it yet. Continue independent work; a terminal completion reminder is delivered automatically. Root owns it by default and may explicitly delegate it; wildcard delegation never grants it.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -203,77 +207,10 @@ At least one of prompt or source_image_path is required; both may be provided. A
   },
   {
     name: 'CreateSpatialScene',
-    description: 'Create a versioned editable Scene, optionally from one already-published World Job. Revision identities are managed automatically.',
+    description: 'Create a source-first Three.js Scene and prepare its multi-file code project. Returns entry_path, assets_path and checks_path for immediate Write/Edit. Add authorized assets through assets.json and source; no declarative Scene mutations. Revision identities are managed automatically.',
     input_schema: { type: 'object', additionalProperties: false, properties: {
       title: { type: 'string', minLength: 1, maxLength: 160 },
-      world_job_id: { type: 'string', minLength: 1, maxLength: 160 },
     }, required: ['title'] },
-  },
-  {
-    name: 'SetSceneEnvironment',
-    description: 'Set an authorized Workspace image as the Scene equirectangular panorama environment. This is the normal far-field sky and horizon layer; it does not create geometry or a walkable surface.',
-    input_schema: { type: 'object', additionalProperties: false, properties: {
-      scene_id: { type: 'string', minLength: 1, maxLength: 160 },
-      image_path: { type: 'string', minLength: 1, description: 'Authorized Workspace panorama image path. Prefer a seamless 2:1 equirectangular image.' },
-      yaw_deg: { type: 'number', description: 'Optional horizontal panorama rotation in degrees.' },
-      exposure: { type: 'number', exclusiveMinimum: 0, maximum: 8 },
-      observation_id: { type: 'string', maxLength: 160 },
-    }, required: ['scene_id', 'image_path'] },
-  },
-  {
-    name: 'SetSceneWorld',
-    description: 'Replace the whole immutable 3DGS World background of a Scene with one published World Job. This does not locally edit 3DGS semantics.',
-    input_schema: { type: 'object', additionalProperties: false, properties: {
-      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, world_job_id: { type: 'string', minLength: 1, maxLength: 160 }, observation_id: { type: 'string', maxLength: 160 },
-    }, required: ['scene_id', 'world_job_id'] },
-  },
-  {
-    name: 'AddSceneObject',
-    description: 'Add the published standalone GLB from an Object Job to a Scene using an absolute three-axis transform.',
-    input_schema: { type: 'object', additionalProperties: false, properties: {
-      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, object_job_id: { type: 'string', minLength: 1, maxLength: 160 }, label: { type: 'string', maxLength: 160 },
-      position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
-      rotation_deg: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
-      scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number', exclusiveMinimum: 0 } },
-      observation_id: { type: 'string', maxLength: 160 },
-    }, required: ['scene_id', 'object_job_id'] },
-  },
-  {
-    name: 'AddSceneTerrain',
-    description: 'Add a published Lux GLB as a terrain, foundation, road, plaza, mountain or other large editable Scene module. Terrain remains an ordinary transformable Lux asset but is eligible for real mesh surface queries.',
-    input_schema: { type: 'object', additionalProperties: false, properties: {
-      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, object_job_id: { type: 'string', minLength: 1, maxLength: 160 }, label: { type: 'string', maxLength: 160 },
-      position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
-      rotation_deg: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
-      scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number', exclusiveMinimum: 0 } },
-      observation_id: { type: 'string', maxLength: 160 },
-    }, required: ['scene_id', 'object_job_id'] },
-  },
-  {
-    name: 'TransformSceneObject',
-    description: 'Set an existing object instance to absolute position, Euler XYZ rotation in degrees, and/or positive XYZ scale. At least one of position, rotation_deg, or scale is required. Inspect first; do not use vague relative motion.',
-    input_schema: { type: 'object', additionalProperties: false, properties: {
-      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, instance_id: { type: 'string', minLength: 1, maxLength: 160 },
-      position: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, rotation_deg: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } }, scale: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number', exclusiveMinimum: 0 } }, observation_id: { type: 'string', maxLength: 160 },
-    }, required: ['scene_id', 'instance_id'] },
-  },
-  {
-    name: 'RemoveSceneObject',
-    description: 'Remove one GLB object instance from the current Scene and create a new automatic revision.',
-    input_schema: { type: 'object', additionalProperties: false, properties: {
-      scene_id: { type: 'string', minLength: 1, maxLength: 160 }, instance_id: { type: 'string', minLength: 1, maxLength: 160 }, observation_id: { type: 'string', maxLength: 160 },
-    }, required: ['scene_id', 'instance_id'] },
-  },
-  {
-    name: 'ApplySceneSpec',
-    description: `Compile and atomically apply one declarative Scene JSON file from the Workspace.
-
-Use this as the default authoring interface for multi-object layout. Each node uses exactly one published object_job_id or a procedural proxy (box, cylinder, or arch with dimensions, colour and material semantics). Maintain stable semantic node keys and absolute positions/rotations. Published objects use explicit scale or one target fit dimension; proxies use explicit dimensions and do not require a Job. The nodes array is the complete desired object set: omitted nodes are removed. One successful apply creates exactly one automatic revision. The JSON's expected_scene_version provides optimistic locking; inspect and update the file after scene_changed.`,
-    input_schema: { type: 'object', additionalProperties: false, properties: {
-      scene_id: { type: 'string', minLength: 1, maxLength: 160 },
-      spec_path: { type: 'string', pattern: '^output/spatial/scenes/[a-zA-Z0-9][a-zA-Z0-9._/-]*\\.json$', description: 'Authorized Workspace JSON file containing schema_version, scene_id, expected_scene_version, optional environment, and the complete nodes array.' },
-      observation_id: { type: 'string', maxLength: 160 },
-    }, required: ['scene_id', 'spec_path'] },
   },
   {
     name: 'InspectSpatialScene',
@@ -284,7 +221,7 @@ Use this as the default authoring interface for multi-object layout. Each node u
   },
   {
     name: 'RestoreSpatialScene',
-    description: 'Clone a historical Scene version into a new current revision. History is never overwritten or rewound.',
+    description: 'Restore a published code-build version into a new current revision. Draft/declarative versions cannot be restored; history is never overwritten or rewound.',
     input_schema: { type: 'object', additionalProperties: false, properties: {
       scene_id: { type: 'string', minLength: 1, maxLength: 160 }, revision_version: { type: 'integer', minimum: 1 },
     }, required: ['scene_id', 'revision_version'] },
@@ -305,18 +242,18 @@ Use this as the default authoring interface for multi-object layout. Each node u
   },
   {
     name: 'CaptureSceneView',
-    description: 'Ask an active browser Stage to render the real Scene from the Agent camera and return the captured PNG as model-visible media. Returns viewer_unavailable when no Stage is open.',
+    description: 'Capture a published immutable code scene from the Agent camera using the headless renderer. Returns actual PNG media bound to build, revision and time; no user stage is required. Use RenderSceneViews for candidate builds or engineering views.',
     input_schema: { type: 'object', additionalProperties: false, properties: {
       scene_id: { type: 'string', minLength: 1, maxLength: 160 }, note: { type: 'string', maxLength: 1000 },
     }, required: ['scene_id'] },
   },
   {
     name: 'QuerySceneSurface',
-    description: 'Raycast downward against one loaded Lux terrain GLB in the active browser Stage and return the real mesh hit point. Use the returned absolute point when placing another object; never guess terrain height from image appearance or bounds.',
+    description: 'Raycast downward against an object key in the published immutable code build using the headless renderer. Use actual hits to author placement in source; never guess height from images or bounds. Use QuerySceneGeometry for candidate builds or batched queries.',
     input_schema: { type: 'object', additionalProperties: false, properties: {
       scene_id: { type: 'string', minLength: 1, maxLength: 160 },
       terrain_instance_id: { type: 'string', minLength: 1, maxLength: 160 },
-      horizontal: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' }, description: 'Two coordinates on the terrain horizontal plane: X/Y for Z-up Scenes, X/Z for legacy Y-up Scenes.' },
+      horizontal: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' }, description: 'Two coordinates on the Z-up scene horizontal plane: X/Y.' },
       cast_height: { type: 'number', exclusiveMinimum: 0, description: 'Optional origin along the Scene up axis. Defaults to a safely high value.' },
     }, required: ['scene_id', 'terrain_instance_id', 'horizontal'] },
   },
@@ -1221,7 +1158,7 @@ Do not close an Agent merely because it answered or finished one Task. A natural
  * this one function so the main request, compaction fork and token accounting
  * share an identical tool prefix.
  */
-export const toolSchemas: ToolSchema[] = allToolSchemas
+export const toolSchemas: ToolSchema[] = allToolSchemas.filter(schema => !RETIRED_SCENE_EDIT_TOOLS.has(schema.name))
 
 export function getToolSchemasForCapabilities(options: {
   supportsVision: boolean

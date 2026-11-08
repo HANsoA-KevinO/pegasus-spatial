@@ -16,6 +16,7 @@ import {
 } from './compaction'
 import { processImageForContext } from './image-resizer'
 import { tokenTracker } from './token-tracker'
+import { queuedImageBlock } from '../workspace/uploaded-image'
 import {
   acknowledgeDequeuedMessages,
   dequeueMessages,
@@ -49,7 +50,7 @@ import {
   rejectedToolInputResultMessage,
   type ToolInputRejection,
 } from './tool-input-boundary'
-import { isPromptTooLongLLMError } from './llm-api'
+import { isPromptTooLongLLMError, LLMStreamError } from './llm-api'
 
 // ==================== Interfaces ====================
 
@@ -1440,10 +1441,11 @@ export async function agentLoop(
           conversation_id: options.conversationId,
           source: 'agent-loop',
           model: options.model || 'unknown',
-          usage: { input_tokens: 0, output_tokens: 0 },
+          usage: err instanceof LLMStreamError && err.usage ? err.usage : { input_tokens: 0, output_tokens: 0 },
           duration_ms: llmDuration,
           status: 'error',
           error_message: errMsg,
+          stream_diagnostics: err instanceof LLMStreamError ? err.diagnostics : undefined,
           turn_number: turnCount,
           request_body: request,
           response: null,
@@ -1852,17 +1854,7 @@ export async function agentLoop(
             if (qm.images?.length) {
               for (const img of qm.images) {
                 if ('assetId' in img) {
-                  queuedContent.push({
-                      type: 'image',
-                      source: {
-                        type: 'asset',
-                        asset_id: img.assetId,
-                        media_type: img.mimeType,
-                        ...(img.storageDriver ? { storage_driver: img.storageDriver } : {}),
-                        width: img.width,
-                        height: img.height,
-                      },
-                  })
+                  queuedContent.push(await queuedImageBlock(options.workspace, img, options.userId, options.conversationId))
                 } else {
                   queuedContent.push({
                       type: 'image',

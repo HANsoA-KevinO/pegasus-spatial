@@ -292,6 +292,32 @@ await workspace.writeRaster('output/spatial/images/insecure-http.png', insecureR
 
 {
   const state = setupDependencies()
+  state.dependencies.resolveProviderRasterUrl = async () => undefined
+  const runtime = { executionContext: rootContext, invocation, dependencies: state.dependencies }
+  const object = await executeCreateObject3D({
+    reference_image_paths: ['output/spatial/images/chair.png', 'output/spatial/images/chair-back.png'],
+    output_path_prefix: 'output/spatial/objects/local-references',
+  }, workspace, runtime)
+  assert.equal(parsed(object.content).status, 'prepared')
+  assert.deepEqual(state.prepared[0].request.provider_options, {
+    version: 'G1-Turbo',
+    output_formats: ['glb', 'ply'],
+    source_asset_ids: ['asset_chair', 'asset_chair_back'],
+    source_image_transport: 'provider_asset',
+  })
+  const world = await executeCreateWorld3D({
+    source_image_path: 'output/spatial/images/room.png',
+    output_path_prefix: 'output/spatial/worlds/local-reference',
+  }, workspace, runtime)
+  assert.equal(parsed(world.content).status, 'prepared')
+  assert.deepEqual(state.prepared[1].request.provider_options, {
+    source_asset_id: 'asset_room',
+    source_image_transport: 'provider_asset',
+  })
+}
+
+{
+  const state = setupDependencies()
   const result = await executeCreateWorld3D({
     source_image_path: 'output/spatial/images/room.png',
     output_path_prefix: 'output/spatial/worlds/reading-room-v1',

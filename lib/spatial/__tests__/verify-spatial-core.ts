@@ -25,6 +25,7 @@ import {
 } from '..'
 import { assertSpatialStatusTransition } from '../state-machine'
 import { createLux3DOfficialG1WireContract } from '../adapters/official-contracts'
+import { materializeSpatialReferenceUrls } from '../adapters/provider-reference-images'
 
 const resolvePublicFixtureHostname = async (): Promise<readonly string[]> => ['93.184.216.34']
 
@@ -734,10 +735,84 @@ async function verifyStableToolResult(): Promise<void> {
   })), null)
 }
 
+async function verifyLocalLuxReferenceUpload(): Promise<void> {
+  const ids = ['front', 'back']
+  const blockSize = 1024 * 1024
+  const localJob = job({
+    provider: 'lux3d',
+    request_snapshot: {
+      output_path_prefix: 'output/spatial/objects/local-fixture',
+      provider_options: { source_image_transport: 'provider_asset', source_asset_ids: ids, version: 'G1-Turbo' },
+    },
+  })
+  const before = structuredClone(localJob)
+  const read: string[] = []
+  const uploaded: string[] = []
+  const transientJob = await materializeSpatialReferenceUrls(localJob, {
+    base: new URL('https://api.aholo3d.cn'),
+    token: 'lux-key',
+    async readReference(id, scopedJob) {
+      assert.equal(scopedJob.conversation_id, 'conversation')
+      assert.equal(scopedJob.user_id, 'user')
+      read.push(id)
+      const buffer = id === 'back' ? Buffer.concat([Buffer.alloc(blockSize), Buffer.from(id)]) : Buffer.from(id)
+      return { buffer, mimeType: 'image/png', filename: 'reference.png' }
+    },
+    async fetchImpl(input, init) {
+      const request = new Request(input, init)
+      const url = new URL(request.url)
+      if (url.pathname === '/asset/v1/token') {
+        assert.equal(request.headers.get('Authorization'), 'lux-key')
+        return Response.json({ ousToken: 'fixture-ous', globalDomain: 'https://ous-cos.kujiale.com', blockSize })
+      }
+      assert.equal(url.hostname, 'ous-cos.kujiale.com')
+      assert.equal(request.headers.get('ous-token-v2'), 'fixture-ous')
+      assert.equal(request.headers.has('Authorization'), false)
+      if (url.pathname === '/ous/api/v2/single/upload') {
+        const form = await request.formData()
+        const file = form.get('file')
+        assert.ok(file instanceof Blob)
+        uploaded.push(await file.text())
+        return Response.json({ c: 0 })
+      }
+      if (url.pathname === '/ous/api/v2/block/upload/init') {
+        assert.equal(request.method, 'POST')
+        assert.equal(request.body, null)
+        assert.equal(url.searchParams.get('blocks'), '2')
+        assert.equal(url.searchParams.get('size'), String(blockSize + 4))
+        assert.equal(url.searchParams.get('name'), 'reference.png')
+        assert.match(url.searchParams.get('md5') ?? '', /^[a-f0-9]{32}$/)
+        return Response.json({ c: 0, d: { lackBlocks: ['2'] } })
+      }
+      if (url.pathname === '/ous/api/v2/block/upload/part') {
+        const form = await request.formData()
+        assert.equal(form.get('block'), '2')
+        const file = form.get('file')
+        assert.ok(file instanceof Blob)
+        uploaded.push(await file.text())
+        return Response.json({ c: 0 })
+      }
+      assert.equal(url.pathname, '/ous/api/v2/upload/status')
+      return Response.json({ c: 0, d: { status: 5, url: `https://qhstaticssl.kujiale.com/${uploaded.at(-1)}.png` } })
+    },
+  })
+  assert.deepEqual(read, ids)
+  assert.deepEqual(uploaded, ids)
+  assert.deepEqual(localJob, before)
+  assert.deepEqual(createLux3DOfficialG1WireContract().encodeSubmission(transientJob), {
+    imgs: ['https://qhstaticssl.kujiale.com/front.png', 'https://qhstaticssl.kujiale.com/back.png'],
+    version: 'G1-Turbo',
+    outputFormat: ['glb'],
+    faceCount: 200000,
+    enablePbr: true,
+  })
+}
+
 async function main(): Promise<void> {
   await verifyIdentityAndStateMachine()
   await verifyByteInspectionAndMirroring()
   await verifyAdaptersFailClosedAndUseFixtures()
+  await verifyLocalLuxReferenceUpload()
   await verifyStableToolResult()
   console.log('✓ Spatial durable core verification passed')
 }

@@ -65,6 +65,18 @@ function verifyLegalEstimateIsUnchanged(): void {
   })
 }
 
+function verifyImageBytesStayOutsideTheTextBudget(): void {
+  const data = 'A'.repeat(4_000_000)
+  const inline = { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png', data } }
+  const reference = { type: 'image' as const, source: { type: 'asset' as const, asset_id: 'A'.repeat(43), media_type: 'image/png' } }
+  const messagesFor = (image: typeof inline | typeof reference): ConversationMessage[] => [{
+    role: 'user',
+    content: [image, { type: 'tool_result', tool_use_id: 'read', content: [image] }],
+  }]
+  assert.equal(estimateTokens(messagesFor(inline)), 4_000)
+  assert.equal(estimateTokens(messagesFor(reference)), 4_000)
+}
+
 function verifyMalformedToolInputsUseSafeBudget(): void {
   const circular: Record<string, unknown> = { secret: 'secret-tool-input' }
   circular.self = circular
@@ -337,6 +349,7 @@ async function verifyReactiveCompactionRejectsRewriteWithoutHeadroom(): Promise<
 
 async function main(): Promise<void> {
   verifyLegalEstimateIsUnchanged()
+  verifyImageBytesStayOutsideTheTextBudget()
   verifyMalformedToolInputsUseSafeBudget()
   verifyPartialBlocksNeverCrashEstimator()
   verifyFoldingHandlesMalformedHistory()

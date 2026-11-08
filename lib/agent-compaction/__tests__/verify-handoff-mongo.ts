@@ -236,7 +236,7 @@ async function main(): Promise<void> {
     agent_id: 'handoff_member',
     model_alias_snapshot: 'main_pro',
     execution_mode: 'agent_session',
-    request: { message: 'member request', internal: { kind: 'task' } },
+    request: { message: 'member request', internal: { kind: 'task_wakeup' } },
     started_message_id: 'member_started',
   })
   const memberSnapshot = projectContext(3)

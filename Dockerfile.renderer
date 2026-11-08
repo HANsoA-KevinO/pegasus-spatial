@@ -1,0 +1,10 @@
+FROM mcr.microsoft.com/playwright:v1.64.1-noble
+WORKDIR /renderer
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+COPY scripts/scene-code-renderer.mjs ./scripts/scene-code-renderer.mjs
+ENV NODE_ENV=production SCENE_CODE_RENDERER_HOST=0.0.0.0 SCENE_CODE_RENDERER_PORT=3201
+USER pwuser
+EXPOSE 3201
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 CMD node -e "fetch('http://127.0.0.1:3201/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+CMD ["node", "scripts/scene-code-renderer.mjs"]

@@ -128,36 +128,36 @@ async function run(): Promise<void> {
   assert.match(guide.content, /确认前不得创建 3D 生产成员[^]*CreateObject3D[^]*CreateWorld3D/)
   assert.match(guide.content, /用户沉默[^]*Agent 自己写出的设计方案[^]*不构成确认/)
   assert.match(guide.content, /GenerateImage/)
-  assert.match(guide.content, /加载 `imagegen` Skill[^]*提示词结构[^]*输出检查/)
+  assert.match(guide.content, /生成图片前加载 `imagegen` Skill/)
   assert.match(guide.content, /CreateObject3D/)
   assert.match(guide.content, /CreateWorld3D/)
-  assert.match(guide.content, /Lux 环境模块[^]*地台、道路、庭院、建筑外壳/)
-  assert.match(guide.content, /远景、天空、包围式环境[^]*SetSceneEnvironment/)
-  assert.match(guide.content, /Lux 资产默认使用一张[^]*canonical 主视图/)
-  assert.match(guide.content, /只有背面、厚度、支撑或不对称结构[^]*补充视角/)
+  assert.match(guide.content, /Three.js 源码为真值[^]*组装 GLB[^]*细节补充/)
+  assert.match(guide.content, /可见天空或远景[^]*assets.json[^]*scene.background/)
+  assert.match(guide.content, /照片与口述还原新场景[^]*可见事实、口述细节和推测补全[^]*GenerateImage[^]*整体概念图[^]*单件参考图[^]*CreateObject3D[^]*GLB/)
+  assert.match(guide.content, /Lux 资产先用一张[^]*canonical 主视图[^]*在提交前从主图派生一致的补充视角/)
   assert.match(guide.content, /GetSpatialJob/)
   assert.match(guide.content, /WaitSpatialJob/)
   assert.match(guide.content, /prepared[^]*本地持久队列[^]*自动通知 Root/)
-  assert.match(guide.content, /2:1[^]*等距柱状[^]*scene_environment_panorama/)
+  assert.match(guide.content, /scene_environment_panorama[^]*新建室外场景[^]*概念确定后默认单独生成一张 2:1 等距柱状[^]*全封闭室内或局部修改按需处理/)
   assert.match(guide.content, /视觉观察[^]*不是代码级硬门槛[^]*不阻塞独立 Lux 工作/)
-  assert.match(guide.content, /QuerySceneSurface[^]*真实 GLB 网格/)
+  assert.match(guide.content, /真实 GLB 网格[^]*候选构建用 `QuerySceneGeometry`[^]*已发布构建可用无头 `QuerySceneSurface`/)
   assert.match(guide.content, /CreateWorld3D[^]*可选[^]*固定观察点[^]*不是默认环境链路/)
   assert.match(guide.content, /结果可用但不完美[^]*继续[^]*不确定性/)
   assert.doesNotMatch(guide.content, /检查合格后|任一项失败|提交前全景门禁/)
   assert.match(guide.content, /waiting_user[^]*3D 终态事件[^]*持久排队/)
-  assert.match(guide.content, /概念图经用户确认后[^]*多个独立资产[^]*多个 Asset Maker/)
+  assert.match(guide.content, /视觉基准明确后[^]*独立资产可并行委派给多个 Asset Maker/)
   assert.match(guide.content, /不设置项目级图片或 3D 任务数量上限/)
   assert.match(guide.content, /唯一 Scene Assembler[^]*串行修改/)
-  assert.match(guide.content, /scene\.json[^]*ApplySceneSpec[^]*完整期望状态/)
-  assert.match(guide.content, /fit\.width[^]*fit\.depth[^]*fit\.height/)
+  assert.match(guide.content, /PrepareSceneCode[^]*RunSceneCode[^]*PublishSceneBuild/)
+  assert.match(guide.content, /QuerySceneGeometry[^]*CheckSceneConstraints/)
   assert.match(guide.content, /AskUserQuestion/)
   assert.match(guide.content, /不因对话结束[^]*原样重放付费提交/)
   assert.match(guide.content, /output\/spatial\/objects\/<build-id>\//)
   assert.match(guide.content, /derived_from/)
   assert.match(guide.content, /verified[^]*inferred[^]*unknown/)
-  assert.match(guide.content, /Scene rotation[^]*GLB\/PLY[^]*本地坐标基错误/)
-  assert.match(guide.content, /重力方向[^]*支撑点[^]*承载面/)
-  assert.match(guide.content, /单张遮挡视图或包围盒[^]*不足以得出[^]*verified/)
+  assert.match(guide.content, /坐标基错误[^]*设计旋转/)
+  assert.match(guide.content, /承重姿态[^]*正面\/侧面\/俯视/)
+  assert.match(guide.content, /名称、树和包围盒不能证明空间正确/)
   assert.match(guide.content, /不宣称 CAD 精度[^]*真实尺度[^]*碰撞/)
   assert.match(guide.content, /最终交付默认使用简体中文/)
 
@@ -301,6 +301,7 @@ async function run(): Promise<void> {
       model: 'test-model',
       maxTokens: 2_000,
       temperature: 0,
+      supportsVision: false,
       executionContext: rootExecutionContext,
     },
     undefined,
@@ -313,9 +314,17 @@ async function run(): Promise<void> {
   )
   const request = agentProvider.buildRequest([{
     role: 'user',
-    content: [{ type: 'text', text: '开始任务' }],
+    content: [
+      {
+        type: 'image',
+        source: { type: 'asset', asset_id: 'fixture_asset', media_type: 'image/png' },
+        workspace_path: `references/uploads/${'a'.repeat(64)}.png`,
+      },
+      { type: 'text', text: '开始任务' },
+    ],
   }])
   assert.deepEqual(request.system, expectedSystem)
+  assert.match(JSON.stringify(request.messages), /references\/uploads\/[a-f0-9]{64}\.png[^]*input_image_path/)
   const rootSystemText = request.system.map((block: { text: string }) => block.text).join('\n')
   assert.match(rootSystemText, /优先复核冲突证据/)
   assert.match(rootSystemText, /面向用户的最终回复[^]*默认使用简体中文/)

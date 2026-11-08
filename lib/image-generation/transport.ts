@@ -42,6 +42,7 @@ export async function fetchImageGenerationJSON(input: {
   if (input.signal?.aborted) abortFromCaller()
 
   try {
+    if (controller.signal.aborted) throw abortReasonAsError(controller.signal)
     const response = await (input.fetchImpl ?? fetch)(input.url, {
       ...input.init,
       signal: controller.signal,

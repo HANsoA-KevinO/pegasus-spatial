@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import mongoose from 'mongoose'
 import {
-  assertSafeDemoEnvironment,
-  ensureDemoMongo,
-  startManagedDemoApp,
-  stopManagedDemoApp,
+  assertSafeLocalEnvironment,
+  ensureLocalMongo,
+  startManagedLocalApp,
+  stopManagedLocalApp,
 } from './demo-local'
 import { loadProjectEnv } from './load-project-env'
 import { seedSpatialUiFixture } from './spatial-ui-fixture'
@@ -59,8 +59,8 @@ async function main(): Promise<void> {
   const database = `pegasus_spatial_e2e_${suffix}`
   const mongoUri = e2eMongoUri(sourceMongoUri, database)
   process.env.MONGODB_URI = mongoUri
-  assertSafeDemoEnvironment({ allowE2eDatabase: true })
-  await ensureDemoMongo()
+  assertSafeLocalEnvironment({ allowE2eDatabase: true })
+  await ensureLocalMongo()
 
   let ownsApp = false
   let databaseCreated = false
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     databaseCreated = true
     const fixture = await seedSpatialUiFixture({ suffix })
 
-    const firstStart = await startManagedDemoApp(process.env)
+    const firstStart = await startManagedLocalApp(process.env)
     if (!firstStart.started) {
       throw new Error('端口 3200 已有 Pegasus Spatial；请先停止现有服务再运行重启 E2E。')
     }
@@ -79,12 +79,12 @@ async function main(): Promise<void> {
     // another database. Judge startup must never reuse any existing listener.
     let refusedExistingPort = false
     try {
-      await startManagedDemoApp(process.env)
+      await startManagedLocalApp(process.env)
     } catch (error) {
       refusedExistingPort = /拒绝接管/.test((error as Error).message)
     }
     if (!refusedExistingPort) {
-      throw new Error('演示启动器未拒绝复用已有的 3200 端口。')
+      throw new Error('本地启动器未拒绝复用已有的 3200 端口。')
     }
 
     runBrowserPhase({
@@ -93,11 +93,11 @@ async function main(): Promise<void> {
       suffix,
     })
 
-    await stopManagedDemoApp()
+    await stopManagedLocalApp()
     ownsApp = false
 
-    const secondStart = await startManagedDemoApp(process.env)
-    if (!secondStart.started) throw new Error('E2E 无法取得重启后的演示进程。')
+    const secondStart = await startManagedLocalApp(process.env)
+    if (!secondStart.started) throw new Error('E2E 无法取得重启后的本地进程。')
     ownsApp = true
     runBrowserPhase({
       phase: 'after-restart',
@@ -105,10 +105,10 @@ async function main(): Promise<void> {
       suffix,
     })
 
-    console.log('spatial-demo-e2e passed: direct local access, owner fence, refresh, Job card/API, process restart recovery')
+    console.log('spatial-local-e2e passed: direct local access, owner fence, refresh, Job card/API, process restart recovery')
     console.log('provider calls: 0 (terminal fixture records only)')
   } finally {
-    if (ownsApp) await stopManagedDemoApp().catch(() => undefined)
+    if (ownsApp) await stopManagedLocalApp().catch(() => undefined)
     if (databaseCreated) {
       const databaseHandle = mongoose.connection.db
       const activeDatabase = databaseHandle?.databaseName
@@ -126,6 +126,6 @@ async function main(): Promise<void> {
 }
 
 main().catch(error => {
-  console.error(`[spatial-demo-e2e] ${(error as Error).message}`)
+  console.error(`[spatial-local-e2e] ${(error as Error).message}`)
   process.exitCode = 1
 })

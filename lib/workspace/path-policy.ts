@@ -9,7 +9,7 @@ export const WORKSPACE_MAX_SEGMENT_LENGTH = 128
 const SUPPORTED_EXTENSIONS = new Set([
   'md', 'txt', 'json', 'jsonl', 'xml', 'svg', 'html', 'css', 'js', 'jsx', 'ts', 'tsx', 'csv',
   'png', 'jpg', 'jpeg', 'webp', 'gif',
-  'pdf', 'glb', 'gltf', 'ply', 'spz',
+  'pdf', 'glb', 'gltf', 'ply', 'spz', 'zip', 'glsl', 'vert', 'frag',
 ])
 
 export const LEGACY_INTERNAL_PATH_ALIASES: Readonly<Record<string, string>> = Object.freeze({})
@@ -18,7 +18,6 @@ const LEGACY_INTERNAL_PATHS = new Set(Object.keys(LEGACY_INTERNAL_PATH_ALIASES))
 const CANONICAL_TO_LEGACY_INTERNAL_PATH = new Map(
   Object.entries(LEGACY_INTERNAL_PATH_ALIASES).map(([legacy, canonical]) => [canonical, legacy]),
 )
-const LEGACY_VERSION_PATH = /(?:^|\/)[^/]+_v\d+\.[^/]+$/
 
 /** Normalize a path without weakening traversal checks. */
 export function normalizeWorkspacePath(input: string): string {
@@ -111,7 +110,6 @@ export function isInternalWorkspacePath(input: string): boolean {
   return normalized === '.sci-pegasus'
     || normalized.startsWith('.sci-pegasus/')
     || LEGACY_INTERNAL_PATHS.has(normalized)
-    || LEGACY_VERSION_PATH.test(normalized)
 }
 
 /**

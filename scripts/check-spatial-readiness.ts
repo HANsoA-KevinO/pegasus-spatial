@@ -86,20 +86,22 @@ function newApiGatewayCheck(): Check {
 }
 
 function imageModelCheck(): Check {
-  const model = process.env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim() || 'GPT-image-2'
+  const model = process.env.PEGASUS_SPATIAL_IMAGE_MODEL?.trim() || 'gpt-image-2'
+  const valid = /^gpt-image-2$/i.test(model)
   return {
     name: 'PEGASUS_SPATIAL_IMAGE_MODEL',
-    ok: model === 'GPT-image-2',
-    detail: model === 'GPT-image-2' ? 'GPT-image-2（NewAPI 精确别名）' : '必须精确设置为 GPT-image-2',
+    ok: valid,
+    detail: valid ? '已配置 GPT Image 2，需与网关别名大小写一致' : '需要配置网关的 GPT Image 2 别名',
   }
 }
 
 function providerReachableMediaCheck(): Check {
   const driver = process.env.MEDIA_STORAGE_DRIVER?.trim().toLowerCase() || 'gridfs'
-  const raw = driver === 'oss'
-    ? process.env.NEXT_PUBLIC_MEDIA_CDN_BASE_URL || process.env.OSS_CDN_BASE_URL
-    : process.env.MEDIA_PUBLIC_BASE_URL
-  const name = driver === 'oss' ? 'MEDIA CDN' : 'MEDIA_PUBLIC_BASE_URL'
+  if (driver === 'gridfs') {
+    return { name: 'MEDIA delivery', ok: true, detail: '本地 GridFS。3D Worker 按需向供应商上传参考图。' }
+  }
+  const raw = process.env.NEXT_PUBLIC_MEDIA_CDN_BASE_URL || process.env.OSS_CDN_BASE_URL
+  const name = 'MEDIA CDN'
   if (!present(raw)) return { name, ok: false, detail: '未配置供应商可访问的媒体地址' }
   try {
     const url = new URL(raw!)

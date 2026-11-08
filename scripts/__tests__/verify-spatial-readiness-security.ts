@@ -19,6 +19,7 @@ function testEnvironment(overrides: Record<string, string> = {}): NodeJS.Process
     MEDIA_PUBLIC_BASE_URL: 'https://media.invalid',
     NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX: 'raster-assets/pegasus-spatial',
     APP_PUBLIC_URL: 'http://localhost:3200',
+    SCENE_CODE_RENDERER_TOKEN: 'startup-test-renderer-token-long-enough',
     AHOLO_API_KEY: 'dummy-aholo-key',
     AHOLO_ASSET_HOST_ALLOWLIST: 'artifacts.aholo.invalid',
     LUX3D_API_KEY: 'dummy-lux-key',
@@ -61,6 +62,11 @@ assert.equal(
   'non-production loopback HTTP should remain usable for local development',
 )
 assert.equal(
+  runStartup({ MEDIA_STORAGE_DRIVER: 'gridfs', MEDIA_PUBLIC_BASE_URL: 'http://localhost:3200' }).status,
+  0,
+  'local raster storage can start with provider reference uploads and a loopback browser',
+)
+assert.equal(
   runStartup({
     LLM_BASE_URL: 'http://newapi.invalid/v1',
     PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP: '1',
@@ -70,6 +76,9 @@ assert.equal(
 )
 
 for (const [name, overrides, expected] of [
+  ['missing renderer token', { SCENE_CODE_RENDERER_TOKEN: '' }, 'SCENE_CODE_RENDERER_TOKEN'],
+  ['short renderer token', { SCENE_CODE_RENDERER_TOKEN: 'short' }, 'SCENE_CODE_RENDERER_TOKEN'],
+  ['credentialed renderer URL', { SCENE_CODE_RENDERER_URL: 'http://user:secret@renderer:3201' }, 'SCENE_CODE_RENDERER_URL'],
   ['invalid media prefix', {
     NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX: '../raster-assets',
   }, 'NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX'],

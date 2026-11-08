@@ -20,6 +20,8 @@ function verifyWorkspacePolicy(): void {
   )
   assert.equal(isInternalWorkspacePath('.sci-pegasus/settings/project.md'), true)
   assert.equal(isInternalWorkspacePath('analysis/report.md'), false)
+  assert.equal(isInternalWorkspacePath('output/spatial/images/concept_ecotech_city_landmark_dusk_v1.png'), false)
+  assert.equal(isInternalWorkspacePath('output/research_report_v2.md'), false)
   assert.equal(isManagedLiteratureArtifactPath('references/searches/search-abc.json'), true)
   assert.equal(isManagedLiteratureArtifactPath('references/papers/arxiv-abc/parsed/fulltext.md'), true)
   assert.equal(isManagedLiteratureArtifactPath('references/papers/arxiv-abc/original.pdf'), true)

@@ -254,9 +254,16 @@ function testRoutineSupervisionFeedbackGuard(): void {
     event(7, 'agent_status_changed', 'agent_member'),
     event(8, 'task_status_changed', 'agent_member'),
     event(9, 'agent_error', rootAgentId),
+    event(10, 'team_created', rootAgentId),
+    event(11, 'agent_created', rootAgentId),
+    event(12, 'agent_created', 'agent_member'),
   ], rootAgentId)
 
-  assert.deepEqual(filtered.map(item => item.seq), [7, 8, 9])
+  assert.deepEqual(filtered.map(item => item.seq), [7, 8, 9, 12])
+  assert.deepEqual(routineSupervisionEvents([
+    event(1, 'team_created', rootAgentId),
+    event(2, 'agent_created', rootAgentId),
+  ], rootAgentId), [], 'Opening an empty project must not start a model run')
 }
 
 function testDormantRootSupervisionGuard(): void {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { isRecoverableLLMStreamError } from '../agent/llm-api'
 import type {
   AgentRunFailureCategory,
   AgentRunFailureRecoverability,
@@ -9,6 +10,11 @@ export interface AgentRunFailureMetadata {
   failureRecoverability: AgentRunFailureRecoverability
   failureCategory: AgentRunFailureCategory
   failureSignature: string
+}
+
+/** Only a failed model response can resume without executing uncertain tools. */
+export function isRecoverableModelStreamFailure(error: unknown, modelActionActive: boolean, userCancelled: boolean): boolean {
+  return !userCancelled && modelActionActive && isRecoverableLLMStreamError(error)
 }
 
 interface ErrorLike {

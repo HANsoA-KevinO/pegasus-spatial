@@ -9,8 +9,8 @@
 #   - Application data lives in the dedicated `pegasus_spatial` database.
 #
 # Copy `.env.example` to `.env.production` and fill every secret
-# before starting the stack. Never reuse Pegasus secrets, API keys, buckets,
-# networks, or volumes.
+# before starting the stack. Keep secrets, API keys, buckets, networks, and
+# volumes scoped to this deployment.
 # =============================================================================
 
 name: pegasus-spatial
@@ -20,24 +20,55 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_MEDIA_CDN_BASE_URL: ${NEXT_PUBLIC_MEDIA_CDN_BASE_URL:-}
+        NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX: ${NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX:-}
     image: pegasus-spatial:latest
     restart: unless-stopped
+    stop_grace_period: 35s
     ports:
-      - "3200:3200"
+      - "127.0.0.1:3200:3200"
     env_file:
-      - .env.production
+      - path: .env.production
+        required: false
     environment:
       PORT: "3200"
       # Pin the bundled Mongo service and database even if a copied env file
       # still contains an old URI. External Mongo deployments should replace
-      # this value deliberately instead of inheriting Pegasus configuration.
+      # this value deliberately instead of inheriting unrelated configuration.
       MONGODB_URI: mongodb://mongo:27017/pegasus_spatial
       AGENT_RUNTIME_INTERNAL_BASE_URL: http://127.0.0.1:3200
+      SCENE_CODE_RENDERER_URL: http://scene-renderer:3201
+      SCENE_CODE_RENDERER_TOKEN: ${SCENE_CODE_RENDERER_TOKEN:-}
     depends_on:
       mongo:
         condition: service_healthy
+      scene-renderer:
+        condition: service_healthy
     networks:
       - pegasus-spatial-net
+      - pegasus-spatial-renderer-net
+
+  scene-renderer:
+    build:
+      context: .
+      dockerfile: Dockerfile.renderer
+    image: pegasus-spatial-renderer:latest
+    restart: unless-stopped
+    environment:
+      SCENE_CODE_RENDERER_TOKEN: ${SCENE_CODE_RENDERER_TOKEN:-}
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    shm_size: 1gb
+    pids_limit: 256
+    mem_limit: 3g
+    cpus: 2
+    security_opt:
+      - seccomp=./deploy/chromium-seccomp.json
+    networks:
+      - pegasus-spatial-renderer-net
 
   mongo:
     image: mongo:7
@@ -57,6 +88,8 @@ services:
       - pegasus-spatial-net
 
 networks:
+  pegasus-spatial-renderer-net:
+    internal: true
   pegasus-spatial-net:
     name: pegasus-spatial-net
     driver: bridge

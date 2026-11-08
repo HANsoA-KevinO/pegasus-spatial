@@ -34,6 +34,7 @@ interface ImageGenerationReceiptDocument {
   asset_sha256?: string
   result_content?: string
   provider_request_id?: string
+  actual_model?: string
   submission_owner?: string
   submission_started_at?: Date
   error_code?: string
@@ -69,6 +70,7 @@ const ReceiptSchema = new Schema<ImageGenerationReceiptDocument>({
   asset_sha256: String,
   result_content: String,
   provider_request_id: String,
+  actual_model: String,
   submission_owner: String,
   submission_started_at: Date,
   error_code: String,
@@ -145,7 +147,7 @@ function fromDocument(doc: ImageGenerationReceiptDocument): ImageGenerationRecei
     inputHash: doc.input_hash,
     status: doc.status,
     provider: doc.provider,
-    model: doc.model,
+    model: doc.actual_model ?? doc.model,
     providerSnapshot,
     outputPath: doc.output_path,
     sourcePath: doc.source_path,
@@ -240,7 +242,7 @@ export const mongoImageGenerationReceiptStore: ImageGenerationReceiptStore = {
     return doc ? fromDocument(doc) : null
   },
 
-  async markAssetStored(key, owner, asset, assetSha256, providerRequestId, now) {
+  async markAssetStored(key, owner, asset, assetSha256, providerRequestId, now, actualModel) {
     await connectDB()
     const doc = await ImageGenerationReceiptModel.findOneAndUpdate(
       { ...filter(key), status: 'submitting', submission_owner: owner },
@@ -250,6 +252,7 @@ export const mongoImageGenerationReceiptStore: ImageGenerationReceiptStore = {
           asset: cloneAsset(asset),
           asset_sha256: assetSha256,
           provider_request_id: providerRequestId,
+          ...(actualModel ? { actual_model: actualModel } : {}),
           updated_at: now,
         },
       },

@@ -46,6 +46,8 @@ export type ImageSource =
 export type ImageBlock = {
   type: 'image'
   source: ImageSource
+  /** Workspace reference for an uploaded user image, serialized as text beside the image. */
+  workspace_path?: string
 }
 
 export type ToolUseBlock = {

@@ -3,6 +3,7 @@ import type {
   SpatialProviderPollResult,
   SpatialProviderSubmission,
 } from '../types'
+import { materializeSpatialReferenceUrls } from './provider-reference-images'
 import {
   ProviderDefinitelyNotAcceptedError,
   ProviderConfigurationBlockedError,
@@ -173,8 +174,11 @@ export abstract class ContractDrivenSpatialHttpAdapter {
     let url: URL
     let body: string
     try {
-      url = resolveProviderUrl(base, contract.submitPath(job))
-      body = JSON.stringify(contract.encodeSubmission(job))
+      const submission = await materializeSpatialReferenceUrls(job, {
+        base, token, fetchImpl: this.fetchImpl, signal: context.signal,
+      })
+      url = resolveProviderUrl(base, contract.submitPath(submission))
+      body = JSON.stringify(contract.encodeSubmission(submission))
     } catch (error) {
       throw new ProviderDefinitelyNotAcceptedError(
         `${this.provider} submission input failed local wire validation: ${error instanceof Error ? error.message : String(error)}`,

@@ -7,6 +7,7 @@ import { getTotalInputTokens } from '../agent/compaction'
 import { estimateCostCents } from '../agent/pricing'
 import { tokenTracker, type TokenExecutionContext } from '../agent/token-tracker'
 import type { LLMResponse, TokenUsage } from '../types'
+import type { LLMStreamDiagnostics } from '../agent/llm-api'
 
 // ==================== Input Types ====================
 
@@ -24,6 +25,7 @@ export interface LogAPICallInput {
   duration_ms: number
   status: 'success' | 'error' | 'aborted'
   error_message?: string
+  stream_diagnostics?: LLMStreamDiagnostics
   turn_number: number
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   request_body: any
@@ -103,6 +105,7 @@ export async function logAPICall(input: LogAPICallInput): Promise<void> {
     duration_ms: input.duration_ms,
     status: input.status,
     error_message: input.error_message,
+    stream_diagnostics: input.stream_diagnostics,
     tool_calls: input.response ? extractToolNames(input.response) : [],
     turn_number: input.turn_number,
     request_body: sanitizedRequest,

@@ -1,159 +1,203 @@
 # Pegasus Spatial
 
-**Pegasus Spatial（飞马空间 Agent）**是一个用自然语言驱动图像生成、3D 造物、世界生成与现实重建能力的空间创作 Agent。
+> 🏆 **VentureD Hackathon 2026 · Deep Space Disrupt Award（空间智能赛道冠军）**
+>
+> 2026 年 8 月，杭州 · 群核科技支持的 Deep Space 赛道 · 参赛项目名：Spatial Pegasus。
 
-用户从一个对话入口描述目标。Agent 根据对象是独立物体、完整世界还是现实场地，自主选择可用工具、追踪外部任务、保留修订血缘并交付可检查资产。产品不设“物体 / 世界”预选模式，也不规定外部能力必须按某个次序执行。
+**Pegasus Spatial（飞马空间 Agent）**是一套自然语言驱动的 **AI 世界编译器与空间创作工作台**。多模态 Agent 理解文字、参考图和空间约束，将创意转成概念图、独立 3D 资产和可继续编辑的三维场景。
 
-## 评委本地演示
+项目以 Three.js 源码和不可变构建为场景真值，保留资产来源与修改历史。用户浏览、选中物体并提交截图意见；Agent 修改源码，依据工程视图、实际网格测量与明确约束持续迭代。
 
-这是用于检查已预生成、已持久化成果的**评委安全审阅模式**。比赛电脑需要一次性满足以下前置：
+项目正在转向**记忆空间还原**：用几张老照片、一段口述记忆，让被时代带走的空间成为可以走进去的世界。当前正完善混合建模与 Agent 的观察、修改闭环；照片中不可见的结构和记忆中的不确定细节需要明确区分，不能视为精确测绘。
 
-- 已安装并启动 Docker Desktop 或 Docker Engine，当前用户可访问 daemon。
-- 已安装 Docker Compose v2，并能拉取或已缓存官方 `mongo:7` 镜像。
-- 已运行 `npm install`，并完成 `.env.local` 的 NewAPI、Aholo、Lux3D 与媒体配置。
+从同一个对话入口，Agent 根据目标、现有资产和观察结果，组合程序化几何、Lux3D 造物、全景环境、可选 Aholo World、场景编辑与截图工具。
 
-前置完成后，现场启动只有一个命令：
+## 核心能力
+
+- 从文字或参考图生成概念美术和资产参考图。
+- 直接编写多文件 Three.js：任意几何、CSG、曲面、实例阵列、程序纹理、Shader 和动画，与 GLB 混合渲染。
+- 使用 Lux3D 创建复杂形态的 GLB 资产，可独立选择、移动、旋转和缩放。
+- 使用 2:1 全景图构建远景环境，与近中景 GLB 资产组成混合空间；可选 Aholo World 探索固定观察点的 3DGS 背景。
+- 通过隔离 Worker 和随部署提供的 Chromium 服务执行冻结构建，用户关闭舞台仍可观察、测量和导出。
+- 查看带坐标轴、比例和对象编号的工程图，查询实际网格距离、支撑采样、相交与通道净空。
+- 通过保留的必需条件和版本 CAS 原子发布；用户只读浏览、选中、截图反馈和历史恢复。
+- 保存用户视角与 Agent 视角，从真实渲染画面继续提出修改。
+- 查询真实 GLB 或程序化网格表面，为地形上的物体放置提供位置依据。
+- 将耗时的外部 3D 任务持久化到后台，完成后自动通知并恢复 Agent 工作。
+- 通过幂等 receipt、外部任务接管和 `unknown` 状态避免重复付费提交。
+
+## 本地快速配置部署
+
+### 环境要求
+
+- Node.js 22+
+- npm 10+
+- Docker Desktop 或 Docker Engine
+- Docker Compose v2
+
+### 1. 安装与配置
 
 ```bash
-npm run demo:up
+git clone https://github.com/HANsoA-KevinO/pegasus-spatial.git
+cd pegasus-spatial
+npm install
+cp .env.example .env.local
 ```
 
-脚本会检查 Docker/Compose 和安全配置，自动启动并等待隔离的本地持久存储，然后在回环地址启动 Web 应用。评委直接打开
-`http://localhost:3200` 即可进入工作台；没有登录、注册、邀请码或密码，也不需要安装数据库客户端。
-演示数据保存在本机专用 Docker volume 中，刷新、Web 进程重启和安全停止都不会丢失。
+编辑 `.env.local`，配置模型网关和不同的随机密钥：
+
+```env
+LLM_BASE_URL=https://your-newapi.example.com/v1
+LLM_API_KEY_ORCHESTRATOR=...
+LLM_API_KEY_TOOLS=...
+
+SCENE_CODE_RENDERER_TOKEN=至少24字符的独立随机密钥
+AGENT_RUNTIME_INTERNAL_SECRET=另一条至少32字符的独立随机密钥
+CRON_SECRET=第三条独立随机密钥
+```
+
+使用资产生成时再配置 `AHOLO_API_KEY` / `LUX3D_API_KEY`，并把真实产物域名写入：
+
+```env
+AHOLO_ASSET_HOST_ALLOWLIST=...
+LUX3D_ASSET_HOST_ALLOWLIST=...
+```
+
+默认媒体存储为本地 Mongo GridFS，无需额外对象存储。需要使用 OSS/CDN 时，再配置 `.env.example` 中的 `OSS_*` 与 `NEXT_PUBLIC_MEDIA_CDN_BASE_URL`。
+
+### 2. 一键启动本地环境
 
 ```bash
-npm run demo:status   # 只报告配置、Web 和本地存储是否就绪，不打印密钥
-npm run demo:down     # 安全停止，不删除容器或数据卷
+npm run local:up
 ```
 
-`demo:up` 会拒绝配置缺失、远程数据库或 3200 端口已有未知服务。正常 Agent 不再经过额外的“付费调用总开关”；真实提交由具体供应商凭证、资产域名白名单、持久 receipt 与 `unknown` 防重放契约保护。若只想静态审阅预生成结果，不要发送新的生成请求。
-
-无账号模式只适用于现场单机 Demo：服务默认只监听 `127.0.0.1`，浏览器请求统一映射到一个固定的本地内部身份。如需对局域网或公网开放，必须在前置网关重新加入访问控制。
-
-`demo:up` 不代表现场自然语言真实生成已经放行。真实生成必须在 H0 完成域名白名单、供应商 operator smoke 和预算确认后，由团队按现场手册受控启动；它不是评委一键安全审阅命令的能力。
-
-## 第一阶段能力
-
-- `GenerateImage`：通过 NewAPI Chat Completions 完成文生图与单图修订，固定使用精确模型别名 `GPT-image-2`。
-- `CreateObject3D`：从文字或 Workspace 参考图创建 Lux3D GLB 物体。
-- `CreateWorld3D`：从文字或单张场景图提交 Aholo World。
-- `GetSpatialJob` / `WaitSpatialJob`：跟踪已知外部任务，不重复付费提交。
-- `InspectSpatialArtifact`：检查已发布资产、manifest 和血缘。
-- 图片查看、GLB orbit 预览、World manifest 与 Aholo 打开入口。
-
-默认 Project Guide 为 `spatial-creation@1`，默认 Skill 目录只暴露 `spatial-creation`。Sci-Pegasus 的 `materials-discovery@1`、文献工具与研究 Skills 仍保留在代码中，但不进入新空间项目的默认工具面。
-
-## 持久任务契约
+该命令会检查配置，启动本地 Mongo 与 Chromium 渲染服务，并在回环地址启动 Web 应用：
 
 ```text
-prepared → submitting → submitted → running → materializing → published
-                         ├→ failed
-                         ├→ unknown
-                         └→ cancelled
+http://localhost:3200
 ```
 
-- 幂等键由 `project_id + run_id + tool_use_id` 构成。
-- 获得供应商任务 ID 后先持久化，再继续等待与物化。
-- 服务重启只接管已知外部任务；无法确认是否已提交的任务进入 `unknown`，不自动重试。
-- 生成工具默认由 Root Agent 使用；Root 可以通过持久 `allowed_tools` 明确授权 Member，wildcard 不会自动开放生成工具。配置有效后即可真实提交，不需要额外总开关。
-- 产品不设置项目级图片或 3D 任务数量上限。3D 请求全部进入持久队列；`SPATIAL_WORKER_CONCURRENCY` 只限制本机瞬时提交、轮询与物化吞吐，不是 Agent 或项目额度。
+常用维护命令：
 
-## Workspace
+```bash
+npm run local:status   # 检查配置、Mongo 与 Web 状态，不打印密钥
+npm run local:down     # 停止 Web、渲染服务和 Mongo，保留本地数据卷
+```
+
+应用采用本地单用户模式，不需要注册、登录或手工建表。默认只监听 `127.0.0.1`；如需开放到局域网或公网，应在反向代理或网关层增加 HTTPS 与身份认证。
+
+### 3. 分步开发启动
+
+需要直接查看 Next.js 日志或调试代码时，在没有后台 Web 占用端口时启动：
+
+```bash
+npm run dev
+```
+
+`predev` 会自动启动 Mongo 和渲染服务。本机已有 Chromium 时，可通过 `.env.local` 中的 `SCENE_CODE_CHROMIUM_EXECUTABLE_PATH` 指定其绝对路径，直接使用本机启用 sandbox 的渲染服务。
+
+### 4. 容器化部署
+
+```bash
+cp .env.example .env.production
+# 填写生产配置与密钥
+docker compose --env-file .env.production up --build -d
+```
+
+生产环境必须使用 HTTPS 的模型网关和媒体地址，并在外层网关提供访问控制。完整说明见 [本地与容器部署](docs/DEPLOYMENT.md)。
+
+## 关键配置
+
+| 配置 | 用途 | 默认值 |
+|---|---|---|
+| `MONGODB_URI` | 对话、任务、Scene Revision 与 Workspace 持久化 | `mongodb://127.0.0.1:27019/pegasus_spatial` |
+| `LLM_BASE_URL` | NewAPI 模型网关 | 无 |
+| `LLM_API_KEY_ORCHESTRATOR` | Root Agent 模型调用 | 无 |
+| `LLM_API_KEY_TOOLS` | 工具模型与图像生成 | 无 |
+| `PEGASUS_SPATIAL_IMAGE_MODEL` | 图像模型精确别名 | `GPT-image-2` |
+| `AHOLO_API_KEY` | Aholo World | 无 |
+| `LUX3D_API_KEY` | Lux3D 资产生成 | 无 |
+| `SPATIAL_WORKER_CONCURRENCY` | 后台空间任务处理并发 | `8` |
+| `SCENE_CODE_RENDERER_TOKEN` | 应用与隔离渲染服务之间的独立凭据 | 无 |
+| `SCENE_CODE_RENDERER_URL` | Chromium 服务地址 | `http://127.0.0.1:3201` |
+| `MEDIA_STORAGE_DRIVER` | `gridfs` 或 `oss` | `gridfs` |
+
+`LLM_BASE_URL` 不得包含内嵌账号、密码、query 或 fragment。非生产环境只有回环地址允许明文 HTTP；公网与生产部署必须使用 HTTPS。
+
+## Agent 工具
+
+空间创作的主要工具包括：
+
+- `GenerateImage`
+- `CreateObject3D`
+- `CreateWorld3D`
+- `GetSpatialJob` / `WaitSpatialJob`
+- `InspectSpatialArtifact`
+- `CreateSpatialScene` / `InspectSpatialScene`
+- `PrepareSceneCode` / `RunSceneCode` / `InspectSceneBuild`
+- `RenderSceneViews` / `QuerySceneGeometry` / `CheckSceneConstraints`
+- `PublishSceneBuild` / `ExportSceneBuild`
+- `RestoreSpatialScene`
+- `SetSceneViewpoint` / `FocusSceneObject` / `CaptureSceneView`
+- `QuerySceneSurface`
+
+新系统统一使用 Three.js 源码；创建 Scene 即准备代码工程。旧声明式编辑工具已退役，不自动转换旧场景；已有资产可主动导入新工程。详见 [源码协议、工具与验证边界](docs/SCENE_SYSTEM.md)。
+
+外部 3D 生成任务采用持久队列：工具将任务写入本地队列后返回任务 ID 与当前状态，后台 worker 负责向供应商提交、持久化外部任务 ID、轮询、下载、校验、发布和完成通知。`prepared` 表示已入队，尚不代表供应商接受。Agent 可以在等待 3D 资产时继续生成下一组参考图或处理其他场景工作。
+
+## 资产与版本
 
 ```text
 output/spatial/images/
 output/spatial/objects/<build-id>/
 output/spatial/worlds/<build-id>/
-output/spatial/reviews/
+output/spatial/scenes/<scene-id>/
+output/spatial/builds/<build-id>/
+output/spatial/reviews/<observation-id>/
 ```
 
-资产可记录 `derived_from`、`revision_of`、`conditioned_by` 和 `compared_with`。Critic 判断只使用 `verified / inferred / unknown`，不把图像或生成模型宣称为已验证的 CAD 精度、真实尺度、碰撞或物理仿真。
-
-## 隔离参数
-
-| 项目 | Pegasus Spatial |
-|---|---|
-| npm / Compose / image | `pegasus-spatial` |
-| Web | `http://localhost:3200` |
-| Mongo host | `127.0.0.1:27019` |
-| Mongo database | `pegasus_spatial` |
-| GridFS bucket | `pegasus_spatial_media` |
-| OSS prefix | `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX=raster-assets/pegasus-spatial` |
-| 浏览器访问 | 无账号、无 Cookie，固定本地 Demo 身份 |
-| Docker network / volumes | `pegasus-spatial-*` |
-
-底层 Workspace 内部路径暂保留 `.sci-pegasus/` 以兼容已验证的 CAS、版本库与多 Agent ACL；它是数据库内的虚拟路径，不会使新应用连接 Sci-Pegasus 的 Mongo、媒体或 Docker volume。
-
-## 开发者配置
-
-```bash
-cp .env.example .env.local
-# 填写 LLM 与供应商凭证；不需要账号或会话密钥
-
-npm install
-docker compose up -d mongo
-npm run dev
-```
-
-打开 `http://localhost:3200`。供应商凭证和精确产物域名配置通过后，Agent 可以直接建立持久生成任务。
-
-日常比赛演示请使用上方 `npm run demo:up`，以下分步命令仅用于开发和故障排查。
-
-图像能力复用 Agent 的 NewAPI 配置：`LLM_BASE_URL` 与 `LLM_API_KEY_TOOLS`。第一阶段不使用
-`OPENAI_API_KEY`，也不提供图像供应商选择器或运行期自动 fallback；文生图和单图修订都通过
-`/chat/completions` 的旧 Pegasus 兼容协议调用 `GPT-image-2`。
-
-`LLM_BASE_URL` 不得内嵌用户名、密码、query 或 fragment。正式付费和生产环境必须使用 HTTPS；
-只有非生产环境的 `localhost`、`127.0.0.0/8` 或 `::1` 回环地址允许明文 HTTP。readiness 会把任何
-HTTP 地址标为“不具备正式付费就绪条件”，即使它可以用于本机开发。
-如果旧 NewAPI 暂时只有公网 HTTP，可在非生产本机联调时显式设置
-`PEGASUS_SPATIAL_ALLOW_INSECURE_NEWAPI_HTTP=1`；这是有泄露 Tool Key、提示词和源图风险的临时逃生口，
-生产环境仍会拒绝启动，readiness 也不会把它判为正式付费就绪。
-
-OSS 的对象前缀使用非敏感的单一变量 `NEXT_PUBLIC_PEGASUS_SPATIAL_MEDIA_PREFIX`。服务端写入、
-服务端公开 URL 和浏览器 CDN URL 都读取它；值不得带首尾 `/` 或路径穿越片段。旧变量
-`PEGASUS_SPATIAL_MEDIA_PREFIX` 已弃用；迁移期间若仍存在，其值必须与新变量完全一致，否则启动拒绝继续。
-
-先运行只读门禁（不会访问供应商，也不会产生费用）：
-
-```bash
-npm run spatial:preflight:local
-```
-
-门禁要求用首次真实响应冻结 Aholo/Lux3D 产物下载域名白名单。脚本只报告密钥是否存在，不输出密钥值，也不会把“配置存在”冒充真实生成已验证。
-
-```bash
-cp .env.example .env.production
-# 填写所有必需凭证
-docker compose up --build
-```
+每次成功的 Scene 修改都会自动创建新 Revision。Agent 只操作当前 Scene，不需要手工管理 revision ID；并发修改通过 CAS 防止静默覆盖。资产关系可记录 `derived_from`、`revision_of`、`conditioned_by` 和 `compared_with`。
 
 ## 验证
+
+提交代码或制作发布包前运行：
 
 ```bash
 npm run project-prompt:verify
 npm run spatial:verify
 npm run spatial:verify:mongo
-npm run spatial:verify:demo-e2e
+npm run spatial:verify:local-e2e
 npm run tool-contracts:verify
 npm run multi-agent:verify
 npx tsc --noEmit
 npm run lint
 npm run build
+npm audit --audit-level=high
 ```
 
-真实 Aholo、Lux3D 和 NewAPI GPT Image 提交必须单独运行 smoke test，不应由单元测试或普通 build 触发。
-`spatial:verify:demo-e2e` 使用随机命名、仅限回环地址的临时 Mongo 数据库和终态 fixture，覆盖无登录直达、内部归属隔离、空间 Job 卡片/API、页面刷新与 Web 进程重启恢复；它不会提交聊天、模型或任何供应商任务，并在验证后只清理本轮临时测试数据库。
-完整的 H0 凭证门禁、崩溃演练、真实预生成资产要求和现场降级方案见
-[48 小时验收与现场手册](docs/PEGASUS_SPATIAL_48H_RUNBOOK.md)。
+真实 WebGL 回归可运行 `npm run spatial:verify:three-browser`（需 Python Playwright、Chromium 与 Pillow）。它在独立临时页面中验证 GLB、PLY/SPZ 像素、全景、求交、相机截图和版本隔离，不启动数据库或 Agent。
 
-空间工具适配器以供应商正式契约为准：[Aholo / Lux3D API Reference](https://labs.aholo3d.cn/api-docs/api-reference)、[Aholo 3DGS Skill](https://labs.aholo3d.cn/api-docs/skills/aholo-3dgs-reconstruction) 与 [Lux3D Skill](https://labs.aholo3d.cn/api-docs/skills/lux3d)。图像生成则固定使用已经在旧 Pegasus 验证的 NewAPI Chat Completions 契约；运行时不会切换到 OpenAI Images API 或其他图像供应商。
+上述验证不会发起真实付费生成。供应商真实调用应通过单独的 smoke 命令完成：
+
+```bash
+npm run spatial:preflight:local
+npm run spatial:smoke:image -- --help
+npm run spatial:smoke:lux -- --help
+npm run spatial:smoke:aholo -- --help
+```
+
+## 架构文档
+
+- [系统架构](docs/ARCHITECTURE.md)
+- [本地与容器部署](docs/DEPLOYMENT.md)
+- [多 Agent 执行契约](docs/AGENT_TEAM_V1.md)
+- [空间 Scene 系统](docs/SCENE_SYSTEM.md)
+- [代码来源与上游基线](UPSTREAM.md)
 
 ## 能力边界
 
-第一阶段不实现 OpenUSD / RenderCloud Scene Compiler、物体级 Aholo World 写回、CAD 精度、真实尺度、碰撞、路径规划或物理仿真。混合 3DGS + GLB Viewer 是核心交付完成后的可选实验，不得阻塞主演示。
+当前版本不宣称 CAD 精度、真实米制、碰撞正确性、物理仿真或 OpenUSD 场景编译。全景图承担无限远视觉环境；Aholo World 用于可选的固定观察点体积背景探索，不承诺局部语义编辑或可自由漫游的场景几何。可编辑空间结构以程序化网格、独立 GLB 实例和 Scene Revision 为准。
 
-## 来源与许可
+## 许可
 
-本项目从 Sci-Pegasus 的独立源码快照建立。基线、未继承 Git 历史的原因和重分发注意事项见 [UPSTREAM.md](UPSTREAM.md)。未确认原始权利与许可之前，不要宣称本仓库采用 MIT 或其他许可证。
+本仓库目前未声明开源许可证。未经项目所有者明确许可，不得以 MIT、Apache-2.0 或其他开源许可证重新分发。

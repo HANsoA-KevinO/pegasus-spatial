@@ -1,15 +1,17 @@
 export class ImageGenerationProviderError extends Error {
   readonly requestMayHaveBeenAccepted: boolean
+  readonly canUseBackup: boolean
   readonly code: string
 
   constructor(
     message: string,
-    options: { code: string; requestMayHaveBeenAccepted: boolean; cause?: unknown },
+    options: { code: string; requestMayHaveBeenAccepted: boolean; canUseBackup?: boolean; cause?: unknown },
   ) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause })
     this.name = 'ImageGenerationProviderError'
     this.code = options.code
     this.requestMayHaveBeenAccepted = options.requestMayHaveBeenAccepted
+    this.canUseBackup = options.canUseBackup === true && !options.requestMayHaveBeenAccepted
   }
 }
 

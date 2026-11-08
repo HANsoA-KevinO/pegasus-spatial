@@ -43,7 +43,7 @@ export function WorkspacePanel({ artifacts, isStreaming, onQuoteSelection, quote
   }, [active?.path])
 
   if (activeSceneId && conversationId) {
-    return <section className="relative h-full min-w-0 overflow-hidden border-r border-[var(--glass-panel-border)] bg-[#ddd8ce]">
+    return <section className="relative h-full min-w-0 overflow-hidden border-r border-[var(--glass-panel-border)] bg-[#dfe3eb]">
       <SpatialStage
         conversationId={conversationId}
         projectTitle={projectTitle}

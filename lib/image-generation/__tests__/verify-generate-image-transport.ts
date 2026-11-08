@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import sharp from 'sharp'
 import { ImageGenerationProviderError } from '../errors'
 import {
   NewApiChatImageAdapter,
@@ -84,10 +85,18 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
   })
 }
 
-// Text-to-image uses the one supported NewAPI Chat contract and emits server-only bytes.
+// Text-to-image uses the NewAPI Images contract with a real provider size.
 {
   let capturedUrl = ''
   let capturedInit: RequestInit | undefined
+  const generatedImage = await sharp({
+    create: {
+      width: 1440,
+      height: 720,
+      channels: 4,
+      background: { r: 20, g: 30, b: 40, alpha: 1 },
+    },
+  }).png().toBuffer()
   const adapter = new NewApiChatImageAdapter({
     apiKey: 'test-key',
     apiBase: 'https://api.test/v1',
@@ -95,16 +104,7 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
       capturedUrl = String(url)
       capturedInit = init
       return new Response(JSON.stringify({
-        choices: [{
-          message: {
-            images: [{
-              type: 'image_url',
-              image_url: {
-                url: `data:image/png;base64,${Buffer.from('generated-image').toString('base64')}`,
-              },
-            }],
-          },
-        }],
+        data: [{ b64_json: generatedImage.toString('base64') }],
       }), {
         status: 200,
         headers: { 'content-type': 'application/json', 'x-request-id': 'req_test' },
@@ -112,23 +112,23 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
     }) as typeof fetch,
   })
   const output = await adapter.generate({ prompt: 'a quiet panoramic environment', aspectRatio: '2:1' })
-  assert.equal(capturedUrl, 'https://api.test/v1/chat/completions')
+  assert.equal(capturedUrl, 'https://api.test/v1/images/generations')
   assert.equal(capturedInit?.method, 'POST')
   assert.equal(capturedInit?.redirect, 'error')
   const body = JSON.parse(String(capturedInit?.body))
-  assert.equal(body.model, 'GPT-image-2')
-  assert.deepEqual(body.modalities, ['text', 'image'])
-  assert.equal(body.messages[0].role, 'user')
-  assert.match(body.messages[0].content, /2:1/)
+  assert.equal(body.model, 'gpt-image-2')
+  assert.equal(body.size, '1440x720')
+  assert.equal(body.n, 1)
+  assert.match(body.prompt, /2:1/)
   assert.equal(new Headers(capturedInit?.headers).get('content-type'), 'application/json')
   assert.equal(new Headers(capturedInit?.headers).get('http-referer'), 'https://pegasus.local')
   assert.equal(new Headers(capturedInit?.headers).get('x-title'), 'Pegasus Spatial')
-  assert.equal(output.buffer.toString(), 'generated-image')
+  assert.deepEqual(output.buffer, generatedImage)
   assert.equal(output.mimeType, 'image/png')
   assert.equal(output.providerRequestId, 'req_test')
 }
 
-// Single-image editing embeds owned Workspace bytes as a Data URL in the Chat message.
+// Single-image editing sends owned Workspace bytes as multipart form data.
 {
   let capturedUrl = ''
   let capturedInit: RequestInit | undefined
@@ -140,19 +140,7 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
       capturedInit = init
       return new Response(JSON.stringify({
         id: 'chatcmpl_image_edit',
-        choices: [{
-          message: {
-            content: [
-              { type: 'text', text: 'done' },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:image/webp;base64,${Buffer.from('edited-image').toString('base64')}`,
-                },
-              },
-            ],
-          },
-        }],
+        data: [{ b64_json: Buffer.from('edited-image').toString('base64') }],
       }), { status: 200 })
     }) as typeof fetch,
   })
@@ -164,19 +152,18 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
       buffer: Buffer.from('local-workspace-image'),
     },
   })
-  assert.equal(capturedUrl, 'https://api.test/v1/chat/completions')
-  const body = JSON.parse(String(capturedInit?.body))
-  assert.equal(body.messages[0].content[0].type, 'image_url')
-  assert.equal(
-    body.messages[0].content[0].image_url.url,
-    `data:image/png;base64,${Buffer.from('local-workspace-image').toString('base64')}`,
-  )
-  assert.deepEqual(body.messages[0].content[1], {
-    type: 'text',
-    text: 'move the chair',
-  })
+  assert.equal(capturedUrl, 'https://api.test/v1/images/edits')
+  const body = capturedInit?.body
+  assert.ok(body instanceof FormData)
+  assert.equal(body.get('model'), 'gpt-image-2')
+  assert.equal(body.get('prompt'), 'move the chair')
+  assert.equal(body.get('size'), 'auto')
+  const source = body.get('image')
+  assert.ok(source instanceof Blob)
+  assert.deepEqual(Buffer.from(await source.arrayBuffer()), Buffer.from('local-workspace-image'))
+  assert.equal(new Headers(capturedInit?.headers).get('content-type'), null)
   assert.equal(output.buffer.toString(), 'edited-image')
-  assert.equal(output.mimeType, 'image/webp')
+  assert.equal(output.mimeType, 'image/png')
   assert.equal(output.providerRequestId, 'chatcmpl_image_edit')
 }
 
@@ -197,7 +184,7 @@ function headersThenStalledBody(onHeaders?: () => void): typeof fetch {
     apiBase: 'https://api.test/v1',
     model: 'another-image-model',
   })
-  assert.equal(first.provider, 'newapi-chat-image-v1')
+  assert.equal(first.provider, 'newapi-images-v2')
   assert.match(first.configurationFingerprint, /^[a-f0-9]{64}$/)
   assert.equal(first.configurationFingerprint, sameConfiguration.configurationFingerprint)
   assert.notEqual(first.configurationFingerprint, differentModel.configurationFingerprint)
@@ -259,9 +246,7 @@ for (const apiBase of [
 
 // Every unusable HTTP 2xx payload is ambiguous because the generation may have been billed.
 
-// NewAPI's GPT-image-2 success payload uses `content: null` while placing the
-// generated image in `message.images[]`. This is the exact production shape;
-// null content must not reject an otherwise valid image response.
+// NewAPI's Images endpoint returns base64 image data in data[].
 {
   const expected = Buffer.from('newapi-image')
   const adapter = new NewApiChatImageAdapter({
@@ -269,18 +254,7 @@ for (const apiBase of [
     apiBase: 'https://api.test/v1',
     fetchImpl: (async () => new Response(JSON.stringify({
       id: 'gen-production-shape',
-      choices: [{
-        message: {
-          role: 'assistant',
-          content: null,
-          images: [{
-            type: 'image_url',
-            image_url: {
-              url: `data:image/png;base64,${expected.toString('base64')}`,
-            },
-          }],
-        },
-      }],
+      data: [{ b64_json: expected.toString('base64') }],
     }), {
       status: 200,
       headers: { 'x-request-id': 'req-production-shape' },
@@ -294,29 +268,18 @@ for (const apiBase of [
 
 for (const testCase of [
   {
-    name: 'no message',
-    payload: { choices: [] },
-    code: 'provider_returned_no_message',
-  },
-  {
     name: 'no image',
-    payload: { choices: [{ message: { content: 'text only' } }] },
+    payload: { data: [] },
     code: 'provider_returned_no_image',
   },
   {
     name: 'invalid base64',
-    payload: {
-      choices: [{
-        message: {
-          images: [{ image_url: { url: 'data:image/png;base64,%%%' } }],
-        },
-      }],
-    },
+    payload: { data: [{ b64_json: '%%%' }] },
     code: 'invalid_provider_image',
   },
   {
     name: 'invalid schema',
-    payload: { choices: { unexpected: true } },
+    payload: { data: { unexpected: true } },
     code: 'invalid_provider_schema',
   },
 ]) {
@@ -342,15 +305,7 @@ for (const testCase of [
     apiBase: 'https://api.test/v1',
     maxProviderImageBytes: 3,
     fetchImpl: (async () => new Response(JSON.stringify({
-      choices: [{
-        message: {
-          images: [{
-            image_url: {
-              url: `data:image/png;base64,${Buffer.from('four').toString('base64')}`,
-            },
-          }],
-        },
-      }],
+      data: [{ b64_json: Buffer.from('four').toString('base64') }],
     }), { status: 200 })) as typeof fetch,
   })
   await assert.rejects(adapter.generate({ prompt: 'large result' }), error => {
@@ -359,6 +314,41 @@ for (const testCase of [
     assert.equal(error.requestMayHaveBeenAccepted, true)
     return true
   })
+}
+
+// A billed response with the wrong dimensions is quarantined instead of
+// being published as if it had honored the requested aspect ratio.
+{
+  let capturedInit: RequestInit | undefined
+  const square = await sharp({
+    create: {
+      width: 1024,
+      height: 1024,
+      channels: 3,
+      background: { r: 1, g: 2, b: 3 },
+    },
+  }).png().toBuffer()
+  const adapter = new NewApiChatImageAdapter({
+    apiKey: 'test-key',
+    apiBase: 'https://api.test/v1',
+    fetchImpl: (async (_url, init) => {
+      capturedInit = init
+      return new Response(JSON.stringify({
+        data: [{ b64_json: square.toString('base64') }],
+      }), { status: 200 })
+    }) as typeof fetch,
+  })
+  await assert.rejects(
+    adapter.generate({ prompt: 'wide result', aspectRatio: '16:9' }),
+    error => {
+      assert.ok(error instanceof ImageGenerationProviderError)
+      assert.equal(error.code, 'provider_aspect_ratio_mismatch')
+      assert.equal(error.requestMayHaveBeenAccepted, true)
+      assert.match(error.message, /1024x1024/)
+      return true
+    },
+  )
+  assert.equal(JSON.parse(String(capturedInit?.body)).size, '1280x720')
 }
 
 // A provider 4xx is a definitive non-accepted failure; callers may expose a new retry.
@@ -422,6 +412,75 @@ for (const status of [408, 409, 425, 499, 502]) {
     assert.equal(error.code, `provider_http_${status}`)
     return true
   })
+}
+
+// Explicit New API pre-dispatch rejection schedules one backup with the same reference and brief.
+{
+  const source = await sharp({
+    create: { width: 64, height: 32, channels: 3, background: '#a58c72' },
+  }).png().toBuffer()
+  const calls: string[] = []
+  const adapter = new NewApiChatImageAdapter({
+    apiKey: 'test-key',
+    apiBase: 'https://api.test/v1',
+    model: 'gpt-image-2',
+    editModel: 'GPT-image-edit',
+    fallbackModel: 'nanobanana2',
+    fetchImpl: (async (url, init) => {
+      calls.push(String(url))
+      if (calls.length === 1) {
+        assert.ok(init?.body instanceof FormData)
+        assert.equal(init.body.get('model'), 'GPT-image-edit')
+        assert.match(String(init.body.get('prompt')), /^Keep the courtyard gate/)
+        const image = init.body.get('image')
+        assert.ok(image instanceof Blob)
+        assert.deepEqual(Buffer.from(await image.arrayBuffer()), source)
+        return Response.json({ error: {
+          type: 'new_api_error',
+          message: 'This token has no access to model GPT-image-edit',
+        } }, { status: 403 })
+      }
+      const request = JSON.parse(String(init?.body))
+      assert.equal(request.model, 'nanobanana2')
+      assert.deepEqual(request.modalities, ['text', 'image'])
+      assert.equal(request.messages[0].content[0].image_url.url, `data:image/png;base64,${source.toString('base64')}`)
+      assert.match(request.messages[0].content[1].text, /Keep the courtyard gate[\s\S]+2:1/)
+      return Response.json({
+        choices: [{ message: { images: [{ image_url: { url: `data:image/png;base64,${source.toString('base64')}` } }] } }],
+      }, { headers: { 'x-request-id': 'backup-request' } })
+    }) as typeof fetch,
+  })
+  const output = await adapter.generate({
+    prompt: 'Keep the courtyard gate', aspectRatio: '2:1',
+    source: { assetId: 'source', mimeType: 'image/png', buffer: source },
+  })
+  assert.deepEqual(calls, ['https://api.test/v1/images/edits', 'https://api.test/v1/chat/completions'])
+  assert.equal(output.providerModel, 'nanobanana2')
+  assert.equal(output.providerRequestId, 'backup-request')
+  assert.deepEqual(output.buffer, source)
+  assert.notEqual(adapter.configurationFingerprint, new NewApiChatImageAdapter({
+    apiKey: 'test-key', apiBase: 'https://api.test/v1', model: 'gpt-image-2', editModel: 'GPT-image-edit',
+  }).configurationFingerprint)
+}
+
+for (const { status, payload, ambiguous } of [
+  { status: 403, payload: { error: { type: 'policy_violation', message: 'content rejected' } }, ambiguous: false },
+  { status: 502, payload: { error: { message: 'upstream reset' } }, ambiguous: true },
+  { status: 200, payload: { data: [] }, ambiguous: true },
+]) {
+  let calls = 0
+  const adapter = new NewApiChatImageAdapter({
+    apiKey: 'test-key', apiBase: 'https://api.test/v1', fallbackModel: 'nanobanana2',
+    fetchImpl: (async () => { calls++; return Response.json(payload, { status }) }) as typeof fetch,
+  })
+  await assert.rejects(adapter.generate({ prompt: 'test image' }), error => {
+    assert.ok(error instanceof ImageGenerationProviderError)
+    assert.equal(error.requestMayHaveBeenAccepted, ambiguous)
+    return true
+  })
+  assert.equal(calls, 1)
+  await assert.rejects(adapter.generate({ prompt: 'cancelled', signal: AbortSignal.abort() }))
+  assert.equal(calls, 1, 'An already aborted tool must not submit either route')
 }
 
 console.log('GenerateImage transport verification passed.')
